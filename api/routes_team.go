@@ -1,0 +1,259 @@
+package main
+
+import (
+	"errors"
+	"math"
+	"net/http"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Password hashes never leave the database: the selection is explicit,
+// never `SELECT *` — a newly added column must not travel to the browser
+// because nobody re-read the query.
+const accountColumns = "c.email, c.name, c.role, c.team_id, c.active, " +
+	"COALESCE(c.personal_note,'') AS personal_note, COALESCE(c.created_at,'') AS created_at, " +
+	"COALESCE(c.created_by,'') AS created_by, g.name AS team"
+
+// GET /api/team — the accounts. Coordination sees everyone; a team lead,
+// only their own team.
+func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
+	c := accountOf(r)
+
+	var accounts []map[string]any
+	var err error
+	if c.Coordination() {
+		accounts, err = s.rows(r, "SELECT "+accountColumns+" FROM accounts c "+
+			"LEFT JOIN teams g ON g.id=c.team_id "+
+			"ORDER BY c.active DESC, g.name, c.name")
+	} else {
+		accounts, err = s.rows(r, "SELECT "+accountColumns+" FROM accounts c "+
+			"LEFT JOIN teams g ON g.id=c.team_id "+
+			"WHERE c.team_id=$1 ORDER BY c.active DESC, c.name", c.MyTeam())
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+
+	teams := []map[string]any{}
+	if c.Coordination() {
+		teams, err = s.rows(r,
+			"SELECT g.id, g.name, COALESCE(g.departments,'') AS departments, "+
+				"COALESCE(g.created_at,'') AS created_at, "+
+				"(SELECT COUNT(*) FROM accounts c WHERE c.team_id=g.id AND c.active) "+
+				"AS members, "+
+				"(SELECT COUNT(*) FROM assignments t WHERE t.team_id=g.id) AS reserved "+
+				"FROM teams g ORDER BY g.name")
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
+
+	departments, err := s.column(r, "SELECT DISTINCT department FROM mayors "+
+		"ORDER BY department")
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusOK, map[string]any{
+		"accounts": accounts, "teams": teams, "departments": departments})
+}
+
+type teamRequest struct {
+	Name        string   `json:"name"`
+	Departments []string `json:"departments"`
+}
+
+// POST /api/team/group — creating a local team (coordination only).
+func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
+	var d teamRequest
+	if !readBody(w, r, &d) {
+		return
+	}
+	name := strings.TrimSpace(d.Name)
+	if name == "" {
+		errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
+		return
+	}
+	// the column is btree-indexed (teams_org_name): past ~2 690 bytes of
+	// pasted text PostgreSQL refuses the index row (54000) with an
+	// « erreur interne » on the lead's own screen. Runes, not bytes: the
+	// message promises characters, and 200 runes stay far below the
+	// index ceiling even at 4 bytes each.
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de l'équipe ne doit pas dépasser 200 caractères.")
+		return
+	}
+	var departments []string
+	for _, x := range d.Departments {
+		if x = strings.TrimSpace(x); x != "" {
+			departments = append(departments, x)
+		}
+	}
+	var id int
+	err := s.tx(r).QueryRow(r.Context(),
+		"INSERT INTO teams(org_id, name, departments, created_at) VALUES($1,$2,$3,$4) "+
+			"RETURNING id", orgOf(r).ID, name, strings.Join(departments, ";"),
+		shortTimestamp()).Scan(&id)
+	if isUniqueViolation(err) {
+		errorJSON(w, http.StatusConflict, "Une équipe nommée « %s » existe déjà.", name)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusCreated, map[string]any{
+		"id": id, "name": name, "departments": departments})
+}
+
+type accountRequest struct {
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	TeamID *int   `json:"team_id"`
+}
+
+// POST /api/team/account — opens an account. The password is returned
+// once, never stored in the clear nor put in the session.
+func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
+	var d accountRequest
+	if !readBody(w, r, &d) {
+		return
+	}
+	me := accountOf(r)
+	email := strings.ToLower(strings.TrimSpace(d.Email))
+	name := strings.TrimSpace(d.Name)
+	if email == "" || !strings.Contains(email, "@") || name == "" {
+		errorJSON(w, http.StatusBadRequest, "Nom et adresse email sont requis.")
+		return
+	}
+	// email is the primary key, so it is btree-indexed: past ~2 690 bytes
+	// PostgreSQL refuses the index row (54000). 254 is the RFC ceiling —
+	// in runes, which still keeps the index row far below its limit.
+	if utf8.RuneCountInString(email) > maxEmailRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Cette adresse email est trop longue (254 caractères maximum).")
+		return
+	}
+
+	role, team := d.Role, d.TeamID
+	if me.Coordination() {
+		if role == "" {
+			role = RoleVolunteer
+		}
+		if !validRole(role) {
+			errorJSON(w, http.StatusBadRequest, "Rôle inconnu : %q.", role)
+			return
+		}
+		if team != nil {
+			// the column is int4: beyond its range pgx cannot even encode
+			// the argument, and coordination read « erreur interne » for a
+			// team that simply does not exist
+			if *team > math.MaxInt32 || *team < math.MinInt32 {
+				errorJSON(w, http.StatusBadRequest,
+					"Aucune équipe n'a l'identifiant %d.", *team)
+				return
+			}
+			var exists bool
+			err := s.tx(r).QueryRow(r.Context(),
+				"SELECT TRUE FROM teams WHERE id=$1", *team).Scan(&exists)
+			if errors.Is(err, pgx.ErrNoRows) {
+				errorJSON(w, http.StatusBadRequest,
+					"Aucune équipe n'a l'identifiant %d.", *team)
+				return
+			}
+			if err != nil {
+				s.failure(w, err)
+				return
+			}
+		}
+	} else {
+		// a team lead only opens volunteer accounts, in their OWN team
+		g := me.MyTeam()
+		role, team = RoleVolunteer, &g
+	}
+
+	password, err := ReadablePassword()
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	hashed, err := HashPassword(password)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	_, err = s.tx(r).Exec(r.Context(),
+		"INSERT INTO accounts(org_id, email, name, password_hash, role, team_id, created_at, created_by) "+
+			"VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+		orgOf(r).ID, email, name, hashed, role, team, shortTimestamp(), me.Email)
+	if isUniqueViolation(err) {
+		errorJSON(w, http.StatusConflict, "Un compte existe déjà pour %s.", email)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusCreated, map[string]any{
+		"email": email, "name": name, "role": role, "password": password})
+}
+
+// POST /api/team/account/{email}/active — activates or deactivates an
+// account.
+func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
+	me := accountOf(r)
+	target := strings.ToLower(strings.TrimSpace(r.PathValue("email")))
+	if target == me.Email {
+		errorJSON(w, http.StatusBadRequest, "On ne désactive pas son propre compte.")
+		return
+	}
+
+	// A team lead only searches within their OWN team: otherwise the
+	// 404/403 distinction would tell them which addresses exist in other
+	// teams.
+	req := &query{}
+	filter := "email=" + req.p(target)
+	if !me.Coordination() {
+		filter += " AND team_id=" + req.p(me.MyTeam()) +
+			" AND role=" + req.p(RoleVolunteer)
+	}
+	var active bool
+	err := s.tx(r).QueryRow(r.Context(),
+		"UPDATE accounts SET active = NOT active WHERE "+filter+" RETURNING active",
+		req.args...).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		errorJSON(w, http.StatusNotFound,
+			"Aucun compte %s que vous puissiez gérer.", target)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusOK, map[string]any{"email": target, "active": active})
+}
+
+func isUniqueViolation(err error) bool {
+	var pge *pgconn.PgError
+	return errors.As(err, &pge) && pge.Code == "23505"
+}

@@ -1,0 +1,16 @@
+OBJET: Présentation à l'élection présidentielle de 2027 — votre voix de maire
+
+{salutation},
+
+Je me permets de vous écrire au nom de {candidat}, {candidat_description}, qui sollicite les présentations pour l'élection présidentielle de 2027.
+
+Vous le savez mieux que personne : présenter n'est pas soutenir. C'est permettre que les électeurs tranchent — le rôle que la Constitution confie aux maires. Moins d'un tiers des élus habilités utilisent aujourd'hui cette prérogative, et beaucoup de candidatures sérieuses s'arrêtent faute de cinq cents signatures, avant même que le débat ait lieu.
+{contexte}
+{argument_personnel}
+
+Accepteriez-vous d'en échanger quelques minutes par téléphone, ou que {candidat} vous appelle personnellement ? Je reste à votre disposition, y compris pour un simple non — votre temps est précieux et une réponse claire nous aide autant qu'un accord.
+
+Avec notre respect pour votre engagement au service {commune_de},
+
+{signataire}, {signataire_qualite}
+{contact_tel} — {contact_email} — {site}

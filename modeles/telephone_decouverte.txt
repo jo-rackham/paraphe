@@ -1,0 +1,57 @@
+## Avant d'appeler
+
+- Appeler pendant : **{horaires}** (sinon personne ne décroche).
+- Numéro : **{telephone}** — {commune} ({departement}).
+- **Ce maire n'a jamais parrainé de candidat peu médiatisé** (ou nous n'en
+  avons pas trace) : ne rien lui prêter, ne remercier de rien.{contexte_tel}
+- Après l'appel, enregistrer le statut et une note dans la fiche. Toujours.
+
+## 1. Barrage secrétariat
+
+« Bonjour, [votre prénom et nom], j'appelle de la part de {candidat}, au
+sujet de l'élection présidentielle. Serait-il possible de parler à
+{civilite_courte} le Maire, ou de convenir d'un créneau où je peux
+le/la joindre ? »
+
+Si absent·e : noter le créneau proposé. Ne pas dérouler l'argumentaire à la
+secrétaire, mais la traiter avec les mêmes égards que le maire.
+
+## 2. Accroche maire (30 secondes — aller droit au but, poliment)
+
+« Bonjour, merci de me prendre. Je vous appelle au sujet des présentations
+pour l'élection présidentielle de 2027. Je travaille avec {candidat},
+{candidat_description}. Je ne vous demande pas un soutien : seulement si
+vous accepteriez d'envisager de permettre à une candidature de plus
+d'exister au débat. »
+
+(Laisser un silence. C'est leur tour.)
+
+## 3. Écouter, puis une seule question
+
+« Est-ce que vous avez déjà utilisé votre présentation, par le passé ? » —
+leur réponse oriente tout le reste. S'ils disent non : « Qu'est-ce qui vous
+retient ? » Reprendre leurs mots, ne pas argumenter contre.
+
+## 4. Objections classiques
+
+- **« Je ne parraine jamais. »** → « Je comprends, et je respecte. Puis-je
+  vous demander si c'est un principe, ou la crainte que ce soit lu comme un
+  soutien ? » (Si principe : refus, clore poliment. Si crainte : enchaîner
+  ci-dessous.)
+- **« On croirait que je le soutiens. »** → « C'est l'obstacle numéro un
+  depuis que les parrainages sont publics. Présenter n'est pas soutenir — le
+  Conseil constitutionnel lui-même le rappelle. Beaucoup de maires l'assument
+  en une phrase : “je ne partage pas ses idées, je permets qu'on en
+  débatte”. Souhaitez-vous notre note d'une page, à montrer à votre
+  conseil ? » (Statut : à rappeler + envoyer la note.)
+- **« J'ai déjà promis ma signature. »** → « Bravo, c'est tout ce qu'on
+  défend. Bonne campagne à lui ou elle. » (Statut : déjà promis. Ne pas
+  demander à qui.)
+- **« C'est qui, votre candidat ? »** → {candidat_description}. Jamais
+  évasif. Proposer l'appel direct de {candidat}.
+
+## 5. Conclure — toujours un engagement concret et daté
+
+« Je vous envoie la note » / « {candidat} vous rappelle [jour] » / « on se
+reparle mi-janvier quand vous aurez reçu le formulaire du Conseil
+constitutionnel ». Reformuler, remercier, noter.

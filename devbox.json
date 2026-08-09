@@ -1,0 +1,11 @@
+{
+  "packages": [
+    "go@1.26",
+    "nodejs@24",
+    "pnpm@latest",
+    "jq@latest",
+    "curl@latest",
+    "go-task@latest",
+    "kubernetes-helm@latest"
+  ]
+}

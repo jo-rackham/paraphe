@@ -1,0 +1,20 @@
+{{- if and .Values.postgres.cnpg.enabled .Values.postgres.cnpg.backup.enabled }}
+{{- if not .Values.postgres.cnpg.backup.s3CredentialsSecret }}
+{{- fail "postgres.cnpg.backup.s3CredentialsSecret est obligatoire quand la sauvegarde est activée : sans identifiants, l'archivage WAL échoue en silence." }}
+{{- end }}
+# WAL archiving alone restores NOTHING: a base backup is required.
+# Without this resource, enabling backup.enabled felt like being covered
+# while no restore was possible.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "paraphe.nomPostgres" . }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  # first backup at install time, without waiting for the night
+  immediate: true
+  schedule: {{ .Values.postgres.cnpg.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ include "paraphe.nomPostgres" . }}
+{{- end }}

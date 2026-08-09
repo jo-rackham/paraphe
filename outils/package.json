@@ -1,0 +1,19 @@
+{
+  "name": "paraphe-outils",
+  "private": true,
+  "type": "module",
+  "description": "Croisement des sources ouvertes et publipostage de masse. Lancés par Node sans compilation.",
+  "scripts": {
+    "build": "node build.ts",
+    "messages": "node messages-masse.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "smol-toml": "^1.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "vitest": "^3.2.0",
+    "yaml": "^2.8.0"
+  }
+}

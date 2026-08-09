@@ -1,0 +1,20 @@
+# Configuration de la campagne — À REMPLIR avant toute génération.
+# Ces valeurs remplissent les {placeholders} de modeles/*.txt.
+
+[campagne]
+candidat = "Prénom NOM"
+# une ligne factuelle : courant, profession, démarche (pour l'email)
+candidat_description = "candidat(e) [courant / démarche], [profession]"
+# 2-3 phrases à la première personne (pour le courrier, signé du candidat)
+candidat_description_longue = "Je suis [qui]. Je porte [quoi]. Je me présente parce que [pourquoi]."
+signataire = "Prénom Nom"
+signataire_qualite = "équipe de campagne de [candidat]"
+contact_tel = "06 00 00 00 00"
+contact_email = "contact@exemple.fr"
+site = "https://exemple.fr"
+ville_envoi = "Ville"
+
+[app]
+# nombre de maires attribués par « prendre un lot »
+# (l'accès se fait par compte individuel : voir DEPLOIEMENT.md)
+taille_lot = 10

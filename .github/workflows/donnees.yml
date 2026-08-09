@@ -1,0 +1,74 @@
+name: Données
+
+# The invariants that only hold on the REAL crossing: 36 letters to the
+# wrong town hall, 12 mayors thanked for someone else's endorsement. No
+# synthetic fixture reproduces them, so outils/sorties.test.ts needs the
+# open sources — which is why this is not part of CI.
+#
+# Two reasons to run, and they are different failures:
+#   - a change to the crossing (push) — a code regression;
+#   - the passing of time (schedule) — the RNE and the directory are
+#     refreshed continuously upstream, and a column renamed there corrupts
+#     the list without touching a line of our code.
+#
+# Kept OUT of ci.yml on purpose: release.yml goes through CI, and an
+# outage at data.gouv.fr must never be what stops a publication.
+on:
+  push:
+    # No `paths:` filter on main: an amended commit force-pushed leaves
+    # GitHub without a diff to filter on, and the run is skipped in silence
+    # (see pages.yml). On a pull request the diff exists, so the filter
+    # still earns its keep there.
+    branches: [main]
+  pull_request:
+    paths: ["outils/**", "noyau/**", "config/**"]
+  schedule:
+    # every Monday, 6:00 UTC — before the week's work on the lists
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  croisement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache des sources ouvertes
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: sources-${{ github.run_id }}
+          restore-keys: sources-
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Croiser les sources ouvertes
+        run: |
+          bash outils/telecharger.sh
+          node outils/build.ts
+
+      - name: Invariants sur les sorties réelles
+        working-directory: outils
+        run: pnpm exec vitest run
+        env:
+          # this job — and only this job — has crossed the sources, so it is
+          # the one where the suite standing aside must be a failure
+          PARAPHE_EXPECTED_OUTPUTS: "1"
+
+      - name: Le rapport de croisement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-croisement
+          path: out/rapport.md
+          retention-days: 30
+          if-no-files-found: ignore

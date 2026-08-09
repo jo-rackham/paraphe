@@ -1,0 +1,39 @@
+# sources brutes : seules les listes construites entrent dans l'image
+data/
+out/messages/
+out/02_anciens_parrains.csv
+out/03_non_apparies.csv
+out/rapport.md
+# travail de l'équipe et secrets : ne doivent jamais entrer dans une image.
+# Le « * » de Docker ne traverse PAS les « / », contrairement à celui de
+# .gitignore : sans « **/ », app/data.sqlite entrait dans le contexte de build
+# et dans le cache de la CI.
+**/*.sqlite*
+**/*.sql
+**/*.db
+**/*.dump
+app/
+.env
+.env.*
+!.env.exemple
+config/campagne.local.toml
+# artefacts de construction de l'hôte : recopiés dans l'image, ils entrent en
+# conflit avec ceux que les étages construisent (pnpm refuse de démarrer sur un
+# node_modules qu'il n'a pas installé lui-même) et embarquent des binaires
+# compilés pour une autre plateforme
+node_modules/
+web/node_modules/
+outils/node_modules/
+web/dist/
+web/public/donnees/
+api/paraphe-api
+# outillage et identifiants locaux
+.claude/
+.gh-*/
+.repos/
+.git/
+.venv/
+.devbox/
+.pytest_cache/
+__pycache__/
+tests/

@@ -1,0 +1,16 @@
+{salutation},
+
+Je m'appelle {candidat}. {candidat_description_longue}
+
+Je vous écris parce que la Constitution vous confie, à vous maire, une prérogative que peu d'élus utilisent : présenter une candidature à l'élection présidentielle. Moins d'un tiers des élus habilités s'en servent, et des candidatures sérieuses s'arrêtent faute de cinq cents signatures — avant même que les électeurs aient pu en juger.
+{contexte}
+Je ne vous demande pas d'adhérer à mes idées. Je vous demande d'envisager de me permettre de les soumettre au débat et au suffrage — ce que la loi appelle une présentation, et que la doctrine constitutionnelle distingue explicitement du soutien politique. Le « je ne partage pas vos idées, mais je me battrai pour qu'elles puissent s'exprimer » a, dans notre République, une forme concrète : elle tient sur le formulaire que le Conseil constitutionnel vous adressera début 2027, et que vous êtes {seul_e} à pouvoir renvoyer.
+
+{argument_personnel}
+
+Mon équipe se permettra de vous appeler dans les prochaines semaines. Si vous préférez ne pas être {sollicite_e}, un mot suffira et nous le respecterons.
+
+Avec ma considération pour votre engagement au service {commune_de},
+
+{candidat}
+{contact_tel} — {contact_email}

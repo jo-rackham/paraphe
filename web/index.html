@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paraphe — recherche de parrainages d'élus</title>
+<meta name="description" content="Outil de recherche de parrainages d'élus pour l'élection présidentielle. Site non officiel.">
+<!-- relative hrefs: the app has no deep routes, and the base differs by
+     deployment (/paraphe/ on Pages, / in Docker) — relative works in both -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="alternate icon" type="image/x-icon" href="favicon.ico">
+<!-- Le même bundle sert les deux modes : c'est la présence d'une API qui
+     tranche, à l'exécution. Le titre reste donc neutre — annoncer « version
+     navigateur » sur une instance d'équipe serait une promesse de
+     confidentialité fausse. -->
+<!-- aucune ressource distante : ni police, ni CDN, ni mesure d'audience.
+     La promesse « aucune donnée ne sort » (mode navigateur) doit être
+     vérifiable dans l'onglet réseau, pas seulement affirmée. -->
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+{{- if .Values.postgres.cnpg.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "paraphe.nomPostgres" . }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+  annotations:
+    # the database carries all the team's work: uninstalling the chart
+    # must not take it along
+    helm.sh/resource-policy: keep
+spec:
+  instances: {{ .Values.postgres.cnpg.instances }}
+  {{- with .Values.postgres.cnpg.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+
+  # the operator creates the database, the application role, and the
+  # "<cluster>-app" secret holding the full DSN (key "uri")
+  bootstrap:
+    initdb:
+      database: paraphe
+      owner: paraphe
+      localeCollate: fr_FR.UTF-8
+      localeCType: fr_FR.UTF-8
+
+  storage:
+    size: {{ .Values.postgres.cnpg.storage.size }}
+    {{- with .Values.postgres.cnpg.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+
+  {{- with .Values.postgres.cnpg.resources }}
+  resources: {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  {{- if .Values.postgres.cnpg.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.postgres.cnpg.backup.retentionPolicy | quote }}
+    barmanObjectStore:
+      destinationPath: {{ .Values.postgres.cnpg.backup.destinationPath | quote }}
+      {{- with .Values.postgres.cnpg.backup.endpointURL }}
+      endpointURL: {{ . | quote }}
+      {{- end }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Values.postgres.cnpg.backup.s3CredentialsSecret }}
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: {{ .Values.postgres.cnpg.backup.s3CredentialsSecret }}
+          key: ACCESS_SECRET_KEY
+  {{- end }}
+{{- end }}

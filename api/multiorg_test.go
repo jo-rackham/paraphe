@@ -1,0 +1,436 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+)
+
+func TestScopeOfHost(t *testing.T) {
+	const base = "paraphe.fr"
+	cases := []struct {
+		host     string
+		slug     string
+		instance bool
+		ok       bool
+	}{
+		{"campaign.paraphe.fr", "campaign", false, true},
+		{"CAMPAIGN.Paraphe.FR", "campaign", false, true},
+		{"campaign.paraphe.fr:8443", "campaign", false, true},
+		// absolute name: the trailing dot designates the SAME campaign
+		{"campaign.paraphe.fr.", "campaign", false, true},
+		{"paraphe.fr", "", true, true},
+		{"www.paraphe.fr", "", true, true},
+		// one level only: the wildcard certificate covers no deeper
+		{"a.b.paraphe.fr", "", false, false},
+		// a reserved slug designates no campaign
+		{"api.paraphe.fr", "", false, false},
+		{"other-domain.fr", "", false, false},
+		{"paraphe.fr.attaquant.fr", "", false, false},
+		// no campaign is served by IP: the splitting must not build a slug
+		// out of the colons
+		{"127.0.0.1:8047", "", false, false},
+		{"[::1]:8047", "", false, false},
+		{"", "", false, false},
+	}
+	for _, c := range cases {
+		scope, ok := ScopeOfHost(c.host, base)
+		if ok != c.ok || scope.Slug != c.slug || scope.Instance != c.instance {
+			t.Errorf("ScopeOfHost(%q) = %+v, %v; expected {slug:%q instance:%v}, %v",
+				c.host, scope, ok, c.slug, c.instance, c.ok)
+		}
+	}
+	// without a base domain, no host designates anything: the caller is
+	// what switches to single-campaign, not this function
+	if _, ok := ScopeOfHost("campaign.paraphe.fr", ""); ok {
+		t.Error("an empty base domain resolved a host")
+	}
+}
+
+func TestValidSlug(t *testing.T) {
+	good := []string{"campaign", "ma-campaign-2027", "c2027", "ab"}
+	bad := []string{
+		"a", "", "-debut", "fin-", "MAJUSCULE", "avec_underscore",
+		"avec.point", "accentué", "api", "www", "admin",
+	}
+	for _, s := range good {
+		if !ValidSlug(s) {
+			t.Errorf("ValidSlug(%q) = false", s)
+		}
+	}
+	for _, s := range bad {
+		if ValidSlug(s) {
+			t.Errorf("ValidSlug(%q) = true", s)
+		}
+	}
+}
+
+func createOrg(t *testing.T, s *Server, slug, name string) int {
+	t.Helper()
+	var id int
+	if err := s.pool.QueryRow(context.Background(),
+		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
+			"VALUES($1,$2,'{}'::jsonb,2,'active','2026-01-01T00:00') RETURNING id",
+		slug, name).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// THE walling test: the tables are queried WITHOUT any application filter.
+// If the wall rested on the routes' WHERE clauses, this test would see
+// everything; it only sees the declared campaign because PostgreSQL does
+// the filtering.
+// A row every column of which is valid: what is left is the policy.
+var validInsertInto = map[string]string{
+	"assignments": "INSERT INTO assignments(org_id, insee_code, volunteer, status) " +
+		"VALUES($1,'01001','intrus@exemple.fr','email_sent')",
+	"notes": "INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts) " +
+		"VALUES($1,'01001','intrus@exemple.fr','email_sent','vu','2026-01-01T00:00')",
+	"teams": "INSERT INTO teams(org_id, name, departments) VALUES($1,'Intrus','01')",
+	"accounts": "INSERT INTO accounts(org_id, email, name, password_hash, role) " +
+		"VALUES($1,'intrus@exemple.fr','Intrus','x','volunteer')",
+}
+
+func TestRLSHoldsWithoutApplicationFilter(t *testing.T) {
+	s, _ := testServer(t)
+	seedMayors(t, s, 4, "01")
+	a := orgID(t, s, testSlug)
+	b := createOrg(t, s, "other", "Other campaign")
+
+	for _, org := range []int{a, b} {
+		execAsMaintenance(t, s,
+			"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
+				"VALUES($1,'01000',$2,'email_sent')", org, "who@org.fr")
+		execAsMaintenance(t, s,
+			"INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts) "+
+				"VALUES($1,'01000',$2,'email_sent','note interne','2026-01-01T00:00')",
+			org, "who@org.fr")
+		execAsMaintenance(t, s,
+			"INSERT INTO accounts(org_id, email, name, password_hash, role) "+
+				"VALUES($1,'commun@exemple.fr','Commun','x','volunteer')", org)
+		createTeamIn(t, s, org, "Nord", "01")
+	}
+
+	ctx := context.Background()
+	for _, table := range walledTables {
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setOrgScope(ctx, tx, a); err != nil {
+			t.Fatal(err)
+		}
+		var total, elsewhere int
+		if err := tx.QueryRow(ctx,
+			"SELECT count(*), count(*) FILTER (WHERE org_id <> $1) FROM "+table,
+			a).Scan(&total, &elsewhere); err != nil {
+			t.Fatal(err)
+		}
+		if elsewhere != 0 {
+			t.Errorf("%s: %d row(s) of another campaign visible without an "+
+				"application filter", table, elsewhere)
+		}
+		if total == 0 {
+			t.Errorf("%s: the campaign no longer sees its own rows", table)
+		}
+
+		// Writing into the neighbour must fail, and it must be the POLICY
+		// that refuses. `INSERT INTO <table>(org_id)` alone violates the NOT
+		// NULL constraints of three of these four tables, so it failed
+		// whether or not the wall existed — the assertion was vacant
+		// everywhere except on `notes`.
+		_, err = tx.Exec(ctx, validInsertInto[table], b)
+		if err == nil {
+			t.Errorf("%s: a valid row was accepted into another campaign", table)
+		} else if !strings.Contains(err.Error(), "row-level security") &&
+			!strings.Contains(err.Error(), "violates row-level") {
+			t.Errorf("%s: refused, but not by the wall: %v", table, err)
+		}
+		tx.Rollback(ctx) //nolint:errcheck // test transaction
+	}
+
+	// and with no declared scope at all: nothing, rather than everything
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // test transaction
+	var visible int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM assignments").Scan(&visible); err != nil {
+		t.Fatal(err)
+	}
+	if visible != 0 {
+		t.Errorf("a transaction without a scope sees %d work row(s): the "+
+			"default must be \"nothing\", not \"everything\"", visible)
+	}
+}
+
+// Two campaigns hosted side by side, reached through their subdomain.
+func TestTwoCampaignsCannotSeeEachOther(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	seedMayors(t, s, 6, "01")
+	a := orgID(t, s, testSlug)
+	b := createOrg(t, s, "other", "Other campaign")
+
+	pwA := createAccountIn(t, s, a, "moi@exemple.fr", RoleVolunteer, nil)
+	pwB := createAccountIn(t, s, b, "moi@exemple.fr", RoleVolunteer, nil)
+	ca := clientOn(t, srv, testSlug+".paraphe.test")
+	cb := clientOn(t, srv, "other.paraphe.test")
+
+	// the same address exists in both campaigns, with two different
+	// passwords: each only accepts its own
+	if code := ca.signIn("moi@exemple.fr", pwB); code != http.StatusUnauthorized {
+		t.Errorf("the other campaign's password is accepted: %d", code)
+	}
+	if code := ca.signIn("moi@exemple.fr", pwA); code != http.StatusOK {
+		t.Fatalf("sign-in refused on one's own campaign: %d", code)
+	}
+	if code := cb.signIn("moi@exemple.fr", pwB); code != http.StatusOK {
+		t.Fatalf("sign-in refused on the other campaign: %d", code)
+	}
+
+	if code, rep := ca.call(http.MethodPost, "/api/batch", map[string]any{}); code != http.StatusOK {
+		t.Fatalf("batch refused: %d %v", code, rep)
+	}
+	// campaign B sees the SAME available mayors: the list is shared, the
+	// work is not
+	code, rep := cb.call(http.MethodGet, "/api/mayors", nil)
+	if code != http.StatusOK {
+		t.Fatalf("list refused: %d %v", code, rep)
+	}
+	if total := int(rep["total"].(float64)); total != 6 {
+		t.Errorf("campaign B sees %d available mayors out of 6: campaign A's "+
+			"work spills over", total)
+	}
+	// and its dashboard counts no contact
+	_, dash := cb.call(http.MethodGet, "/api/dashboard", nil)
+	if mine, _ := dash["mine"].([]any); len(mine) != 0 {
+		t.Errorf("campaign B has %d card(s) assigned without having done anything", len(mine))
+	}
+
+	// a host that matches nothing is not served at random
+	unknown := clientOn(t, srv, "inexistante.paraphe.test")
+	if code, _ := unknown.call(http.MethodGet, "/api/config", nil); code != http.StatusNotFound {
+		t.Errorf("an unknown subdomain was served: %d", code)
+	}
+}
+
+// The cookie is valid for ONE campaign: presented to another, it is worth
+// nothing.
+func TestSessionDoesNotCrossCampaigns(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	a := orgID(t, s, testSlug)
+	b := createOrg(t, s, "other", "Other campaign")
+	pw := createAccountIn(t, s, a, "moi@exemple.fr", RoleVolunteer, nil)
+	createAccountIn(t, s, b, "moi@exemple.fr", RoleVolunteer, nil)
+
+	c := clientOn(t, srv, testSlug+".paraphe.test")
+	if code := c.signIn("moi@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	// same client, same cookie jar, other campaign
+	c.host = "other.paraphe.test"
+	if code, rep := c.call(http.MethodGet, "/api/me", nil); code != http.StatusUnauthorized {
+		t.Errorf("one campaign's session is valid for another: %d %v", code, rep)
+	}
+}
+
+// The apex serves the instance landing page, not a campaign.
+func TestApexIsNotACampaign(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	a := orgID(t, s, testSlug)
+	pw := createAccountIn(t, s, a, "moi@exemple.fr", RoleVolunteer, nil)
+
+	apex := clientOn(t, srv, "paraphe.test")
+	code, rep := apex.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK || rep["mode"] != "instance" {
+		t.Fatalf("/api/config on the apex: %d %v", code, rep)
+	}
+	// a campaign cannot sign in there: its accounts are not there
+	if code := apex.signIn("moi@exemple.fr", pw); code != http.StatusUnauthorized {
+		t.Errorf("a campaign account signed in on the apex: %d", code)
+	}
+	// and the work routes do not exist there
+	if code, _ := apex.call(http.MethodGet, "/api/dashboard", nil); code == http.StatusOK {
+		t.Error("the apex serves a campaign's dashboard")
+	}
+}
+
+// The form is public, but it creates nothing: the approval is what creates
+// the campaign, and with it its requester's access.
+func TestRequestThenApprovalCreatesCampaign(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, "admin@paraphe.test", "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+
+	apex := clientOn(t, srv, "paraphe.test")
+	request := map[string]any{
+		"slug": "nouvelle", "name": "Nouvelle campagne",
+		"requester_email": "porteur@exemple.fr", "requester_name": "Porteur",
+		"message": "on présente quelqu'un",
+	}
+	code, rep := apex.call(http.MethodPost, "/api/request", request)
+	if code != http.StatusCreated {
+		t.Fatalf("request refused: %d %v", code, rep)
+	}
+	// nothing is created until someone approves
+	if code, _ := clientOn(t, srv, "nouvelle.paraphe.test").
+		call(http.MethodGet, "/api/config", nil); code != http.StatusNotFound {
+		t.Errorf("the campaign exists before moderation: %d", code)
+	}
+	// and squatting the same name is refused right away
+	if code, _ := apex.call(http.MethodPost, "/api/request", request); code != http.StatusConflict {
+		t.Errorf("second request on the same subdomain accepted: %d", code)
+	}
+
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("administration sign-in: %d", code)
+	}
+	code, queue := admin.call(http.MethodGet, "/api/admin/requests", nil)
+	if code != http.StatusOK {
+		t.Fatalf("moderation queue: %d %v", code, queue)
+	}
+	requests, _ := queue["requests"].([]any)
+	if len(requests) != 1 {
+		t.Fatalf("%d request(s) in the queue, 1 expected", len(requests))
+	}
+	id := int64(requests[0].(map[string]any)["id"].(float64))
+
+	code, dec := admin.call(http.MethodPost,
+		"/api/admin/requests/"+itoa(id), map[string]any{"decision": RequestAccepted})
+	if code != http.StatusOK {
+		t.Fatalf("approval refused: %d %v", code, dec)
+	}
+	pw, _ := dec["password"].(string)
+	if pw == "" {
+		t.Fatal("no password returned for the created coordination")
+	}
+	// the same decision twice does not create two campaigns
+	if code, _ := admin.call(http.MethodPost, "/api/admin/requests/"+itoa(id),
+		map[string]any{"decision": RequestAccepted}); code != http.StatusConflict {
+		t.Errorf("request approved twice: %d", code)
+	}
+
+	// the campaign answers, and its requester enters as coordination
+	fresh := clientOn(t, srv, "nouvelle.paraphe.test")
+	code, cfg := fresh.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK || cfg["mode"] != "team" {
+		t.Fatalf("the approved campaign does not answer: %d %v", code, cfg)
+	}
+	if code := fresh.signIn("porteur@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("the requester cannot enter their campaign: %d", code)
+	}
+	code, me := fresh.call(http.MethodGet, "/api/me", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/me: %d %v", code, me)
+	}
+	account, _ := me["account"].(map[string]any)
+	if account["role"] != RoleCoordination {
+		t.Errorf("the requester enters with role %v", account["role"])
+	}
+}
+
+// A suspended campaign keeps its work, but nobody gets in.
+func TestSuspendedCampaignAcceptsNoRequest(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	if _, err := s.pool.Exec(context.Background(),
+		"UPDATE orgs SET state=$1 WHERE slug=$2", OrgSuspended, testSlug); err != nil {
+		t.Fatal(err)
+	}
+	c := clientOn(t, srv, testSlug+".paraphe.test")
+	if code, _ := c.call(http.MethodGet, "/api/config", nil); code != http.StatusServiceUnavailable {
+		t.Errorf("a suspended campaign answers: %d", code)
+	}
+}
+
+func testHash(t *testing.T, password string) string {
+	t.Helper()
+	h, err := HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func itoa(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var digits []byte
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	return string(digits)
+}
+
+// The file configuration ALWAYS carries all nine campaign keys — a complete
+// configuration requires them, and the shipped campagne.toml fills them
+// with template values. Reapplying it on restart reverted everything
+// coordination had typed into "Mon équipe", down to re-arming the
+// "campaign not configured" banner and regenerating "Prénom NOM" messages.
+func TestRestartKeepsWhatCoordinationTyped(t *testing.T) {
+	s, _ := testServer(t)
+	org := orgID(t, s, testSlug)
+	execAsMaintenance(t, s,
+		`UPDATE orgs SET campaign = campaign || '{"candidat":"Camille Réel",`+
+			`"contact_email":"camille@exemple.org"}'::jsonb WHERE id=$1`, org)
+
+	// a restart with the shipped template, and nothing in the environment
+	cfg := testConfig()
+	cfg.Campaign["candidat"] = "Prénom NOM"
+	cfg.Campaign["contact_email"] = "contact@exemple.fr"
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if _, err := ensureOrg(context.Background(), tx, testSlug, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+	after := campaignOf(t, s, org)
+	if after["candidat"] != "Camille Réel" {
+		t.Errorf("candidat = %q after restart: the coordination's own campaign "+
+			"was reverted to the template, and the messages with it",
+			after["candidat"])
+	}
+
+	// but an explicit PARAPHE_* still fixes a campaign without touching the
+	// database — that is what the override exists for
+	cfg.Overrides = map[string]string{"candidat": "Corrigé Par L'Opérateur"}
+	cfg.Campaign["candidat"] = "Corrigé Par L'Opérateur"
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if _, err := ensureOrg(context.Background(), tx, testSlug, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+	after = campaignOf(t, s, org)
+	if after["candidat"] != "Corrigé Par L'Opérateur" {
+		t.Errorf("candidat = %q: an explicit PARAPHE_CANDIDATE no longer applies",
+			after["candidat"])
+	}
+	// and it did NOT drag the rest of the file along with it
+	if after["contact_email"] != "camille@exemple.org" {
+		t.Errorf("contact_email = %q: a single override reverted the other keys",
+			after["contact_email"])
+	}
+}
+
+func campaignOf(t *testing.T, s *Server, org int) map[string]string {
+	t.Helper()
+	var campaign map[string]string
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT campaign FROM orgs WHERE id=$1", org).Scan(&campaign); err != nil {
+		t.Fatal(err)
+	}
+	return campaign
+}

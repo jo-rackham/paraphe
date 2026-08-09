@@ -1,0 +1,13 @@
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "paraphe.nomComplet" . }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  # maxUnavailable rather than minAvailable: with 3 replicas,
+  # minAvailable=1 allowed draining two nodes at once
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels: {{- include "paraphe.selecteur" . | nindent 6 }}
+{{- end }}

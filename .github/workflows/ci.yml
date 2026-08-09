@@ -1,0 +1,270 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # called by release.yml: nothing gets published without passing through here
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  outils:
+    # crossing of the open sources, mass mailing, and faithfulness of the
+    # difflib port the targeted-mayor list depends on
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: outils
+    # The invariants on the REAL outputs live in their own workflow
+    # (donnees.yml): they need the open sources, and this job — which
+    # release.yml goes through — must not depend on data.gouv.fr being up.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Types
+        run: pnpm exec tsc --noEmit
+      - name: Tests
+        run: pnpm exec vitest run
+
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paraphe
+          POSTGRES_PASSWORD: paraphe
+          POSTGRES_DB: paraphe_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U paraphe"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: api/go.sum
+
+      - name: Format
+        # single-quoted: the ':' in the message would make YAML read the
+        # command as a mapping, and the whole workflow would be rejected
+        run: 'gofmt -l . | (! grep .) || (echo "gofmt : fichiers non formatés"; exit 1)'
+
+      - run: go vet ./...
+
+      - name: Tests
+        # the database is provided on purpose: without it the integration
+        # tests skip themselves, and they are what covers concurrent
+        # allocation and the wall between teams
+        run: go test -race -count=1 ./...
+        env:
+          PARAPHE_TEST_DATABASE_URL: postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe_test
+
+  interface:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Types
+        run: pnpm exec tsc --noEmit
+      - name: Tests du moteur de messages
+        # the central invariant: never claim an endorsement from someone
+        # who made none
+        run: pnpm test
+      - run: pnpm build
+        env:
+          PARAPHE_BASE_PATH: /
+
+  e2e:
+    # The full journeys, in a browser: real database, real API, real built
+    # interface. The only place where a JSON key renamed on one side and not
+    # the other shows up — the unit suites stay green in that case, each
+    # right on its own side.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paraphe
+          POSTGRES_PASSWORD: paraphe
+          POSTGRES_DB: paraphe
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U paraphe"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: api/go.sum
+      - uses: pnpm/action-setup@v4
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Parcours complets
+        run: pnpm exec playwright test --config e2e/playwright.config.ts
+        env:
+          # the suite creates its own throwaway database from this account
+          PARAPHE_TEST_DATABASE_URL: postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe
+
+      - name: Traces des échecs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: e2e/.results/
+          retention-days: 7
+
+  image:
+    # checks the image actually builds and starts, without publishing it
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paraphe
+          POSTGRES_PASSWORD: paraphe
+          POSTGRES_DB: paraphe
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U paraphe"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 24: TypeScript type stripping is native, the tools run without
+          # compilation
+          node-version: 24
+
+      - name: Jeu de données minimal (les vraies sources ne sont pas versionnées)
+        run: node outils/faux-jeu.ts out/
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construire l'image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: paraphe:ci
+
+      - name: L'application démarre, sert l'API et l'interface
+        run: |
+          docker run -d --name paraphe-ci --network host \
+            -e PARAPHE_ADMIN_EMAIL=ci@exemple.fr \
+            -e PARAPHE_ADMIN_PASSWORD=ci-motdepasse \
+            -e PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe \
+            paraphe:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8047/api/config >/dev/null 2>&1; then
+              echo "démarré au bout de ${i}s"; break
+            fi
+            if [ "$i" = 60 ]; then
+              echo "l'application n'a pas répondu en 60 s"; docker logs paraphe-ci; exit 1
+            fi
+            sleep 1
+          done
+          # the liveness probe must not depend on the database
+          curl -fsS http://127.0.0.1:8047/health | grep -q '"state":"ok"'
+          # the interface is embedded: without it the image serves a mute
+          # API, and nobody notices before opening a browser
+          curl -fsS http://127.0.0.1:8047/ | grep -q 'id="root"'
+          # sign-in works end to end
+          curl -fsS -X POST http://127.0.0.1:8047/api/session \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci@exemple.fr","password":"ci-motdepasse"}' \
+            | grep -q '"role":"coordination"'
+          # and without a session, nothing gets out
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8047/api/mayors)" = 401
+
+      - name: Journaux du conteneur
+        if: always()
+        run: docker logs paraphe-ci || true
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Lint du chart
+        # helm lint files a {{ fail }} under INFO and exits 0: it proves
+        # nothing alone. Neither does `helm template`: three misspelled probe
+        # fields (periodSecond, failureThreshhold, httpsGet) passed the render
+        # AND the grep. Only schema validation sees them.
+        run: helm lint chart/paraphe
+
+      - name: Installer kubeconform
+        run: |
+          curl -fsSL --retry 3 -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install /tmp/kubeconform /usr/local/bin/
+
+      - name: Les manifestes sont valides, dans plusieurs configurations
+        run: |
+          # the default path is not enough: ingress, autoscaling, existing
+          # secret and external database are never rendered otherwise
+          rendre() {
+            nom=$1; shift
+            helm template paraphe chart/paraphe \
+              --set image.tag=ci --set secrets.adminPassword=x \
+              --set secrets.secretKey=y "$@" > "/tmp/$nom.yaml"
+            test -s "/tmp/$nom.yaml"
+            echo "--- $nom : $(grep -c '^kind:' "/tmp/$nom.yaml") ressources"
+          }
+          rendre defaut
+          rendre ingress --set ingress.enabled=true \
+            --set ingress.host=paraphe.exemple.fr --set ingress.tls.enabled=true
+          rendre multi-campagnes --set ingress.enabled=true \
+            --set ingress.tls.enabled=true \
+            --set instance.baseDomain=paraphe.exemple.fr \
+            --set instance.admin.email=admin@exemple.fr \
+            --set secrets.instanceAdminPassword=z
+          # the wildcard host IS the mechanism that opens a campaign:
+          # without it, every approved campaign would require editing the
+          # Ingress
+          grep -q 'host: "\*.paraphe.exemple.fr"' /tmp/multi-campagnes.yaml
+          # and it does not appear when the instance hosts a single campaign
+          ! grep -q 'host: "\*' /tmp/ingress.yaml
+          rendre autoscaling --set autoscaling.enabled=true --set replicaCount=5
+          rendre base-externe --set postgres.cnpg.enabled=false \
+            --set postgres.external.existingSecret=ma-base
+          rendre sauvegarde --set postgres.cnpg.backup.enabled=true \
+            --set postgres.cnpg.backup.s3CredentialsSecret=mes-cles
+          grep -q "kind: Deployment" /tmp/defaut.yaml
+          # CloudNativePG CRDs: kubeconform does not know them, skip them
+          kubeconform -strict -summary \
+            -ignore-missing-schemas -skip Cluster,ScheduledBackup \
+            /tmp/defaut.yaml /tmp/ingress.yaml /tmp/autoscaling.yaml \
+            /tmp/base-externe.yaml /tmp/sauvegarde.yaml

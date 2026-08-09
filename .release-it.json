@@ -1,0 +1,29 @@
+{
+  "$schema": "https://unpkg.com/release-it/schema/release-it.json",
+  "git": {
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "paraphe v${version}",
+    "push": true,
+    "pushArgs": ["--follow-tags"]
+  },
+  "npm": {
+    "publish": false
+  },
+  "github": {
+    "release": false
+  },
+  "hooks": {
+    "before:init": [
+      "pnpm --dir outils exec tsc --noEmit",
+      "pnpm --dir outils exec vitest run",
+      "pnpm --dir web exec tsc --noEmit",
+      "pnpm --dir web exec vitest run",
+      "go build -C api ./..."
+    ],
+    "after:bump": "node outils/version.ts ${version}",
+    "after:release": "echo 'tag v${version} poussé — release.yml publie image et chart OCI ; suivre avec: task gh -- run watch'"
+  }
+}
