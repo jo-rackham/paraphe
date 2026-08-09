@@ -1,0 +1,210 @@
+# -- Image publiée par la CI sur ghcr.io
+image:
+  repository: ghcr.io/jo-rackham/paraphe
+  # laissé vide = appVersion du chart. Cette image n'existe sur ghcr.io
+  # qu'une fois le tag git correspondant publié : pour installer depuis un
+  # clone avant publication, poser un tag existant ici.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# -- Haute disponibilité. L'application est sans état : tout vit en base.
+replicaCount: 3
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# -- Base de données PostgreSQL.
+# Par défaut, le chart déclare un cluster CloudNativePG (opérateur à installer
+# au préalable dans le cluster) : réplication en flux, bascule automatique,
+# sauvegardes. L'application y lit son DSN dans le secret « <cluster>-app »
+# généré par l'opérateur.
+postgres:
+  cnpg:
+    enabled: true
+    # 3 instances = 1 primaire + 2 réplicas, tolère la perte d'un nœud
+    instances: 3
+    # laisser vide = image par défaut de l'opérateur
+    imageName: ""
+    storage:
+      size: 8Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    # Sauvegarde. L'archivage WAL seul ne suffit pas à restaurer : le chart
+    # crée aussi un ScheduledBackup (sauvegarde de base récurrente).
+    backup:
+      enabled: false
+      # cron à 6 champs de CloudNativePG (secondes en tête)
+      schedule: "0 0 3 * * *"
+      destinationPath: "s3://mon-bucket/paraphe"
+      endpointURL: ""
+      # secret contenant ACCESS_KEY_ID et ACCESS_SECRET_KEY
+      s3CredentialsSecret: ""
+      retentionPolicy: "30d"
+
+  # -- PostgreSQL externe (managé, ou cluster CNPG déjà en place).
+  # Utilisé seulement si postgres.cnpg.enabled vaut false.
+  external:
+    # secret contenant le DSN complet (postgresql://user:mdp@hote:5432/base)
+    existingSecret: ""
+    secretKey: "uri"
+
+# -- Instance : une campagne, ou plusieurs.
+#
+# domaineBase vide = MONO-CAMPAGNE. Tout nom d'hôte sert la campagne décrite
+# plus bas ; c'est le mode le plus simple, et il n'exige aucun DNS particulier.
+#
+# domaineBase renseigné = MULTI-CAMPAGNES. Chaque campagne vit sur
+# <campagne>.<domaineBase>, l'apex sert l'accueil public (demande
+# d'hébergement) et la modération. Il faut alors :
+#   - un enregistrement DNS générique *.<domaineBase> vers l'entrée du cluster,
+#     en plus de l'apex ;
+#   - un certificat GÉNÉRIQUE : Let's Encrypt ne le délivre qu'en DNS-01
+#     (HTTP-01 ne sait pas signer un *), donc un Issuer cert-manager avec le
+#     jeton d'API de votre fournisseur DNS ;
+#   - un rôle PostgreSQL SANS privilège (ni SUPERUSER, ni BYPASSRLS) : un rôle
+#     privilégié traverse les politiques de cloisonnement, et l'application
+#     REFUSE de démarrer dans ce cas. Le secret « <cluster>-app » de
+#     CloudNativePG convient.
+instance:
+  baseDomain: ""
+  # Sous-domaine de la campagne décrite par `campagne:` ci-dessous. Sert aussi
+  # à retrouver cette campagne en mono-campagne.
+  orgSlug: campagne
+  # Administration de l'instance : le seul rôle qui valide les demandes
+  # d'hébergement. Il ne lit aucune donnée de campagne. Inutile en
+  # mono-campagne.
+  admin:
+    email: ""
+    name: Administration
+
+# -- Identité de la campagne d'amorçage. Ces valeurs remplissent les messages
+# envoyés aux élus : tant qu'elles sont au gabarit, l'application affiche un
+# bandeau d'avertissement et le publipostage de masse refuse de tourner.
+# En multi-campagnes, elles n'amorcent que la PREMIÈRE campagne ; les
+# suivantes se configurent dans l'application, par leur coordination.
+# LAISSEZ-LES VIDES si la campagne se remplit dans l'application (onglet
+# « Mon équipe ») : ce qui est posé ici est réappliqué à CHAQUE démarrage de
+# pod et écraserait la saisie de la coordination — bandeau « campagne non
+# configurée » réarmé, taille de lot revenue au défaut, sans un mot.
+# Ne renseignez une clé que pour corriger une campagne sans toucher à la base.
+campaign:
+  candidate: ""
+  candidateDescription: ""
+  candidateDescriptionLong: ""
+  signatory: ""
+  signatoryRole: ""
+  contactPhone: ""
+  contactEmail: ""
+  site: ""
+  sendingCity: ""
+  # nombre de maires attribués par « prendre un lot » — vide = 10, et la
+  # coordination le règle dans l'application
+  batchSize: ""
+
+# -- Compte de coordination, créé ou mis à jour à chaque démarrage.
+# Sans lui, personne ne peut entrer : l'application refuse de s'ouvrir.
+admin:
+  email: "coordination@exemple.fr"
+  name: "Coordination"
+
+secrets:
+  # mot de passe du compte de coordination — OBLIGATOIRE
+  adminPassword: ""
+  # mot de passe de l'administration d'instance. Obligatoire dès que
+  # instance.baseDomain est renseigné : sans lui, les demandes d'hébergement
+  # s'accumulent sans que personne puisse les valider.
+  instanceAdminPassword: ""
+  # 32+ octets aléatoires (openssl rand -hex 32). En HA, le poser
+  # explicitement : sinon la première instance démarrée en tire un et
+  # l'enregistre en base, ce qui fonctionne mais rend les sessions
+  # dépendantes de l'ordre de démarrage.
+  secretKey: ""
+  # Nom d'un Secret existant. Il doit porter TROIS clés en multi-campagnes,
+  # DEUX en mono-campagne — le chart ne peut pas lire son contenu, et une
+  # clé manquante ne se voit qu'en CreateContainerConfigError, aucun pod ne
+  # devenant jamais prêt :
+  #   PARAPHE_ADMIN_PASSWORD           (toujours)
+  #   PARAPHE_SECRET_KEY                 (toujours)
+  #   PARAPHE_INSTANCE_ADMIN_PASSWORD  (dès que instance.baseDomain est posé)
+  existingSecret: ""
+
+# -- Lien « code source » affiché en pied de page (dépôt public, MIT)
+sourceUrl: "https://github.com/jo-rackham/paraphe"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  # HAProxy Ingress : "haproxy". Le contrôleur doit accepter les hôtes
+  # génériques (l'API Ingress les autorise sur UN niveau : *.exemple.fr).
+  className: ""
+  # cert-manager, pour un certificat générique :
+  #   cert-manager.io/cluster-issuer: letsencrypt-dns01
+  annotations: {}
+  # L'apex. En multi-campagnes, c'est aussi instance.baseDomain, et
+  # « *.<domaineBase> » est ajouté automatiquement.
+  host: paraphe.exemple.fr
+  hotesSupplementaires: []
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 192Mi
+  limits:
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# -- Sondes. Disponibilité : /health/db interroge la base — un pod qui ne la
+# voit pas ne doit pas recevoir de trafic. Elle ne résout AUCUNE campagne :
+# kubelet sonde l'IP du pod, dont le nom d'hôte ne correspond à aucun
+# sous-domaine, et une sonde sur /api/config laisserait tous les pods
+# éternellement « non prêts » en multi-campagnes.
+probes:
+  path: /health/db
+  # sonde de vivacité : n'interroge PAS la base, pour qu'une coupure de
+  # base ne fasse pas redémarrer des pods qui se rétablissent seuls
+  livenessPath: /health
+  # l'import initial des 34 826 maires prend ~2 s ; la marge couvre le
+  # démarrage à froid d'un cluster CNPG
+  startupFailureThreshold: 60
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# -- Répartir les instances sur des nœuds distincts : sans ça, « 3 réplicas »
+# ne protège de rien le jour où le nœud tombe.
+# « hard » exige STRICTEMENT plus de nœuds que de réplicas : avec autant de
+# nœuds que de réplicas, le pod supplémentaire du rolling update ne trouve
+# pas où se poser et la mise à jour reste bloquée.
+podAntiAffinity: soft
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

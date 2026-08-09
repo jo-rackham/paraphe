@@ -1,0 +1,50 @@
+# --- Ne JAMAIS publier -------------------------------------------------
+# Le travail de l'équipe : comptes, notes nominatives sur des élus, qui a dit
+# quoi à qui. C'est la seule donnée réellement sensible du projet.
+*.sqlite*
+*.db
+*.sql
+*.dump
+
+# Valeurs réelles de la campagne et secrets. Les fichiers versionnés
+# (.env.exemple, config/campagne.toml) sont des gabarits : les vraies
+# valeurs vont dans ces fichiers-ci, jamais dans les gabarits.
+.env
+.env.*
+!.env.exemple
+# direnv : ni suivi ni ignoré jusqu'ici, donc emporté par un `git add -A`
+.envrc
+config/campagne.local.toml
+
+# --- Données et sorties : reconstructibles, pas versionnées -------------
+# `task all` les régénère depuis les sources ouvertes. Les versionner
+# publierait un fichier de publipostage de 34 800 adresses prêt à l'emploi,
+# figé et vite périmé — l'outil qui le construit vaut mieux que le fichier.
+data/
+out/
+
+# --- Interface et outils (espace de travail pnpm) ------------------------
+node_modules/
+web/dist/
+# listes publiées : régénérées par `task web-donnees` et par la CI Pages
+web/public/donnees/*.csv
+
+# parcours complets : base jetable, binaire compilé, traces d'échec
+e2e/.tmp/
+e2e/.results/
+
+# --- Divers -------------------------------------------------------------
+# artefacts d'outils (navigateur de test, verrou uv)
+.playwright-mcp/
+uv.lock
+.claude/
+.gh-*/
+.repos/
+__pycache__/
+*.pyc
+.venv/
+.devbox/
+.pytest_cache/
+# binaires compilés de l'API
+api/paraphe-api
+api/api

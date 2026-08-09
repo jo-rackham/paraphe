@@ -1,0 +1,127 @@
+{
+  "comment": [
+    "Cases the two implementations of the unfilled-template guard must",
+    "decide identically: unfilledKeys() in noyau/messages.ts, which arms",
+    "the banner the volunteer sees, and UnfilledKeys() in api/org.go, which",
+    "arms the server's refusal. Two implementations means the weaker one is",
+    "the one that counts, and a value let through reaches mayors verbatim.",
+    "",
+    "Read by noyau/messages.test.ts and by api/config_test.go. Add a case",
+    "here and both languages must answer for it.",
+    "",
+    "`value` is what the coordination typed into the campaign form;",
+    "`unfilled` is true when it must NOT be allowed to reach a mayor."
+  ],
+  "cases": [
+    {
+      "value": "équipe de campagne de Camille Durand",
+      "unfilled": false,
+      "why": "a real, filled value"
+    },
+    {
+      "value": "Camille Durand",
+      "unfilled": false,
+      "why": "a real name"
+    },
+    {
+      "value": "",
+      "unfilled": true,
+      "why": "empty"
+    },
+    {
+      "value": "   ",
+      "unfilled": true,
+      "why": "blank"
+    },
+    {
+      "value": "Prénom NOM",
+      "unfilled": true,
+      "why": "the shipped template"
+    },
+    {
+      "value": "prénom nom",
+      "unfilled": true,
+      "why": "the template, lowercased"
+    },
+    {
+      "value": " Prénom NOM ",
+      "unfilled": true,
+      "why": "the template, padded"
+    },
+    {
+      "value": "Prénom  NOM",
+      "unfilled": true,
+      "why": "the template with a double space — a copy-paste artefact"
+    },
+    {
+      "value": "Prénom​ NOM",
+      "unfilled": true,
+      "why": "an invisible U+200B inside the template value"
+    },
+    {
+      "value": "Prénom NOM",
+      "unfilled": true,
+      "why": "a non-breaking space inside the template value — Go's \\s did not fold it"
+    },
+    {
+      "value": "Prénom NOM",
+      "unfilled": true,
+      "why": "a narrow no-break space, what a French keyboard produces before punctuation"
+    },
+    {
+      "value": "06 00 00 00 00",
+      "unfilled": true,
+      "why": "the template phone number typed with non-breaking spaces"
+    },
+    {
+      "value": "PrénomNOM",
+      "unfilled": true,
+      "why": "U+0085 — JavaScript's \\s left it alone while Go folded it"
+    },
+    {
+      "value": "Ville",
+      "unfilled": true,
+      "why": "a trailing U+0085, which trim() folds and \\s does not"
+    },
+    {
+      "value": "Prénom NOM",
+      "unfilled": true,
+      "why": "the template with a decomposed é, as pasted from a PDF"
+    },
+    {
+      "value": "candidat(e) [courant / démarche], [profession]",
+      "unfilled": true,
+      "why": "square-bracket placeholder"
+    },
+    {
+      "value": "équipe de campagne de {candidat}",
+      "unfilled": true,
+      "why": "curly placeholder — the natural thing to write, and it went out verbatim"
+    },
+    {
+      "value": "candidat <courant>, <profession>",
+      "unfilled": true,
+      "why": "angle-bracket placeholder"
+    },
+    {
+      "value": "06 00 00 00 00",
+      "unfilled": true,
+      "why": "the template phone"
+    },
+    {
+      "value": "contact@exemple.fr",
+      "unfilled": true,
+      "why": "the template email"
+    },
+    {
+      "value": "https://exemple.fr",
+      "unfilled": true,
+      "why": "the template site"
+    },
+    {
+      "value": "Ville",
+      "unfilled": true,
+      "why": "the template city"
+    }
+  ]
+}

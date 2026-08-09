@@ -1,0 +1,15 @@
+apiVersion: v2
+name: paraphe
+description: Outillage de recherche de parrainages d'élus — app d'équipe, données publiques
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/jo-rackham/paraphe
+sources:
+  - https://github.com/jo-rackham/paraphe
+keywords:
+  - elections
+  - parrainages
+  - open-data
+maintainers:
+  - name: Jo Rackham

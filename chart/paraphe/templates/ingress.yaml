@@ -1,0 +1,47 @@
+{{- if .Values.ingress.enabled }}
+{{- $hotes := list .Values.ingress.host }}
+{{- if .Values.instance.baseDomain }}
+{{- /*
+  Multi-campagnes : un hôte GÉNÉRIQUE sert toutes les campagnes. Sans lui, il
+  faudrait modifier l'Ingress à chaque campagne ouverte — donc donner à
+  l'application un accès en écriture à l'API Kubernetes, ou faire dépendre
+  l'ouverture d'une intervention manuelle. Le générique DNS ne couvre qu'un
+  niveau, ce que la résolution applique aussi (cf. PerimetreDeHote).
+*/}}
+{{- $hotes = append $hotes (printf "*.%s" .Values.instance.baseDomain) }}
+{{- end }}
+{{- $hotes = concat $hotes .Values.ingress.hotesSupplementaires | uniq }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "paraphe.nomComplet" . }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $hotes }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" (include "paraphe.nomComplet" .)) }}
+  {{- end }}
+  rules:
+    {{- range $hotes }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: {{ $.Values.ingress.path }}
+            pathType: {{ $.Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "paraphe.nomComplet" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Same mark as <Hexagone/> in src/common.tsx, on the dark header tile:
+       the yellow stroke and the white bar need it on light tab bars.
+       Slightly thicker stroke and taller bars to stay legible at 16x16. -->
+  <rect width="32" height="32" rx="6" fill="#141210"/>
+  <g transform="translate(3 1.5)">
+    <path d="M13 1 24.3 7.5v13L13 27 1.7 20.5v-13z" fill="none"
+      stroke="#ffd400" stroke-width="2.6" stroke-linejoin="round"/>
+    <rect x="7" y="11.7" width="4" height="4.6" fill="#000091"/>
+    <rect x="11" y="11.7" width="4" height="4.6" fill="#ffffff"/>
+    <rect x="15" y="11.7" width="4" height="4.6" fill="#e1000f"/>
+  </g>
+</svg>

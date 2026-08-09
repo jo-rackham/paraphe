@@ -1,0 +1,25 @@
+Listes publiées avec l'application « paraphe ».
+
+Origine, toutes ouvertes :
+  - parrainages publiés par le Conseil constitutionnel (2017, 2022) —
+    domaine public ;
+  - Répertoire national des élus, fichier des maires (ministère de
+    l'Intérieur) — Licence Ouverte / Etalab 2.0 ;
+  - annuaire de l'administration (DILA, api-lannuaire.service-public.fr) —
+    coordonnées officielles des mairies.
+
+Ces fichiers sont RECONSTRUCTIBLES : `task all` les régénère depuis les
+sources, et cette copie vieillit (le RNE et l'annuaire évoluent en continu).
+Pour une campagne réelle, régénérez-les.
+
+Ce qu'ils contiennent : des coordonnées de MAIRIES, publiées pour être
+utilisées, et le nom d'élus dans l'exercice de leur mandat. Aucune donnée
+privée, aucune note d'équipe.
+
+Ce qu'ils ne sont pas : un fichier de prospection commerciale. Un élu qui
+demande à ne plus être contacté doit l'être immédiatement et définitivement.
+
+01_maires_cibles_prioritaires.csv  maires en poste ayant déjà parrainé une
+                                   candidature peu médiatisée
+04_base_complete.csv               tous les maires de France, avec le rang
+                                   qui commande le message

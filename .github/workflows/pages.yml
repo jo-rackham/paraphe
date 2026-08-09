@@ -1,0 +1,113 @@
+name: Pages
+
+# Publishes the browser version on GitHub Pages, with the two lists built
+# from the open sources: the priority one (loaded by default) and the full
+# base (on demand). No team data is published — notes and statuses live in
+# each person's browser.
+on:
+  push:
+    branches: [main]
+    # No `paths:` filter, deliberately. This repository publishes ONE
+    # amended commit, force-pushed: the two heads are unrelated roots, so
+    # GitHub has no diff to filter on and the workflow never fired — the
+    # published page kept serving the previous interface, silently, while
+    # CI was green. A minute of build is worth less than a stale
+    # publication nobody is told about.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache des sources ouvertes
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: sources-${{ github.run_id }}
+          restore-keys: sources-
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Construire les listes depuis les sources ouvertes
+        working-directory: .
+        run: |
+          bash outils/telecharger.sh
+          node outils/build.ts
+          mkdir -p web/public/donnees
+          cp out/01_maires_cibles_prioritaires.csv \
+             out/04_base_complete.csv web/public/donnees/
+          ls -la web/public/donnees/
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Invariants sur les listes qu'on publie
+        # donnees.yml les joue aussi, mais c'est un workflow SÉPARÉ : le
+        # voir rouge n'empêche pas celui-ci de déployer. Ce qu'on publie
+        # doit passer les invariants avant de partir, pas en parallèle.
+        working-directory: outils
+        run: pnpm exec vitest run
+        env:
+          PARAPHE_EXPECTED_OUTPUTS: "1"
+
+      - name: Tests du moteur de messages
+        # the central invariant: never claim an endorsement from someone
+        # who made none
+        run: pnpm test
+
+      - name: Construire
+        run: pnpm build
+        env:
+          PARAPHE_BASE_PATH: /${{ github.event.repository.name }}/
+          # Le domaine d'instance est cuit à la compilation (jamais lu dans
+          # le lien : un ?org= forgé ne peut pas désigner un autre hôte).
+          # Variable de dépôt absente = chaîne vide = ?org= inerte, build
+          # identique. La définir quand une instance héberge des campagnes,
+          # et le lien promis par le GUIDE marche aussi sur Pages.
+          PARAPHE_BASE_DOMAIN: ${{ vars.PARAPHE_BASE_DOMAIN }}
+
+      - name: Vérifier ce qui est publié
+        run: |
+          # the lists are published deliberately; what must NEVER be is
+          # the team's work (nominative notes, accounts)
+          for interdit in data.sqlite .env campagne.local.toml suivi; do
+            if find dist -iname "*$interdit*" | grep -q .; then
+              echo "fichier interdit publié : $interdit"; exit 1
+            fi
+          done
+          test -s dist/donnees/01_maires_cibles_prioritaires.csv
+          test -s dist/donnees/04_base_complete.csv
+          test -s dist/robots.txt
+          echo "listes publiées, aucune donnée d'équipe dans le bundle"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deployer:
+    needs: construire
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - id: deploiement
+        uses: actions/deploy-pages@v4

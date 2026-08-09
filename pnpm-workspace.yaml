@@ -1,0 +1,8 @@
+packages:
+  - web
+  - outils
+
+# pnpm 11 bloque les scripts d'installation par défaut ; esbuild en a besoin
+# pour poser son binaire, et Vite ne démarre pas sans lui.
+allowBuilds:
+  esbuild: true

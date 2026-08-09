@@ -1,0 +1,42 @@
+Déployé : {{ include "paraphe.nomComplet" . }} ({{ .Values.replicaCount }} instance(s))
+
+{{- if .Values.postgres.cnpg.enabled }}
+
+Base : cluster CloudNativePG « {{ include "paraphe.nomPostgres" . }} »
+({{ .Values.postgres.cnpg.instances }} instances). Suivre la bascule :
+
+  kubectl get cluster {{ include "paraphe.nomPostgres" . }} -n {{ .Release.Namespace }} -w
+{{- if not .Values.postgres.cnpg.backup.enabled }}
+
+  ⚠ Aucune sauvegarde configurée. Le travail de l'équipe (comptes, statuts,
+    notes sur des élus) n'existe qu'ici. Renseignez
+    postgres.cnpg.backup.* avant d'ouvrir l'accès aux bénévoles.
+{{- end }}
+{{- end }}
+
+Se connecter :
+{{- if .Values.ingress.enabled }}
+
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "paraphe.nomComplet" . }} 8047:{{ .Values.service.port }}
+  puis http://127.0.0.1:8047
+{{- end }}
+
+Compte de coordination : {{ .Values.admin.email }}
+(mot de passe : celui passé dans secrets.adminPassword). C'est lui qui crée
+ensuite les équipes locales et leurs référents, depuis l'onglet « Équipe ».
+
+{{- if not .Values.ingress.tls.enabled }}
+
+⚠ TLS non activé : les mots de passe circuleraient en clair. N'ouvrez pas
+  l'accès aux bénévoles avant d'avoir mis un Ingress en HTTPS
+  (ingress.enabled=true, ingress.tls.enabled=true).
+{{- end }}
+{{- if .Values.campaign.candidate | regexMatch "Prénom|\\[" }}
+
+⚠ La campagne n'est pas configurée (valeurs de gabarit). L'application
+  affiche un bandeau d'avertissement et refuse le publipostage de masse
+  tant que campagne.* n'est pas rempli.
+{{- end }}

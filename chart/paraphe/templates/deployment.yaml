@@ -1,0 +1,200 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paraphe.nomComplet" . }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: {{- include "paraphe.selecteur" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paraphe.selecteur" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s|%s|%s|%s" (include (print $.Template.BasePath "/secret.yaml") .)
+            (.Values.secrets.existingSecret | default "") (toJson .Values.campaign)
+            (toJson .Values.instance) | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if eq .Values.podAntiAffinity "soft" }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "paraphe.selecteur" . | nindent 20 }}
+      {{- else if eq .Values.podAntiAffinity "hard" }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {{- include "paraphe.selecteur" . | nindent 18 }}
+      {{- else }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+        # without this wait, the instances restart in a loop while the
+        # operator elects a primary — noisy and unreadable
+        - name: attendre-la-base
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: PARAPHE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.secretBase" . }}
+                  key: {{ include "paraphe.cleBase" . }}
+          # same binary as the application: the connection is tested by
+          # the code that will use it, not by an approximate client
+          args: ["-attendre-base", "120s"]
+      containers:
+        - name: paraphe
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8047
+          env:
+            - name: PARAPHE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.secretBase" . }}
+                  key: {{ include "paraphe.cleBase" . }}
+            {{/*
+              Emitted ONLY when set. A PARAPHE_* the operator gives is an
+              EXPLICIT override, and the application reapplies those over
+              what coordination edited in "Mon équipe" — so shipping the
+              nine template values here made every pod restart wipe the
+              campaign, re-arm the "not configured" banner and put the
+              batch size back to its default, in silence. Leave them empty
+              and the campaign lives in the database, where it is edited.
+            */}}
+            {{- if .Values.campaign.candidate }}
+            - name: PARAPHE_CANDIDATE
+              value: {{ .Values.campaign.candidate | quote }}
+            {{- end }}
+            {{- if .Values.campaign.candidateDescription }}
+            - name: PARAPHE_CANDIDATE_DESCRIPTION
+              value: {{ .Values.campaign.candidateDescription | quote }}
+            {{- end }}
+            {{- if .Values.campaign.candidateDescriptionLong }}
+            - name: PARAPHE_CANDIDATE_DESCRIPTION_LONG
+              value: {{ .Values.campaign.candidateDescriptionLong | quote }}
+            {{- end }}
+            {{- if .Values.campaign.signatory }}
+            - name: PARAPHE_SIGNATORY
+              value: {{ .Values.campaign.signatory | quote }}
+            {{- end }}
+            {{- if .Values.campaign.signatoryRole }}
+            - name: PARAPHE_SIGNATORY_ROLE
+              value: {{ .Values.campaign.signatoryRole | quote }}
+            {{- end }}
+            {{- if .Values.campaign.contactPhone }}
+            - name: PARAPHE_CONTACT_PHONE
+              value: {{ .Values.campaign.contactPhone | quote }}
+            {{- end }}
+            {{- if .Values.campaign.contactEmail }}
+            - name: PARAPHE_CONTACT_EMAIL
+              value: {{ .Values.campaign.contactEmail | quote }}
+            {{- end }}
+            {{- if .Values.campaign.site }}
+            - name: PARAPHE_SITE
+              value: {{ .Values.campaign.site | quote }}
+            {{- end }}
+            {{- if .Values.campaign.sendingCity }}
+            - name: PARAPHE_SENDING_CITY
+              value: {{ .Values.campaign.sendingCity | quote }}
+            {{- end }}
+            {{- if .Values.campaign.batchSize }}
+            - name: PARAPHE_BATCH_SIZE
+              value: {{ .Values.campaign.batchSize | quote }}
+            {{- end }}
+            - name: PARAPHE_ADMIN_EMAIL
+              value: {{ .Values.admin.email | quote }}
+            - name: PARAPHE_ADMIN_NAME
+              value: {{ .Values.admin.name | quote }}
+            - name: PARAPHE_ORG_SLUG
+              value: {{ .Values.instance.orgSlug | quote }}
+            {{- if .Values.instance.baseDomain }}
+            - name: PARAPHE_BASE_DOMAIN
+              value: {{ .Values.instance.baseDomain | quote }}
+            - name: PARAPHE_INSTANCE_ADMIN_EMAIL
+              value: {{ .Values.instance.admin.email | quote }}
+            - name: PARAPHE_INSTANCE_ADMIN_NAME
+              value: {{ .Values.instance.admin.name | quote }}
+            - name: PARAPHE_INSTANCE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_INSTANCE_ADMIN_PASSWORD
+            {{- end }}
+            - name: PARAPHE_SOURCE_URL
+              value: {{ .Values.sourceUrl | quote }}
+            {{- if .Values.ingress.tls.enabled }}
+            - name: PARAPHE_HTTPS
+              value: "1"
+            {{- end }}
+            - name: PARAPHE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_ADMIN_PASSWORD
+            - name: PARAPHE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_SECRET_KEY
+                  optional: true
+          volumeMounts:
+            # read-only root (see securityContext): a writable /tmp is
+            # still needed for temporary files
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            periodSeconds: 2
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              # /health and not the readiness probe: that one queries the
+              # database, and killing a pod because the database hiccupped
+              # turns 30 s of outage into CrashLoopBackOff
+              path: {{ .Values.probes.livenessPath }}
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

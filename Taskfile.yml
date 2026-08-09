@@ -1,0 +1,294 @@
+version: '3'
+
+tasks:
+  default:
+    silent: true
+    cmds: [task --list]
+
+  download:
+    desc: Télécharge/rafraîchit les 4 sources (parrainages 2017+2022, RNE maires, annuaire mairies)
+    cmds: [bash outils/telecharger.sh]
+
+  build:
+    desc: Croise les sources et produit out/ (cibles, anciens, non-appariés, rapport)
+    cmds: [node outils/build.ts]
+
+  all:
+    desc: download + build
+    cmds:
+      - task: download
+      - task: build
+
+  messages:
+    desc: Publipostage en masse -> out/messages/ (emails.csv, courriers.html)
+    cmds: [node outils/messages-masse.ts]
+
+  api:
+    desc: Lance l'API d'équipe (Go) sur http://127.0.0.1:8047
+    dir: api
+    env:
+      # the module lives in api/; in a container the default paths
+      # (config/, out/, web/dist) are relative to the WORKDIR and suffice
+      PARAPHE_CONFIG_DIR: '{{.ROOT_DIR}}/config'
+      PARAPHE_CSV: '{{.ROOT_DIR}}/out/04_base_complete.csv'
+      PARAPHE_WEB_DIR: '{{.ROOT_DIR}}/web/dist'
+    cmds: [go run .]
+
+  api-build:
+    desc: Compile le binaire de l'API dans api/paraphe-api
+    dir: api
+    cmds: [go build -o paraphe-api .]
+
+  deploy:
+    desc: Construit et (re)lance l'app en Docker (cf. DEPLOIEMENT.md)
+    # The password is required to START, never to stop or inspect: compose
+    # interpolates the whole file for every command, so making it mandatory
+    # there broke `docker compose down`.
+    cmds:
+      - |
+        set -eu
+        pass="${PARAPHE_PG_PASSWORD:-}"
+        if [ -z "$pass" ] && [ -f .env ]; then
+          pass=$(grep -E '^PARAPHE_PG_PASSWORD=.+' .env | tail -1 | cut -d= -f2- || true)
+        fi
+        if [ -z "$pass" ]; then
+          echo "PARAPHE_PG_PASSWORD est vide." >&2
+          echo "Sur un VPS à IP publique, un mot de passe deviné livre les notes" >&2
+          echo "nominatives de l'équipe. Copiez .env.exemple en .env et remplissez-le :" >&2
+          echo "  cp .env.exemple .env && sed -i \"s|^PARAPHE_PG_PASSWORD=.*|PARAPHE_PG_PASSWORD=\$(openssl rand -hex 24)|\" .env" >&2
+          exit 1
+        fi
+      - docker compose up -d --build
+
+  stop:
+    desc: Arrête l'app en Docker (les données restent dans le volume)
+    cmds: [docker compose down]
+
+  release:
+    desc: 'Publie une version — ex: task release -- 0.2.0, ou patch/minor/major'
+    # release-it writes the version into package.json, web/package.json and
+    # Chart.yaml, then tags. release.yml refuses a tag that disagrees with
+    # package.json, and outils/version.test.ts refuses files that disagree
+    # among themselves: the tag is the only version there is.
+    cmds:
+      - pnpm exec release-it {{.CLI_ARGS}}
+
+  backup:
+    desc: Sauvegarde la base de travail de l'équipe (dump PostgreSQL)
+    cmds:
+      - docker compose exec -T postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql
+      - echo "écrit dans backup-$(date +%F).sql"
+
+  gh:
+    desc: 'gh avec des identifiants isolés au dépôt — ex: task gh -- repo view'
+    cmds:
+      - GH_CONFIG_DIR="{{.ROOT_DIR}}/.gh-local" gh {{.CLI_ARGS}}
+
+  gh-login:
+    desc: Autorise gh pour ce dépôt uniquement (identifiants isolés) — interactif
+    interactive: true
+    cmds:
+      - GH_CONFIG_DIR="{{.ROOT_DIR}}/.gh-local" gh auth login --hostname github.com --git-protocol https --web
+
+  test:
+    desc: Toute la suite — outils et noyau (TS), API (Go), interface (TS)
+    cmds:
+      - task: test-outils
+      - task: test-api
+      - task: test-web
+
+  test-outils:
+    desc: Croisement, publipostage, fidélité du port de difflib
+    dir: outils
+    cmds: [pnpm exec tsc --noEmit, pnpm exec vitest run]
+
+  test-api:
+    desc: Tests de l'API (l'intégration se saute sans PARAPHE_TEST_DATABASE_URL)
+    dir: api
+    cmds:
+      # quoted: the ':' in the message would make YAML read the line as a mapping
+      - 'gofmt -l . | (! grep .) || (echo "gofmt a des fichiers à reformater"; exit 1)'
+      - go vet ./...
+      - go test ./...
+
+  test-web:
+    desc: Types et invariants du moteur de messages
+    dir: web
+    cmds: [pnpm install, pnpm exec tsc --noEmit, pnpm test]
+
+  e2e:
+    desc: Parcours complets au navigateur (vraie base, vraie API, vraie interface)
+    # Outside `task test`: the suite builds the interface, compiles the API
+    # and creates a throwaway database. It is slow, and that is what makes
+    # it useful.
+    cmds:
+      - pnpm install
+      - pnpm exec playwright install --with-deps chromium
+      - pnpm exec playwright test --config e2e/playwright.config.ts
+
+  purge-notes:
+    desc: Efface les notes et l'historique de contact (fin de campagne)
+    prompt: Effacer DÉFINITIVEMENT toutes les notes de l'équipe ?
+    cmds:
+      # `assignments` carries all the contact state, `mayors` is only a
+      # read-only public list: truncating the former is enough.
+      - docker compose exec -T postgres psql -U paraphe -c "TRUNCATE notes, assignments;"
+
+  db:
+    desc: Démarre PostgreSQL en local (pour `task api` hors Docker)
+    deps: [db-ready]
+    cmds:
+      # the DSN printed is the one db-ready actually started, no .env in
+      # sight; with a .env the password is yours and this line would lie
+      - 'if [ -f .env ]; then echo "base démarrée — DSN selon votre .env"; else echo "PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe"; fi'
+
+  web:
+    desc: Interface en développement (http://127.0.0.1:5180), /api proxyfié vers `task api`
+    dir: web
+    env:
+      # same base as production, where the API serves the interface at the
+      # root: otherwise the dev proxy does not recognise /api
+      PARAPHE_BASE_PATH: /
+    cmds: [pnpm install, pnpm dev --port 5180]
+
+  web-build:
+    desc: Construit l'interface dans web/dist (servie par l'API)
+    dir: web
+    env:
+      PARAPHE_BASE_PATH: '{{.PARAPHE_BASE_PATH | default "/"}}'
+    cmds: [pnpm install, pnpm test, pnpm build]
+
+  try-browser:
+    desc: 'Essai local — version navigateur seule (http://127.0.0.1:5180)'
+    # Serves the BUILT artefact as a plain directory, exactly as GitHub
+    # Pages does — not the dev server, whose /api proxy would let a running
+    # API turn a "browser only" trial into team mode without a word.
+    vars:
+      PORT: '{{.PARAPHE_PORT | default "5180"}}'
+    # NOT deps: Task runs those in parallel, and vite copies web/public at
+    # BUILD time — the trial served an application with no lists at all, or
+    # a base truncated mid-copy, depending on the machine.
+    cmds:
+      - task: web-donnees
+      - task: web-build
+      - task: port-free
+        vars: { PORT: '{{.PORT}}' }
+      - 'echo "→ version navigateur sur http://127.0.0.1:{{.PORT}} — aucune base, aucun serveur"'
+      - 'echo "  tout reste dans ce navigateur. Ctrl-C pour arrêter."'
+      - node e2e/static-server.mjs web/dist {{.PORT}}
+
+  try-team:
+    desc: 'Essai local — version équipe avec base (http://127.0.0.1:8047)'
+    vars:
+      PORT: '{{.PARAPHE_PORT | default "8047"}}'
+    # One shot: PostgreSQL, the built interface, then the API with a
+    # bootstrap account. Loopback only, and the password is a trial value
+    # published in this file — override PARAPHE_ADMIN_PASSWORD for
+    # anything that is not a local trial.
+    dir: api
+    deps: [db-ready, web-build]
+    env:
+      PARAPHE_HOST: 127.0.0.1
+      PARAPHE_CONFIG_DIR: '{{.ROOT_DIR}}/config'
+      PARAPHE_CSV: '{{.ROOT_DIR}}/out/04_base_complete.csv'
+      PARAPHE_WEB_DIR: '{{.ROOT_DIR}}/web/dist'
+      PARAPHE_DATABASE_URL: '{{.PARAPHE_DATABASE_URL | default "postgresql://paraphe_essai:paraphe_essai@127.0.0.1:5432/paraphe_essai"}}'
+      PARAPHE_ADMIN_EMAIL: '{{.PARAPHE_ADMIN_EMAIL | default "coordination@essai.test"}}'
+      PARAPHE_ADMIN_PASSWORD: '{{.PARAPHE_ADMIN_PASSWORD | default "essai-local-uniquement"}}'
+    cmds:
+      - task: port-free
+        vars: { PORT: '{{.PORT}}' }
+      - 'echo "→ version équipe sur http://127.0.0.1:{{.PORT}}"'
+      - 'echo "  connexion : coordination@essai.test / essai-local-uniquement"'
+      - 'echo "  (surchargeables par PARAPHE_ADMIN_EMAIL, _PASSWORD, PARAPHE_PORT)"'
+      - go run .
+
+  try-instance:
+    desc: 'Essai local — instance multi-campagnes (apex + un sous-domaine)'
+    vars:
+      PORT: '{{.PARAPHE_PORT | default "8047"}}'
+    # *.localhost resolves to the loopback in every browser, with no DNS:
+    # this is the only way to exercise one campaign per subdomain locally.
+    dir: api
+    deps: [db-ready, web-build]
+    env:
+      PARAPHE_HOST: 127.0.0.1
+      PARAPHE_CONFIG_DIR: '{{.ROOT_DIR}}/config'
+      PARAPHE_CSV: '{{.ROOT_DIR}}/out/04_base_complete.csv'
+      PARAPHE_WEB_DIR: '{{.ROOT_DIR}}/web/dist'
+      PARAPHE_DATABASE_URL: '{{.PARAPHE_DATABASE_URL | default "postgresql://paraphe_essai:paraphe_essai@127.0.0.1:5432/paraphe_essai"}}'
+      PARAPHE_BASE_DOMAIN: localhost
+      PARAPHE_ORG_SLUG: campagne
+      PARAPHE_ADMIN_EMAIL: '{{.PARAPHE_ADMIN_EMAIL | default "coordination@essai.test"}}'
+      PARAPHE_ADMIN_PASSWORD: '{{.PARAPHE_ADMIN_PASSWORD | default "essai-local-uniquement"}}'
+      PARAPHE_INSTANCE_ADMIN_EMAIL: '{{.PARAPHE_INSTANCE_ADMIN_EMAIL | default "administration@essai.test"}}'
+      PARAPHE_INSTANCE_ADMIN_PASSWORD: '{{.PARAPHE_INSTANCE_ADMIN_PASSWORD | default "essai-local-instance"}}'
+    cmds:
+      - task: port-free
+        vars: { PORT: '{{.PORT}}' }
+      - 'echo "→ accueil public et modération  http://localhost:{{.PORT}}"'
+      - 'echo "→ la campagne d''amorçage        http://campagne.localhost:{{.PORT}}"'
+      - 'echo "  administration : administration@essai.test / essai-local-instance"'
+      - 'echo "  coordination   : coordination@essai.test / essai-local-uniquement"'
+      - go run .
+
+  port-free:
+    # Another process on the port is the most ordinary way for a local
+    # trial to fail, and `go run` says only "address already in use" from
+    # inside a task whose output is already three builds long.
+    internal: true
+    cmds:
+      - |
+        if ss -ltn 2>/dev/null | grep -q ":{{.PORT}} "; then
+          echo "le port {{.PORT}} est déjà pris — arrêtez ce qui l'occupe," >&2
+          echo "ou relancez avec PARAPHE_PORT=8147 task <la-tâche>" >&2
+          exit 1
+        fi
+
+  db-ready:
+    desc: 'PostgreSQL local, et attend qu''il réponde'
+    # Three cases, and all three happen. A PostgreSQL already listening on
+    # 5432 (another project, a system install) is reused rather than fought
+    # over — the container would fail to bind and the whole trial with it.
+    # Otherwise the compose file is used, and it REQUIRES
+    # PARAPHE_PG_PASSWORD: on a public-IP VPS a guessed database password
+    # leaks the team's nominative notes, so that strictness is deliberate —
+    # which also means `docker compose` fails on a fresh clone, where there
+    # is no .env. For a local trial on loopback, a known password is the
+    # right trade, and an existing .env still wins.
+    cmds:
+      - |
+        if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+          echo "PostgreSQL répond déjà sur 5432 — réutilisé tel quel"
+        elif [ -f .env ]; then
+          docker compose up -d --wait postgres
+        else
+          PARAPHE_PG_PASSWORD=paraphe docker compose up -d --wait postgres
+        fi
+        # A trial gets its OWN database, never the one the server already
+        # holds: whatever answers on 5432 may belong to another project, and
+        # creating a schema in it would be squatting someone else's data.
+        psql "${PARAPHE_TEST_ADMIN_DSN:-postgresql://paraphe:paraphe@127.0.0.1:5432/postgres}" \
+          -tAc "SELECT 1 FROM pg_database WHERE datname='paraphe_essai'" \
+          | grep -q 1 || psql "${PARAPHE_TEST_ADMIN_DSN:-postgresql://paraphe:paraphe@127.0.0.1:5432/postgres}" \
+          -c "CREATE DATABASE paraphe_essai"
+        # An UNPRIVILEGED role, because a superuser walks through the walls
+        # between campaigns: the application refuses to start on one in
+        # multi-campaign mode, so try-instance could not work at all. The
+        # official postgres image makes POSTGRES_USER a superuser.
+        ADMIN="${PARAPHE_TEST_ADMIN_DSN:-postgresql://paraphe:paraphe@127.0.0.1:5432/postgres}"
+        psql "$ADMIN" -tAc "SELECT 1 FROM pg_roles WHERE rolname='paraphe_essai'" \
+          | grep -q 1 || psql "$ADMIN" -c \
+          "CREATE ROLE paraphe_essai LOGIN PASSWORD 'paraphe_essai' NOSUPERUSER NOBYPASSRLS"
+        psql "$ADMIN" -c "ALTER DATABASE paraphe_essai OWNER TO paraphe_essai" >/dev/null
+        psql "${ADMIN%/postgres}/paraphe_essai" -c \
+          "GRANT CREATE, USAGE ON SCHEMA public TO paraphe_essai" >/dev/null
+        echo "base d'essai : paraphe_essai (rôle sans privilège)"
+
+  web-donnees:
+    desc: Copie les listes construites vers la version navigateur
+    deps: [build]
+    cmds:
+      - mkdir -p web/public/donnees
+      - cp out/01_maires_cibles_prioritaires.csv out/04_base_complete.csv web/public/donnees/
+      - echo "listes copiées dans web/public/donnees/"

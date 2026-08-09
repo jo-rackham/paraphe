@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Campaign key -> PARAPHE_* environment variable, read by the tests of BOTH",
+    "languages. The keys stay French: they name campagne.toml entries and the",
+    "{placeholders} a campaign team edits by hand. The variables are English:",
+    "they are read by whoever operates the service.",
+    "",
+    "The mapping cannot be derived by uppercasing the key any more, and the two",
+    "implementations (outils/config.ts, api/config.go) each hold their own copy.",
+    "Adding a field here obliges both to answer, exactly like gabarit-cases.json."
+  ],
+  "candidat": "PARAPHE_CANDIDATE",
+  "candidat_description": "PARAPHE_CANDIDATE_DESCRIPTION",
+  "candidat_description_longue": "PARAPHE_CANDIDATE_DESCRIPTION_LONG",
+  "signataire": "PARAPHE_SIGNATORY",
+  "signataire_qualite": "PARAPHE_SIGNATORY_ROLE",
+  "contact_tel": "PARAPHE_CONTACT_PHONE",
+  "contact_email": "PARAPHE_CONTACT_EMAIL",
+  "site": "PARAPHE_SITE",
+  "ville_envoi": "PARAPHE_SENDING_CITY"
+}

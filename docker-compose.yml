@@ -1,0 +1,61 @@
+# Deployment of ONE campaign on a simple server.
+#
+# To host several on the same instance (PARAPHE_BASE_DOMAIN), an
+# UNPRIVILEGED PostgreSQL role is required: POSTGRES_USER is a superuser
+# here, and a superuser walks through the walls between campaigns. The
+# application then refuses to start, saying what to create. The Kubernetes
+# chart does not have this problem: CloudNativePG's application role is not
+# privileged.
+#
+# Real values live in .env (git-ignored) — see .env.exemple. Nothing
+# sensitive may be written in this file, it is versioned.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: paraphe
+      # Mandatory: on a VPS, a database with a guessed password is a leak of
+      # the team's nominative notes. The check is NOT `:?` here — compose
+      # interpolates this file for every command, so `docker compose down`
+      # refused to stop a running stack for want of a password it did not
+      # need. Left empty, the postgres image refuses to initialise and says
+      # so; `task deploy` says it earlier, and better.
+      POSTGRES_PASSWORD: ${PARAPHE_PG_PASSWORD}
+      POSTGRES_DB: paraphe
+    ports:
+      # loopback ONLY: `docker compose up` gets run on VPSes with a public
+      # IP, and "5432:5432" would open the database to the world there
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - paraphe-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paraphe"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  paraphe:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # here and not in .env: `environment` wins over `env_file`, so
+      # setting it in .env would have no effect and nobody would see why
+      PARAPHE_DATABASE_URL: postgresql://paraphe:${PARAPHE_PG_PASSWORD}@postgres:5432/paraphe
+    ports:
+      # loopback ONLY, like the database: DEPLOIEMENT.md prescribes this
+      # compose on a public-IP VPS behind a TLS proxy, and "8047:8047"
+      # would expose the sign-in form in the clear there, bypassing the
+      # certificate.
+      - "127.0.0.1:8047:8047"
+    env_file:
+      # absent = the app starts and says clearly what is missing, rather
+      # than failing `docker compose config`
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+volumes:
+  paraphe-pg:

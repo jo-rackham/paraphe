@@ -1,0 +1,9 @@
+# Les listes publiées ici viennent de sources ouvertes (Conseil
+# constitutionnel, Répertoire national des élus, annuaire de
+# l'administration) et servent une campagne de sollicitation d'élus.
+#
+# Elles ne sont pas destinées à être moissonnées : l'indexation d'un fichier
+# de 34 826 adresses de mairies en ferait une cible pour le démarchage
+# commercial, ce qui nuirait aux élus autant qu'à la démarche.
+User-agent: *
+Disallow: /donnees/
