@@ -3,8 +3,10 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"go/ast"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -47,7 +49,7 @@ var (
 	// campaign" that read as a filter.
 	orgPredicate = regexp.MustCompile(
 		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID(?:::[A-Z]+)?\s*=\s*` +
-			`(\$SUB|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
+			`(\$SUB\d+|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
 	// Predicates that are always true, whatever else the statement says.
 	neutralised = regexp.MustCompile(`\bOR\s+(TRUE|1\s*=\s*1)\b`)
 	// A statement whose TABLE is a format verb: which table it reads cannot
@@ -145,10 +147,38 @@ func levels(sql string) []string {
 			break
 		}
 		out = append(out, sql[m[2]:m[3]])
-		sql = sql[:m[0]] + " $SUB " + sql[m[1]:]
+		sql = sql[:m[0]] + fmt.Sprintf(" $SUB%d ", len(out)-1) + sql[m[1]:]
 	}
 	return append(out, sql)
 }
+
+// bounded: does this level carry a value from outside the statement? A
+// parenthesised group counted as a bounded right-hand side whatever it held,
+// so `WHERE org_id = (org_id)` — a tautology — and `WHERE org_id = (SELECT
+// 1)` — a constant naming whichever campaign is number one — both read as
+// filters. A group is bounding only if something in it is.
+func bounded(level string) bool {
+	if boundValue.MatchString(level) {
+		return true
+	}
+	// a group holding another group: follow it
+	for _, m := range subRef.FindAllStringSubmatch(level, -1) {
+		if i, err := strconv.Atoi(m[1]); err == nil && i < len(currentLevels) {
+			if bounded(currentLevels[i]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var (
+	boundValue = regexp.MustCompile(`\$\d+|%\[?\d*\]?S`)
+	subRef     = regexp.MustCompile(`\$SUB(\d+)`)
+	// the levels of the statement being checked, so bounded() can follow a
+	// $SUB into the group it stands for
+	currentLevels []string
+)
 
 // assignments: the SET clause of an UPDATE. `SET org_id = $1` moves a row to
 // a campaign; it does not restrict which rows are touched, and counting it
@@ -270,8 +300,37 @@ func sqlStatements(t *testing.T) []statement {
 // stamped with the campaign, which is how a write names it.
 func insertNaming(table string) *regexp.Regexp {
 	return regexp.MustCompile(`INSERT INTO\s+(?:[A-Z_]+\.)?"?` + table +
-		`"?\s*\(\s*ORG_ID\b`)
+		`"?\s*\$SUB(\d+)`)
 }
+
+// insertNamesCampaign: the row written carries the campaign, AND — when the
+// write may fall back onto an existing row — the conflict key names it too.
+// `ON CONFLICT (name) DO UPDATE SET …` reaches another campaign's row, and
+// the SET clause is not scanned for predicates, so nothing else would see it.
+func insertNamesCampaign(table, level string) bool {
+	m := insertNaming(table).FindStringSubmatch(level)
+	if m == nil {
+		return false
+	}
+	cols, err := strconv.Atoi(m[1])
+	if err != nil || cols >= len(currentLevels) ||
+		!strings.Contains(currentLevels[cols], "ORG_ID") {
+		return false
+	}
+	key := conflictKey.FindStringSubmatch(level)
+	if key == nil {
+		return true // no fallback: only the row being written is touched
+	}
+	i, err := strconv.Atoi(key[1])
+	return err == nil && i < len(currentLevels) &&
+		strings.Contains(currentLevels[i], "ORG_ID")
+}
+
+// conflictKey: `ON CONFLICT (…)` names the columns the write may fall back
+// onto. If it does not name the campaign, the DO UPDATE reaches rows of
+// another one — and the SET clause is not scanned for predicates, so nothing
+// else would have caught it.
+var conflictKey = regexp.MustCompile(`ON CONFLICT\s*\$SUB(\d+)`)
 
 // boundPredicate: does one of the statement's predicates bind `alias` to
 // something bounded — a parameter, or ANOTHER table's org_id in a join?
@@ -282,6 +341,10 @@ func boundPredicate(preds [][]string, alias string) bool {
 			continue
 		}
 		rhs := p[2]
+		if m := subRef.FindStringSubmatch(rhs); m != nil {
+			i, err := strconv.Atoi(m[1])
+			return err == nil && i < len(currentLevels) && bounded(currentLevels[i])
+		}
 		if strings.HasPrefix(rhs, "$") || strings.HasPrefix(rhs, "%") {
 			return true
 		}
@@ -331,11 +394,25 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		// One Exec can carry several statements. Without the split, the
 		// first one's `org_id = $1` counted as the second one's filter.
 		for _, one := range strings.Split(st.SQL, ";") {
-			for _, level := range levels(one) {
+			currentLevels = levels(one)
+			for _, level := range currentLevels {
 				// The SET clause moves a row to a campaign; it never says
 				// WHICH rows are touched.
 				scanned := assignments.ReplaceAllString(level, " WHERE ")
-				preds := orgPredicate.FindAllStringSubmatch(scanned, -1)
+				// Every disjunct, separately. `WHERE org_id=$1 OR
+				// volunteer=$2` names the campaign once and lets the other
+				// branch through: a filter that holds on one side of an OR
+				// holds on neither.
+				disjuncts := strings.Split(scanned, " OR ")
+				preds := orgPredicate.FindAllStringSubmatch(disjuncts[0], -1)
+				for _, d := range disjuncts[1:] {
+					next := orgPredicate.FindAllStringSubmatch(d, -1)
+					if len(next) == 0 {
+						preds = nil
+						break
+					}
+					preds = append(preds, next...)
+				}
 				for _, table := range tables {
 					for _, m := range refs[table].FindAllStringSubmatch(level, -1) {
 						if neutralised.MatchString(level) {
@@ -353,7 +430,7 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 							continue
 						}
 						if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") &&
-							insertNaming(table).MatchString(one) {
+							insertNamesCampaign(table, level) {
 							continue
 						}
 						t.Errorf("%s: this reference to %s is not bounded to "+
@@ -458,5 +535,56 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 			t.Errorf("%s is declared unreadable but every query in it is "+
 				"readable now — drop the declaration", where)
 		}
+	}
+}
+
+// `scoped(r)` is the only way to open a query on a walled table, and this is
+// what makes `org_id=$1` mean what it says.
+//
+// Written `req := &query{}` followed by three bindings, $1 is whichever
+// parameter happened to be bound first. Reordering two of those lines was
+// enough for `WHERE org_id=$1` to filter on a team identifier instead of the
+// campaign — with every other guard green, because the SQL still reads
+// `org_id=$1`. No canary that looks at SQL can see that; the constructor is
+// what carries the guarantee.
+func TestTheCampaignIsBoundByTheConstructorAlone(t *testing.T) {
+	files := apiPackage(t)
+	var offenders []string
+	seen := 0
+	for name, file := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				lit, ok := n.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				id, ok := lit.Type.(*ast.Ident)
+				if !ok || id.Name != "query" {
+					return true
+				}
+				seen++
+				// `scoped` itself has to build one
+				if name == "auth.go" && fn.Name.Name == "scoped" {
+					return true
+				}
+				offenders = append(offenders, name+":"+fn.Name.Name)
+				return true
+			})
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no query builder found at all: this canary is reading nothing")
+	}
+	if len(offenders) > 0 {
+		t.Errorf("these build a query without binding the campaign first, so "+
+			"$1 is whatever they bind first — use scoped(r):\n\t%s",
+			strings.Join(offenders, "\n\t"))
 	}
 }

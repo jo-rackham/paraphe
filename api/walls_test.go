@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -215,8 +216,15 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	// protected it and its WHERE clause is the only wall there is.
 	c.call(http.MethodPost, "/api/team/group",
 		map[string]any{"name": "Équipe de A", "departments": []string{"01"}})
-	c.call(http.MethodPost, "/api/team/account",
-		map[string]any{"email": shared, "name": "Doublon", "role": "volunteer"})
+	// An address held by NEITHER campaign, and the code asserted. Aimed at
+	// the shared address, this answered 409 — the account already exists in
+	// A — so nothing was written and the count check that follows was
+	// falsifiable by nothing: a real crossing was masked by the unique key.
+	if code, rep := c.call(http.MethodPost, "/api/team/account",
+		map[string]any{"email": "nouveau-chez-a@exemple.fr", "name": "Nouveau",
+			"role": "volunteer"}); code != http.StatusCreated {
+		t.Fatalf("A can no longer create an account of its own: %d %v", code, rep)
+	}
 	c.call(http.MethodPost, "/api/campaign",
 		map[string]any{"campaign": map[string]string{"candidat": "Candidat de A"}})
 	// And the personal note: an UPDATE on accounts that no test called. A
@@ -275,6 +283,38 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	if bName != "Other campaign" {
 		t.Errorf("A rewrote B's campaign configuration: name is now %q", bName)
 	}
+	// Row counts move on INSERT and DELETE. Everything B holds can be
+	// REWRITTEN in place without moving one — proven by an UPDATE that
+	// rewrote B's card entirely while every count and every readback above
+	// stayed as expected.
+	var bStatus, bVolunteer, bTeamName, bCardNote string
+	var bTeam *int
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"SELECT status, volunteer, team_id FROM assignments "+
+				"WHERE org_id=$1 AND insee_code='01001'", b).
+			Scan(&bStatus, &bVolunteer, &bTeam); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(context.Background(),
+			"SELECT note FROM notes WHERE org_id=$1 AND insee_code='01001'", b).
+			Scan(&bCardNote); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(context.Background(),
+			"SELECT name FROM teams WHERE org_id=$1 ORDER BY id LIMIT 1", b).
+			Scan(&bTeamName); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+	})
+	if bStatus != "signed" || bVolunteer != neighbourVolunteer || bTeam != nil {
+		t.Errorf("A rewrote B's card: status=%q volunteer=%q team=%v",
+			bStatus, bVolunteer, bTeam)
+	}
+	if bCardNote != neighbourNote {
+		t.Errorf("A rewrote B's note: %q", bCardNote)
+	}
+	_ = bTeamName
 
 	for _, path := range []string{
 		"/api/dashboard", "/api/mayors", "/api/team", "/api/config", "/api/me",

@@ -477,8 +477,12 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 		return f
 	}
 
-	req := &query{}
-	org, team, me := req.p(orgOf(r).ID), req.p(c.MyTeam()), req.p(c.Email)
+	// scoped, not &query{}: the campaign is $1 by construction. Bound by
+	// hand among other parameters, `org_id=$1` meant whichever value
+	// happened to be first — reordering two of these lines was enough to
+	// filter on a team identifier, with every guard still green.
+	req := scoped(r)
+	org, team, me := "$1", req.p(c.MyTeam()), req.p(c.Email)
 	filters := criteria(req)
 	remaining := req.p(0) // replaced every round: the batch's balance
 
