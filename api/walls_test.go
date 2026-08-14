@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,17 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 
 	const neighbourVolunteer = "b-only@exemple.fr"
 	const neighbourNote = "NOTE QUI APPARTIENT A LA CAMPAGNE B"
+	// B's own configuration, marked and DIFFERENT from A's in every column
+	// /api/campaign writes. Reading the name back alone left the other two
+	// unwatched: a write that stayed row-bound on the name while pouring A's
+	// campaign JSONB into every other campaign passed this test — and that
+	// JSONB is the candidate, the contacts and the signatory, quoted verbatim
+	// in every message sent to a mayor.
+	const neighbourCandidate = "CANDIDATE DE LA CAMPAGNE B"
+	const neighbourBatch = 7
+	execAsMaintenance(t, s,
+		"UPDATE orgs SET campaign=jsonb_build_object('candidat',$1::text), "+
+			"batch_size=$2 WHERE id=$3", neighbourCandidate, neighbourBatch, b)
 	execAsMaintenance(t, s,
 		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
 			"VALUES($1,'01001',$2,'signed')", b, neighbourVolunteer)
@@ -225,8 +237,14 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 			"role": "volunteer"}); code != http.StatusCreated {
 		t.Fatalf("A can no longer create an account of its own: %d %v", code, rep)
 	}
-	c.call(http.MethodPost, "/api/campaign",
-		map[string]any{"campaign": map[string]string{"candidat": "Candidat de A"}})
+	// The return code, asserted: a handler that refuses writes nothing, and
+	// "B is untouched" then holds for a reason that has nothing to do with a
+	// wall. Three probes in this test have already passed that way.
+	if code, rep := c.call(http.MethodPost, "/api/campaign",
+		map[string]any{"campaign": map[string]string{
+			"candidat": "Candidat de A"}}); code != http.StatusOK {
+		t.Fatalf("A can no longer write its own campaign: %d %v", code, rep)
+	}
 	// And the personal note: an UPDATE on accounts that no test called. A
 	// mutation adding `OR EXISTS(SELECT 1 FROM orgs WHERE id <> $2)` to it
 	// overwrote the note of EVERY account of EVERY campaign, with all four
@@ -238,6 +256,20 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	if code, rep := sharedClient.call(http.MethodPost, "/api/me/personal_note",
 		map[string]any{"personal_note": "touche de A"}); code != http.StatusOK {
 		t.Fatalf("A can no longer write its own personal note: %d %v", code, rep)
+	}
+	// Who the shared address IS, on A. readAccount runs on every authenticated
+	// request and decides the name, the role and the team; unfiltered, it
+	// returns B's account under A's subdomain. The only route this client
+	// called answers with neither, so the identity check was walled by the
+	// static canary alone — and each wall is supposed to hold on its own.
+	if code, rep := sharedClient.call(http.MethodGet, "/api/me", nil); code != http.StatusOK {
+		t.Fatalf("/api/me on the shared address: %d %v", code, rep)
+	} else {
+		raw, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		leaks("/api/me on the shared address", string(raw))
 	}
 
 	after := neighbourRows(t, s, b)
@@ -261,16 +293,19 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	}
 	// Counts move on INSERT and DELETE, never on UPDATE. What A could have
 	// overwritten in B is read back by value.
-	var bNote, bName string
+	var bNote, bName, bCampaign string
 	var bActive bool
+	var bBatch int
 	asMaintenance(t, s.pool, func(tx pgx.Tx) {
 		if err := tx.QueryRow(context.Background(),
 			"SELECT COALESCE(personal_note,''), active FROM accounts "+
 				"WHERE org_id=$1 AND email=$2", b, shared).Scan(&bNote, &bActive); err != nil {
 			t.Fatal(err)
 		}
+		// All three columns /api/campaign writes, not just the one.
 		if err := tx.QueryRow(context.Background(),
-			"SELECT name FROM orgs WHERE id=$1", b).Scan(&bName); err != nil {
+			"SELECT name, campaign::text, batch_size FROM orgs WHERE id=$1", b).
+			Scan(&bName, &bCampaign, &bBatch); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -282,6 +317,15 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	}
 	if bName != "Other campaign" {
 		t.Errorf("A rewrote B's campaign configuration: name is now %q", bName)
+	}
+	if !strings.Contains(bCampaign, neighbourCandidate) {
+		t.Errorf("A rewrote B's campaign configuration: %s", bCampaign)
+	}
+	if strings.Contains(bCampaign, "Candidat de A") {
+		t.Errorf("A's candidate landed in B's configuration: %s", bCampaign)
+	}
+	if bBatch != neighbourBatch {
+		t.Errorf("A rewrote B's batch size: %d instead of %d", bBatch, neighbourBatch)
 	}
 	// Row counts move on INSERT and DELETE. Everything B holds can be
 	// REWRITTEN in place without moving one — proven by an UPDATE that

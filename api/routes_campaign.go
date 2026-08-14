@@ -72,15 +72,23 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// The row edited is the one the SCOPE names, not the one this handler
+	// happens to hold: `id=$1` where $1 is what app.org_id carries, so the
+	// application and RLS cannot come to disagree about which campaign is
+	// being written. `orgs` is the one per-campaign table RLS lets everyone
+	// READ — resolving a subdomain requires it — so its writes are the place
+	// where the two walls must say the same thing.
+	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
 		// The name follows the candidate: it is what /api/config returns as
 		// organisation.name and what the multi-campaign apex lists. Left
 		// out, it stayed at the template value for the campaign's whole
 		// life, however many times coordination filled the form.
-		"UPDATE orgs SET campaign=$1::jsonb, batch_size=$2, "+
-			"name=COALESCE(NULLIF($4,''), name) WHERE id=$3",
-		string(raw), batchSize, org.ID,
-		strings.TrimSpace(values["candidat"])); err != nil {
+		"UPDATE orgs SET campaign="+req.p(string(raw))+"::jsonb, "+
+			"batch_size="+req.p(batchSize)+", name=COALESCE(NULLIF("+
+			req.p(strings.TrimSpace(values["candidat"]))+",''), name) "+
+			"WHERE id=$1",
+		req.args...); err != nil {
 		s.failure(w, err)
 		return
 	}

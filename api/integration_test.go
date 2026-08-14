@@ -143,13 +143,21 @@ func applicationPool(t *testing.T, adminDSN string) *pgxpool.Pool {
 // being sought, but makes seeding a test impossible otherwise.
 func asMaintenance(t *testing.T, pool *pgxpool.Pool, fn func(pgx.Tx)) {
 	t.Helper()
+	asOrg(t, pool, OrgMaintenance, fn)
+}
+
+// asOrg opens a transaction speaking for one campaign, which is what an HTTP
+// request does. Used to aim a query at a NEIGHBOUR from inside a campaign,
+// and see PostgreSQL refuse it.
+func asOrg(t *testing.T, pool *pgxpool.Pool, org int, fn func(pgx.Tx)) {
+	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
-	if err := setOrgScope(ctx, tx, OrgMaintenance); err != nil {
+	if err := setOrgScope(ctx, tx, org); err != nil {
 		t.Fatal(err)
 	}
 	fn(tx)

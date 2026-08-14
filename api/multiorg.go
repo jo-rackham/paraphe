@@ -49,6 +49,22 @@ const orgPolicy = `org_id = ` + currentScopeSQL +
 // from the database (≥ 1) or OrgInstance (0).
 const maintenanceSQL = "-1"
 
+// 0 in SQL: the instance scope. The apex moderates campaigns — it creates
+// them on approval — while reading none of their work.
+const instanceSQL = "0"
+
+// `orgs` is deliberately NOT in walledTables, and it is not unwalled either.
+// It is the table that DEFINES the campaigns: resolving a subdomain reads it
+// BEFORE any campaign is known, so a wall over its reads would wall off the
+// very step that establishes the scope. Its rows are per-campaign data all
+// the same — the name, the campaign configuration, the suspension state — and
+// a campaign able to write another's would squat a rival candidate's name and
+// send mail under it. Hence: reads cross, writes do not.
+const orgsPrivileged = currentScopeSQL + ` IN (` + instanceSQL + `, ` +
+	maintenanceSQL + `)`
+
+const orgsOwnRow = `id = ` + currentScopeSQL + ` OR ` + orgsPrivileged
+
 func orgSchema(ctx context.Context, tx pgx.Tx) error {
 	statements := []string{
 		// PostgreSQL identities start at 1: 0 and -1 stay free for the
@@ -116,6 +132,29 @@ func enableRLS(ctx context.Context, tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, s); err != nil {
 				return fmt.Errorf("RLS on %s: %w", table, err)
 			}
+		}
+	}
+	// One policy per command, because `orgs` answers differently to each: a
+	// campaign reads every row (that is how a subdomain resolves) and writes
+	// only its own. With RLS on, a command with no policy is refused, so all
+	// four are spelt out.
+	for _, s := range []string{
+		"ALTER TABLE orgs ENABLE ROW LEVEL SECURITY",
+		"ALTER TABLE orgs FORCE ROW LEVEL SECURITY",
+		"DROP POLICY IF EXISTS orgs_resolve ON orgs",
+		"CREATE POLICY orgs_resolve ON orgs FOR SELECT USING (true)",
+		"DROP POLICY IF EXISTS orgs_own ON orgs",
+		fmt.Sprintf("CREATE POLICY orgs_own ON orgs FOR UPDATE USING (%s) "+
+			"WITH CHECK (%s)", orgsOwnRow, orgsOwnRow),
+		"DROP POLICY IF EXISTS orgs_create ON orgs",
+		fmt.Sprintf("CREATE POLICY orgs_create ON orgs FOR INSERT WITH CHECK (%s)",
+			orgsPrivileged),
+		"DROP POLICY IF EXISTS orgs_remove ON orgs",
+		fmt.Sprintf("CREATE POLICY orgs_remove ON orgs FOR DELETE USING (%s)",
+			orgsPrivileged),
+	} {
+		if _, err := tx.Exec(ctx, s); err != nil {
+			return fmt.Errorf("RLS on orgs: %w", err)
 		}
 	}
 	return nil

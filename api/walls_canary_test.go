@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/ast"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -188,9 +189,16 @@ var assignments = regexp.MustCompile(`\bSET\b.*?(?:\bWHERE\b|\bRETURNING\b|$)`)
 
 // tableRef matches a walled table however it is written: schema-qualified,
 // quoted, aliased with or without AS, and after USING as well as FROM/JOIN.
+//
+// The schema and the table are quoted INDEPENDENTLY. Accepting `public.x` and
+// `"x"` but not `"public"."x"` did not merely miss a spelling: an unmatched
+// reference is no reference at all, so the query carried no walled table and
+// was passed over — invisible reading as compliant, one more time.
+// TestEverySpellingOfAWalledTableIsSeen pins the shapes down.
 func tableRef(table string) *regexp.Regexp {
 	return regexp.MustCompile(
-		`(FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:ONLY\s+)?(?:[A-Z_]+\.)?"?` + table +
+		`(FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:ONLY\s+)?` +
+			`(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
@@ -332,18 +340,66 @@ func insertNamesCampaign(table, level string) bool {
 // else would have caught it.
 var conflictKey = regexp.MustCompile(`ON CONFLICT\s*\$SUB(\d+)`)
 
-// boundPredicate: does one of the statement's predicates bind `alias` to
-// something bounded — a parameter, or ANOTHER table's org_id in a join?
-// `org_id = org_id` on the same table is a tautology, not a filter.
-func boundPredicate(preds [][]string, alias string) bool {
+// qualifiers: every name under which a predicate may address this table
+// reference. With an alias, that alias and nothing else. Without one, either
+// no qualifier at all or the table's own name — `WHERE accounts.org_id = $1`
+// is how the predicate is written when no alias was declared, and refusing it
+// sent the next author to write AROUND the canary rather than through it.
+func qualifiers(alias, table string) []string {
+	if alias != "" {
+		return []string{alias}
+	}
+	return []string{"", table}
+}
+
+// boundEverywhere: EVERY disjunct must bound this reference on its own. A
+// branch that does not is a branch through which the statement returns another
+// campaign's rows, whatever the other branches say.
+func boundEverywhere(perDisjunct [][][]string, chain [][]string, names []string) bool {
+	for _, preds := range perDisjunct {
+		if !boundAlias(preds, chain, names, map[string]bool{}) {
+			return false
+		}
+	}
+	return true
+}
+
+// boundAlias: is this reference bound to a value from OUTSIDE the statement —
+// directly, or along a chain of joins that ends on one?
+//
+// `a.org_id = t.org_id` carries the campaign from t to a, but ONLY if t is
+// itself bound. Asking no further, the canary accepted `a.org_id = t.org_id
+// AND t.org_id = a.org_id`: each table vouched for the other, the chain closed
+// on nothing, and a privileged role served every campaign that owns a team.
+// `seen` cuts the cycle, so a chain proves something only when it reaches a
+// parameter.
+//
+// `preds` are this disjunct's, at this nesting level: that is where the
+// reference must be bound. `chain` holds the whole statement's, because a
+// CORRELATED subquery is bound by its outer query — `(SELECT count(*) FROM
+// accounts c WHERE c.org_id = g.org_id)` under `FROM teams g WHERE
+// g.org_id = $1` is walled, and looking for g at the inner level alone
+// refused it.
+func boundAlias(preds, chain [][]string, names []string, seen map[string]bool) bool {
+	key := strings.Join(names, "\x00")
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
 	for _, p := range preds {
-		if p[1] != alias {
+		if !slices.Contains(names, p[1]) {
 			continue
 		}
 		rhs := p[2]
 		if m := subRef.FindStringSubmatch(rhs); m != nil {
 			i, err := strconv.Atoi(m[1])
-			return err == nil && i < len(currentLevels) && bounded(currentLevels[i])
+			if err == nil && i < len(currentLevels) && bounded(currentLevels[i]) {
+				return true
+			}
+			// An unbounded group proves nothing, but the predicates are
+			// AND-ed: another one may still bind. Returning here let the
+			// first group met decide for the whole statement.
+			continue
 		}
 		if strings.HasPrefix(rhs, "$") || strings.HasPrefix(rhs, "%") {
 			return true
@@ -351,7 +407,8 @@ func boundPredicate(preds [][]string, alias string) bool {
 		// <other>.ORG_ID: a join between two walled tables, which is how the
 		// campaign travels from one to the other. The SAME alias on both
 		// sides says nothing at all.
-		if p[3] != "" && p[3] != alias {
+		if p[3] != "" && !slices.Contains(names, p[3]) &&
+			boundAlias(chain, chain, []string{p[3]}, seen) {
 			return true
 		}
 	}
@@ -395,23 +452,35 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		// first one's `org_id = $1` counted as the second one's filter.
 		for _, one := range strings.Split(st.SQL, ";") {
 			currentLevels = levels(one)
+			// Where a join chain may look for the OTHER alias's own binding:
+			// anywhere in the statement, because a correlated subquery is
+			// bound by the query enclosing it. The reference itself is still
+			// judged at its own level, in its own disjunct, below.
+			var chain [][]string
+			for _, l := range currentLevels {
+				chain = append(chain, orgPredicate.FindAllStringSubmatch(
+					assignments.ReplaceAllString(l, " WHERE "), -1)...)
+			}
 			for _, level := range currentLevels {
 				// The SET clause moves a row to a campaign; it never says
 				// WHICH rows are touched.
 				scanned := assignments.ReplaceAllString(level, " WHERE ")
-				// Every disjunct, separately. `WHERE org_id=$1 OR
-				// volunteer=$2` names the campaign once and lets the other
-				// branch through: a filter that holds on one side of an OR
-				// holds on neither.
-				disjuncts := strings.Split(scanned, " OR ")
-				preds := orgPredicate.FindAllStringSubmatch(disjuncts[0], -1)
-				for _, d := range disjuncts[1:] {
-					next := orgPredicate.FindAllStringSubmatch(d, -1)
-					if len(next) == 0 {
-						preds = nil
-						break
-					}
-					preds = append(preds, next...)
+				// Every disjunct, separately, and ALL of them. `WHERE
+				// org_id=$1 OR volunteer=$2` names the campaign once and lets
+				// the other branch through: a filter that holds on one side of
+				// an OR holds on neither.
+				//
+				// Checking only the disjuncts AFTER the first left the first
+				// one unexamined — `WHERE TRUE OR org_id=$1` read as bounded,
+				// and `neutralised` did not save it either, looking only to
+				// the RIGHT of the OR. And pouring every disjunct's predicates
+				// into ONE bag said the same of `a.org_id=$1 OR b.org_id=$2`,
+				// where neither branch bounds both tables. Hence one bag per
+				// disjunct, and each must stand alone.
+				var perDisjunct [][][]string
+				for _, d := range strings.Split(scanned, " OR ") {
+					perDisjunct = append(perDisjunct,
+						orgPredicate.FindAllStringSubmatch(d, -1))
 				}
 				for _, table := range tables {
 					for _, m := range refs[table].FindAllStringSubmatch(level, -1) {
@@ -426,11 +495,28 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 						if notAnAlias[alias] {
 							alias = ""
 						}
-						if boundPredicate(preds, alias) {
+						// An INSERT is never bounded by a WHERE. That clause
+						// restricts what its SELECT source READS; it says
+						// nothing about which campaign the new row lands in.
+						// Consulting the column list only as a fallback,
+						// `INSERT INTO assignments (insee_code, status) SELECT
+						// … FROM notes WHERE org_id=$1` read as compliant,
+						// and the canary's promise — the row written carries
+						// the campaign — was left to a NOT NULL constraint.
+						if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") {
+							if insertNamesCampaign(table, level) {
+								continue
+							}
+							t.Errorf("%s: this INSERT into %s does not name "+
+								"the campaign in its column list (and, when it "+
+								"may fall back on an existing row, in its ON "+
+								"CONFLICT key). A WHERE in the source SELECT "+
+								"does not stand in for it:\n\t%s",
+								where, table, st.SQL)
 							continue
 						}
-						if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") &&
-							insertNamesCampaign(table, level) {
+						if boundEverywhere(perDisjunct, chain,
+							qualifiers(alias, table)) {
 							continue
 						}
 						t.Errorf("%s: this reference to %s is not bounded to "+
@@ -452,6 +538,109 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		if !used[print] {
 			t.Errorf("the exemption %q (%s) matches no statement any more — "+
 				"drop it", print, why)
+		}
+	}
+}
+
+// A walled table the canary does not RECOGNISE is a table it does not guard,
+// and it says nothing about it — the same silence as a query it cannot read.
+// `FROM "public"."accounts"` was spelt in a way tableRef did not match, so the
+// statement carried no walled table at all and went through unexamined.
+//
+// Every spelling PostgreSQL accepts for the same table must be seen. Adding a
+// form here before supporting it is the point: the list is the specification.
+func TestEverySpellingOfAWalledTableIsSeen(t *testing.T) {
+	for _, spelling := range []string{
+		`SELECT X FROM %[1]s`,
+		`SELECT X FROM "%[1]s"`,
+		`SELECT X FROM PUBLIC.%[1]s`,
+		`SELECT X FROM PUBLIC. %[1]s`,
+		`SELECT X FROM "PUBLIC".%[1]s`,
+		`SELECT X FROM PUBLIC."%[1]s"`,
+		`SELECT X FROM "PUBLIC"."%[1]s"`,
+		`SELECT X FROM ONLY %[1]s`,
+		`SELECT X FROM %[1]s A`,
+		`SELECT X FROM %[1]s AS A`,
+		`SELECT X FROM T, %[1]s`,
+		`SELECT X FROM T JOIN %[1]s ON TRUE`,
+		`DELETE FROM T USING %[1]s`,
+		`UPDATE %[1]s SET X=1`,
+		`INSERT INTO %[1]s $SUB0 VALUES $SUB1`,
+	} {
+		for _, table := range walledTablesUpper() {
+			sql := fmt.Sprintf(spelling, table)
+			if !tableRef(table).MatchString(sql) {
+				t.Errorf("the canary does not see %s written this way, so a "+
+					"query on it would carry no walled table and be passed "+
+					"over in silence:\n\t%s", table, sql)
+			}
+		}
+	}
+}
+
+// setOrgScope declares which campaign the transaction speaks for, and RLS
+// takes its word for it. Called from a handler with a number the client chose,
+// it moves the whole request into ANOTHER campaign — and every other guard
+// here stays green while it happens: the SQL still reads `org_id = $1`, and
+// app.org_id agrees with it. The two walls were checking each other against
+// the same lie.
+//
+// Which campaign a request speaks for is decided in ONE place, from the Host
+// header, plus maintenance at startup. The list below is that decision.
+func TestOnlyTheScopeItselfDeclaresTheCampaign(t *testing.T) {
+	allowed := map[string]bool{
+		// resolves the campaign from the subdomain, and from nothing else
+		"scope.go:openScope": true,
+		// its own definition, and the helper that restores the previous scope
+		"multiorg.go:setOrgScope":  true,
+		"multiorg.go:withOrgScope": true,
+		// the import at startup, which crosses every campaign by design
+		"db.go:InitDatabase": true,
+	}
+
+	seen := map[string]bool{}
+	for name, file := range apiPackage(t) {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			where := name + ":" + fn.Name.Name
+			ast.Inspect(fn, func(n ast.Node) bool {
+				declares := false
+				switch v := n.(type) {
+				case *ast.Ident:
+					declares = v.Name == "setOrgScope"
+				case *ast.BasicLit:
+					// The helper can be bypassed by writing the statement
+					// out; the string is what PostgreSQL ends up reading.
+					declares = strings.Contains(v.Value, "app.org_id")
+				}
+				if !declares {
+					return true
+				}
+				seen[where] = true
+				if !allowed[where] {
+					t.Errorf("%s declares the transaction's campaign. Only "+
+						"the scope may: from a handler, with a value the "+
+						"request carries, this walks into another campaign "+
+						"with every wall left standing — the SQL still names "+
+						"a campaign, and RLS still agrees with it. If this "+
+						"is deliberate, say so by name here.", where)
+				}
+				return true
+			})
+		}
+	}
+	// A permission that covers nothing is a claim about code that has moved,
+	// and the next function written under that name would inherit it.
+	for where := range allowed {
+		if !seen[where] {
+			t.Errorf("%s no longer declares the campaign — drop it from the "+
+				"list rather than leave a standing permission", where)
 		}
 	}
 }

@@ -71,12 +71,18 @@ func TestValidSlug(t *testing.T) {
 func createOrg(t *testing.T, s *Server, slug, name string) int {
 	t.Helper()
 	var id int
-	if err := s.pool.QueryRow(context.Background(),
-		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
-			"VALUES($1,$2,'{}'::jsonb,2,'active','2026-01-01T00:00') RETURNING id",
-		slug, name).Scan(&id); err != nil {
-		t.Fatal(err)
-	}
+	// `orgs` takes writes from a DECLARED scope only, and creating a campaign
+	// belongs to the instance or to maintenance. A pool connection that says
+	// nothing about who it speaks for is refused — as in production, where
+	// every path declares itself before writing.
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
+				"VALUES($1,$2,'{}'::jsonb,2,'active','2026-01-01T00:00') RETURNING id",
+			slug, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+	})
 	return id
 }
 
@@ -93,6 +99,68 @@ var validInsertInto = map[string]string{
 	"teams": "INSERT INTO teams(org_id, name, departments) VALUES($1,'Intrus','01')",
 	"accounts": "INSERT INTO accounts(org_id, email, name, password_hash, role) " +
 		"VALUES($1,'intrus@exemple.fr','Intrus','x','volunteer')",
+}
+
+// `orgs` is the one per-campaign table every campaign may READ: resolving a
+// subdomain has to, before it knows which campaign it is in. That made it the
+// table nobody walled — it is not in walledTables, so neither RLS nor the SQL
+// canary looked at it, and its rows carry the campaign's name, its whole
+// configuration and its suspension state. A campaign able to write another's
+// would squat a rival candidate's name, which /api/config then serves to
+// anyone. Its WRITES are walled; only its reads cross.
+func TestACampaignCannotRewriteAnother(t *testing.T) {
+	s, _ := testServer(t)
+	a := orgID(t, s, testSlug)
+	b := createOrg(t, s, "other", "Other campaign")
+
+	asOrg(t, s.pool, a, func(tx pgx.Tx) {
+		tag, err := tx.Exec(context.Background(),
+			"UPDATE orgs SET name=$1 WHERE id=$2", "PRIS PAR A", b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := tag.RowsAffected(); n != 0 {
+			t.Errorf("campaign A rewrote %d row(s) belonging to campaign B", n)
+		}
+		// The witness. Without it, "A changed nothing" would also hold if A
+		// could write no orgs row at all, and the assertion above would be
+		// about a write that never had a chance to happen.
+		tag, err = tx.Exec(context.Background(),
+			"UPDATE orgs SET name=$1 WHERE id=$2", "A renamed itself", a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := tag.RowsAffected(); n != 1 {
+			t.Fatalf("campaign A cannot write its OWN row either (%d rows): "+
+				"the assertion above proves nothing", n)
+		}
+	})
+
+	var name string
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT name FROM orgs WHERE id=$1", b).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Other campaign" {
+		t.Errorf("campaign B is now named %q", name)
+	}
+
+	// Creating a campaign belongs to the instance, never to a campaign. The
+	// refusal aborts its transaction, so this probe gets one of its own.
+	ctx := context.Background()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // the insert is meant to fail
+	if err := setOrgScope(ctx, tx, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		"INSERT INTO orgs(slug, name, campaign, batch_size, state) "+
+			"VALUES('squatted','Squatted','{}'::jsonb,2,'active')"); err == nil {
+		t.Error("campaign A created a campaign of its own")
+	}
 }
 
 func TestRLSHoldsWithoutApplicationFilter(t *testing.T) {
@@ -345,10 +413,11 @@ func TestRequestThenApprovalCreatesCampaign(t *testing.T) {
 func TestSuspendedCampaignAcceptsNoRequest(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
-	if _, err := s.pool.Exec(context.Background(),
-		"UPDATE orgs SET state=$1 WHERE slug=$2", OrgSuspended, testSlug); err != nil {
-		t.Fatal(err)
-	}
+	// Suspending has no route: it is an operator's SQL, run from maintenance.
+	// Without a declared scope the UPDATE now matches no row and changes
+	// nothing — silently, which is why this is spelt out here.
+	execAsMaintenance(t, s,
+		"UPDATE orgs SET state=$1 WHERE slug=$2", OrgSuspended, testSlug)
 	c := clientOn(t, srv, testSlug+".paraphe.test")
 	if code, _ := c.call(http.MethodGet, "/api/config", nil); code != http.StatusServiceUnavailable {
 		t.Errorf("a suspended campaign answers: %d", code)
