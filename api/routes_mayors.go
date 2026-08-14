@@ -194,7 +194,7 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := &query{}
+	req := scoped(r)
 	where := []string{"1=1"}
 	if q != "" {
 		pattern := req.p("%" + q + "%")
@@ -234,7 +234,7 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 	// One placeholder for both queries below: they share `req`, so binding
 	// the campaign twice left the first binding referenced by no SQL at all,
 	// and PostgreSQL cannot type a parameter a query never mentions.
-	join := assignmentJoin(req.p(scopeOrg(r)))
+	join := assignmentJoin("$1")
 
 	var total int
 	if err := s.tx(r).QueryRow(r.Context(),
@@ -300,7 +300,7 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 	// the card's current owner would leak a team's nominative notes as soon
 	// as a card returns to the shared pool — which the orphan-owner
 	// remediation does precisely.
-	req := &query{}
+	req := scoped(r)
 	filter := "n.insee_code=" + req.p(insee)
 	if !accountOf(r).Coordination() {
 		filter += fmt.Sprintf(" AND (n.team_id IS NULL OR n.team_id=%s)",
@@ -314,7 +314,7 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 		"SELECT COALESCE(c.name, n.volunteer) AS volunteer, n.status, n.note, n.ts "+
 			"FROM notes n LEFT JOIN accounts c "+
 			"ON c.email = n.volunteer AND c.org_id = n.org_id "+
-			"WHERE n.org_id="+req.p(scopeOrg(r))+" AND "+filter+
+			"WHERE n.org_id=$1 AND "+filter+
 			" ORDER BY n.id DESC LIMIT 200", req.args...)
 	if err != nil {
 		s.failure(w, err)
@@ -482,9 +482,9 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 	filters := criteria(req)
 	remaining := req.p(0) // replaced every round: the batch's balance
 
-	availReq := &query{}
+	availReq := scoped(r)
 	availSQL := fmt.Sprintf("SELECT EXISTS(SELECT 1%s WHERE %s)",
-		assignmentJoin(availReq.p(scopeOrg(r))),
+		assignmentJoin("$1"),
 		strings.Join(criteria(availReq), " AND "))
 
 	// The allocation is the INSERT itself, not a read followed by a write:
@@ -563,7 +563,7 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 // otherwise downloading it would suffice to read who, in the other teams,
 // contacted whom.
 func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
-	req := &query{}
+	req := scoped(r)
 	filter := teamScope(accountOf(r), req)
 	cols := append(append([]string{}, Cols...), "volunteer", "status", "updated_at")
 	selection := make([]string, 0, len(cols)+1)
@@ -575,7 +575,7 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.tx(r).Query(r.Context(), fmt.Sprintf(
 		"SELECT %s%s WHERE %s ORDER BY m.department, m.commune",
-		strings.Join(selection, ","), assignmentJoin(req.p(scopeOrg(r))), filter),
+		strings.Join(selection, ","), assignmentJoin("$1"), filter),
 		req.args...)
 	if err != nil {
 		s.failure(w, err)

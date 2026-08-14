@@ -47,7 +47,7 @@ var (
 	// campaign" that read as a filter.
 	orgPredicate = regexp.MustCompile(
 		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID(?:::[A-Z]+)?\s*=\s*` +
-			`(\$\?|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
+			`(\$SUB|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
 	// Predicates that are always true, whatever else the statement says.
 	neutralised = regexp.MustCompile(`\bOR\s+(TRUE|1\s*=\s*1)\b`)
 	// A statement whose TABLE is a format verb: which table it reads cannot
@@ -126,26 +126,41 @@ func stripDollarQuoted(sql string) string {
 	}
 }
 
-// outerStatement: what is left once every balanced parenthesis is folded
-// away — that is, the statement itself, without its subqueries. A predicate
-// living inside `IN (SELECT … WHERE org_id = $1)` constrains the subquery,
-// not the DELETE around it.
-func outerStatement(sql string) string {
-	inner := regexp.MustCompile(`\([^()]*\)`)
+// levels splits a statement by nesting: each parenthesised group becomes a
+// level of its own, and the text around it keeps a `$SUB` where the group
+// stood.
+//
+// Two things follow, and both were findings. A table named only inside a
+// subquery — `SELECT x.email FROM (SELECT email FROM accounts) x` — is
+// checked at ITS level instead of disappearing with the fold. And a
+// predicate whose right-hand side IS a subquery — `WHERE org_id = (SELECT id
+// FROM orgs WHERE slug=$1)` — reads as `ORG_ID = $SUB`, which is bounded,
+// instead of looking like a predicate with nothing on its right.
+func levels(sql string) []string {
+	inner := regexp.MustCompile(`\(([^()]*)\)`)
+	var out []string
 	for {
-		next := inner.ReplaceAllString(sql, " ")
-		if next == sql {
-			return next
+		m := inner.FindStringSubmatchIndex(sql)
+		if m == nil {
+			break
 		}
-		sql = next
+		out = append(out, sql[m[2]:m[3]])
+		sql = sql[:m[0]] + " $SUB " + sql[m[1]:]
 	}
+	return append(out, sql)
 }
+
+// assignments: the SET clause of an UPDATE. `SET org_id = $1` moves a row to
+// a campaign; it does not restrict which rows are touched, and counting it
+// as a filter let `UPDATE accounts SET org_id=$1 WHERE id=$2` relabel any
+// account of any campaign.
+var assignments = regexp.MustCompile(`\bSET\b.*?(?:\bWHERE\b|\bRETURNING\b|$)`)
 
 // tableRef matches a walled table however it is written: schema-qualified,
 // quoted, aliased with or without AS, and after USING as well as FROM/JOIN.
 func tableRef(table string) *regexp.Regexp {
 	return regexp.MustCompile(
-		`(FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:[A-Z_]+\.)?"?` + table +
+		`(FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:ONLY\s+)?(?:[A-Z_]+\.)?"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
@@ -307,47 +322,49 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 
 	used := map[string]bool{}
 	for _, st := range statements {
-		// Subqueries fold away: what remains is the statement itself. A
-		// predicate inside `IN (SELECT … WHERE org_id = $1)` constrains the
-		// subquery, and the DELETE around it stays unbounded.
-		outer := outerStatement(st.SQL)
-		preds := orgPredicate.FindAllStringSubmatch(outer, -1)
-		for _, table := range tables {
-			// EVERY reference, not the first: an INSERT INTO t(org_id, …)
-			// SELECT … FROM t satisfied the column list and the second
-			// reference was never looked at.
-			for _, m := range refs[table].FindAllStringSubmatch(outer, -1) {
-				print := fingerprint(st.SQL)
-				if _, allowed := crossesCampaigns[print]; allowed {
-					used[print] = true
-					continue
+		print := fingerprint(st.SQL)
+		if _, allowed := crossesCampaigns[print]; allowed {
+			used[print] = true
+			continue
+		}
+		where := st.File + ":" + st.Func
+		// One Exec can carry several statements. Without the split, the
+		// first one's `org_id = $1` counted as the second one's filter.
+		for _, one := range strings.Split(st.SQL, ";") {
+			for _, level := range levels(one) {
+				// The SET clause moves a row to a campaign; it never says
+				// WHICH rows are touched.
+				scanned := assignments.ReplaceAllString(level, " WHERE ")
+				preds := orgPredicate.FindAllStringSubmatch(scanned, -1)
+				for _, table := range tables {
+					for _, m := range refs[table].FindAllStringSubmatch(level, -1) {
+						if neutralised.MatchString(level) {
+							t.Errorf("%s: this query on %s carries an "+
+								"always-true disjunction, which cancels "+
+								"whatever else it says:\n\t%s",
+								where, table, st.SQL)
+							continue
+						}
+						alias := m[2]
+						if notAnAlias[alias] {
+							alias = ""
+						}
+						if boundPredicate(preds, alias) {
+							continue
+						}
+						if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") &&
+							insertNaming(table).MatchString(one) {
+							continue
+						}
+						t.Errorf("%s: this reference to %s is not bounded to "+
+							"the campaign (%s.org_id = $n, at its own nesting "+
+							"level and outside any SET). A privileged database "+
+							"role would serve one campaign's work to another. "+
+							"If the crossing is deliberate, add %q to "+
+							"crossesCampaigns:\n\t%s",
+							where, table, aliasOrTable(alias, table), print, st.SQL)
+					}
 				}
-				where := st.File + ":" + st.Func
-				if neutralised.MatchString(outer) {
-					t.Errorf("%s: this query on %s carries an always-true "+
-						"disjunction, which cancels whatever else it says:\n\t%s",
-						where, table, st.SQL)
-					continue
-				}
-				alias := m[2]
-				if notAnAlias[alias] {
-					alias = ""
-				}
-				if boundPredicate(preds, alias) {
-					continue
-				}
-				// An INSERT names the campaign by writing it, but only for
-				// the row it writes: `INTO` is the one keyword that counts.
-				if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") &&
-					insertNaming(table).MatchString(st.SQL) {
-					continue
-				}
-				t.Errorf("%s: this reference to %s is not bounded to the "+
-					"campaign (%s.org_id = $n, on the statement itself). A "+
-					"privileged database role would serve one campaign's work "+
-					"to another. If the crossing is deliberate, add %q to "+
-					"crossesCampaigns:\n\t%s",
-					where, table, aliasOrTable(alias, table), print, st.SQL)
 			}
 		}
 	}

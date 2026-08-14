@@ -68,6 +68,21 @@ func (q *query) p(v any) string {
 	return fmt.Sprintf("$%d", len(q.args))
 }
 
+// scoped opens a query already bound to the campaign, which is therefore
+// ALWAYS $1 — so the SQL can name it literally.
+//
+// Written `"org_id="+req.p(scopeOrg(r))`, the campaign was bound correctly
+// but the placeholder existed only at runtime: read from the source, the
+// predicate was `org_id=` with no right-hand side. The canary had to accept
+// "a right-hand side I cannot read" as bounded, and a one-line helper
+// returning "org_id" then produced a tautology it declared compliant. The
+// campaign is $1 by construction here, and there is nothing left to trust.
+func scoped(r *http.Request) *query {
+	q := &query{}
+	q.p(scopeOrg(r)) // $1, and the SQL below says so in full
+	return q
+}
+
 // teamScope: what my team has reserved, plus what nobody has taken. Other
 // teams' work stays with them — in the export too. It bears on `assignments`,
 // outer-joined: a card with no work row has a NULL team, hence is free.

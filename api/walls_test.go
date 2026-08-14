@@ -64,7 +64,12 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	}
 	// The same address in BOTH campaigns, under different names: the export
 	// and /api/me join accounts on the email alone.
+	hash, err := HashPassword("motdepasse-de-test-1234")
+	if err != nil {
+		t.Fatal(err)
+	}
 	const shared = "commun@exemple.fr"
+	const neighbourOwnNote = "TOUCHE PERSONNELLE DE LA CAMPAGNE B"
 	for _, org := range []int{a, b} {
 		name := "Moi chez A"
 		if org == b {
@@ -72,8 +77,15 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 		}
 		execAsMaintenance(t, s,
 			"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
-				"VALUES($1,$2,$3,'x','volunteer',true)", org, shared, name)
+				"VALUES($1,$2,$3,$4,'volunteer',true)", org, shared, name, hash)
 	}
+	// B's note carries a marker. A route that wrote across the wall would
+	// replace it — but only if A signs in under an address B ALSO holds:
+	// signed in as an address unique to A, the write could not reach B even
+	// with no wall at all, and the assertion would pass on nothing.
+	execAsMaintenance(t, s,
+		"UPDATE accounts SET personal_note=$1 WHERE org_id=$2 AND email=$3",
+		neighbourOwnNote, b, shared)
 	// …and give that address work in A. Without it no join ever reaches the
 	// account: the card, the notes and the export all join accounts through
 	// `assignments.volunteer`, so the homonym was only ever exercised by
@@ -87,10 +99,6 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 
 	// an account in A, to sign in with
 	const mine = "a-only@exemple.fr"
-	hash, err := HashPassword("motdepasse-de-test-1234")
-	if err != nil {
-		t.Fatal(err)
-	}
 	execAsMaintenance(t, s,
 		"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
 			"VALUES($1,$2,'Coordination A',$3,'coordination',true)", a, mine, hash)
@@ -201,6 +209,29 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 		t.Errorf("deactivating an account of B answered %d; expected 404 or "+
 			"403 — anything else means the route did not even look", toggle)
 	}
+	// Three more writes on walled tables, none of them exercised before: a
+	// team, an account bearing an address that ALSO exists in B, and the
+	// campaign's own configuration — `orgs` carries no org_id, so RLS never
+	// protected it and its WHERE clause is the only wall there is.
+	c.call(http.MethodPost, "/api/team/group",
+		map[string]any{"name": "Équipe de A", "departments": []string{"01"}})
+	c.call(http.MethodPost, "/api/team/account",
+		map[string]any{"email": shared, "name": "Doublon", "role": "volunteer"})
+	c.call(http.MethodPost, "/api/campaign",
+		map[string]any{"campaign": map[string]string{"candidat": "Candidat de A"}})
+	// And the personal note: an UPDATE on accounts that no test called. A
+	// mutation adding `OR EXISTS(SELECT 1 FROM orgs WHERE id <> $2)` to it
+	// overwrote the note of EVERY account of EVERY campaign, with all four
+	// tests green.
+	sharedClient := clientOn(t, srv, testSlug+".paraphe.test")
+	if code := sharedClient.signIn(shared, "motdepasse-de-test-1234"); code != http.StatusOK {
+		t.Fatalf("sign-in on A under the shared address: %d", code)
+	}
+	if code, rep := sharedClient.call(http.MethodPost, "/api/me/personal_note",
+		map[string]any{"personal_note": "touche de A"}); code != http.StatusOK {
+		t.Fatalf("A can no longer write its own personal note: %d %v", code, rep)
+	}
+
 	after := neighbourRows(t, s, b)
 	for table, n := range before {
 		if after[table] != n {
@@ -219,6 +250,30 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	})
 	if strayed != 0 {
 		t.Errorf("%d note(s) written by A landed in campaign B", strayed)
+	}
+	// Counts move on INSERT and DELETE, never on UPDATE. What A could have
+	// overwritten in B is read back by value.
+	var bNote, bName string
+	var bActive bool
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"SELECT COALESCE(personal_note,''), active FROM accounts "+
+				"WHERE org_id=$1 AND email=$2", b, shared).Scan(&bNote, &bActive); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(context.Background(),
+			"SELECT name FROM orgs WHERE id=$1", b).Scan(&bName); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if bNote != neighbourOwnNote {
+		t.Errorf("A's personal note reached B's account: %q", bNote)
+	}
+	if !bActive {
+		t.Errorf("A deactivated an account of B")
+	}
+	if bName != "Other campaign" {
+		t.Errorf("A rewrote B's campaign configuration: name is now %q", bName)
 	}
 
 	for _, path := range []string{

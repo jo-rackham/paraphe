@@ -230,8 +230,8 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 	// A team lead only searches within their OWN team: otherwise the
 	// 404/403 distinction would tell them which addresses exist in other
 	// teams.
-	req := &query{}
-	filter := "org_id=" + req.p(scopeOrg(r)) + " AND email=" + req.p(target)
+	req := scoped(r)
+	filter := "org_id=$1 AND email=" + req.p(target)
 	if !me.Coordination() {
 		filter += " AND team_id=" + req.p(me.MyTeam()) +
 			" AND role=" + req.p(RoleVolunteer)

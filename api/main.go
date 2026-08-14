@@ -288,7 +288,7 @@ func (s *Server) routes() http.Handler {
 		}
 		s.serveInterface(w, r)
 	})
-	return refuseUnstorableText(mux)
+	return answerOnPanic(refuseUnstorableText(mux))
 }
 
 // refuseUnstorableText: PostgreSQL refuses U+0000 in any text value AND
@@ -396,6 +396,26 @@ func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, abs)
+}
+
+// answerOnPanic: a panic in a handler must still leave the client with an
+// HTTP answer. Go's server recovers it and closes the connection, so the
+// caller sees EOF — no status, no body, nothing an operator can read in a
+// log or a browser. `scopeOrg` panics deliberately when a request carries no
+// scope; that refusal is right, and it should arrive as a 500.
+func answerOnPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("panic serving %s %s: %v", r.Method, r.URL.Path, p)
+				// the handler may already have written: setting a status
+				// then is a no-op and logs, which is the lesser evil
+				errorJSON(w, http.StatusInternalServerError,
+					"Erreur interne. L'incident est enregistré.")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // securityHeaders: the application needs nothing external — no font, no
