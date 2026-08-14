@@ -27,12 +27,13 @@ func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if c.Coordination() {
 		accounts, err = s.rows(r, "SELECT "+accountColumns+" FROM accounts c "+
-			"LEFT JOIN teams g ON g.id=c.team_id "+
-			"ORDER BY c.active DESC, g.name, c.name")
+			"LEFT JOIN teams g ON g.id=c.team_id AND g.org_id=c.org_id "+
+			"WHERE c.org_id=$1 ORDER BY c.active DESC, g.name, c.name", scopeOrg(r))
 	} else {
 		accounts, err = s.rows(r, "SELECT "+accountColumns+" FROM accounts c "+
-			"LEFT JOIN teams g ON g.id=c.team_id "+
-			"WHERE c.team_id=$1 ORDER BY c.active DESC, c.name", c.MyTeam())
+			"LEFT JOIN teams g ON g.id=c.team_id AND g.org_id=c.org_id "+
+			"WHERE c.org_id=$1 AND c.team_id=$2 ORDER BY c.active DESC, c.name",
+			scopeOrg(r), c.MyTeam())
 	}
 	if err != nil {
 		s.failure(w, err)
@@ -44,10 +45,11 @@ func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
 		teams, err = s.rows(r,
 			"SELECT g.id, g.name, COALESCE(g.departments,'') AS departments, "+
 				"COALESCE(g.created_at,'') AS created_at, "+
-				"(SELECT COUNT(*) FROM accounts c WHERE c.team_id=g.id AND c.active) "+
-				"AS members, "+
-				"(SELECT COUNT(*) FROM assignments t WHERE t.team_id=g.id) AS reserved "+
-				"FROM teams g ORDER BY g.name")
+				"(SELECT COUNT(*) FROM accounts c WHERE c.org_id=g.org_id "+
+				"AND c.team_id=g.id AND c.active) AS members, "+
+				"(SELECT COUNT(*) FROM assignments t WHERE t.org_id=g.org_id "+
+				"AND t.team_id=g.id) AS reserved "+
+				"FROM teams g WHERE g.org_id=$1 ORDER BY g.name", scopeOrg(r))
 		if err != nil {
 			s.failure(w, err)
 			return
@@ -167,7 +169,8 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 			}
 			var exists bool
 			err := s.tx(r).QueryRow(r.Context(),
-				"SELECT TRUE FROM teams WHERE id=$1", *team).Scan(&exists)
+				"SELECT TRUE FROM teams WHERE org_id=$1 AND id=$2",
+				scopeOrg(r), *team).Scan(&exists)
 			if errors.Is(err, pgx.ErrNoRows) {
 				errorJSON(w, http.StatusBadRequest,
 					"Aucune équipe n'a l'identifiant %d.", *team)
@@ -228,7 +231,7 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 	// 404/403 distinction would tell them which addresses exist in other
 	// teams.
 	req := &query{}
-	filter := "email=" + req.p(target)
+	filter := "org_id=" + req.p(scopeOrg(r)) + " AND email=" + req.p(target)
 	if !me.Coordination() {
 		filter += " AND team_id=" + req.p(me.MyTeam()) +
 			" AND role=" + req.p(RoleVolunteer)

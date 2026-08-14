@@ -25,6 +25,10 @@ type Scope struct {
 	Tx pgx.Tx
 	// Org: the campaign being served. Nil on the instance scope (the apex).
 	Org *Org
+	// OrgID: the same scope as a number, and the one `app.org_id` carries —
+	// including the sentinels, where Org is nil: 0 on the apex. Every query
+	// on a walled table binds it, so the wall no longer rests on RLS alone.
+	OrgID int
 
 	conn *pgxpool.Conn
 	// committed: the route already committed the transaction. Writes do it
@@ -49,6 +53,16 @@ func orgOf(r *http.Request) *Org {
 		return p.Org
 	}
 	return nil
+}
+
+// scopeOrg: the request's scope as a number, to bind in every query touching a
+// walled table. Unlike orgOf it is never nil — the apex is 0, a scope that
+// owns no campaign row.
+func scopeOrg(r *http.Request) int {
+	if p := scopeOf(r); p != nil {
+		return p.OrgID
+	}
+	return OrgInstance
 }
 
 // commit closes a write's transaction. Call it before replying.
@@ -157,6 +171,7 @@ func (s *Server) openScope(w http.ResponseWriter, r *http.Request) (*Scope, bool
 		}
 		p.Org, org = o, o.ID
 	}
+	p.OrgID = org
 	if err := setOrgScope(ctx, tx, org); err != nil {
 		p.close(ctx)
 		s.failure(w, err)

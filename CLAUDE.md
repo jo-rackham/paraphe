@@ -307,14 +307,33 @@ Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
   `mayors` vers `assignments(org_id, insee_code, team_id, volunteer,
   status, updated_at)`. Dupliquer 34 826 lignes par campagne serait le
   mauvais choix.
-- **Le cloisonnement ne repose PAS sur les clauses WHERE** : `ENABLE` +
-  `FORCE ROW LEVEL SECURITY` sur `assignments`, `notes`, `teams`, `accounts`,
-  politique sur `app.org_id`, posé par `set_config(…, true)` — portée
-  TRANSACTION — au début de chaque requête HTTP. La revue avait déjà trouvé
-  deux trous de périmètre dans ce code (`/export.csv`, `/statut`) ; un
-  troisième entre campagnes ferait fuiter le travail d'une campagne chez une
-  autre. `TestRLSHoldsWithoutApplicationFilter` interroge les tables sans le
-  moindre filtre et vérifie qu'il ne sort rien.
+- **Le cloisonnement est dit DEUX FOIS, et chaque mur tient seul.**
+  1. PostgreSQL : `ENABLE` + `FORCE ROW LEVEL SECURITY` sur `assignments`,
+     `notes`, `teams`, `accounts`, politique sur `app.org_id`, posé par
+     `set_config(…, true)` — portée TRANSACTION — au début de chaque requête.
+     `TestRLSHoldsWithoutApplicationFilter` interroge les tables sans le
+     moindre filtre et vérifie qu'il ne sort rien.
+  2. L'application : **toute requête touchant une table cloisonnée nomme la
+     campagne** (`scopeOrg(r)`). `TestWallsHoldWithoutRLS` fait tourner
+     l'application sous un rôle **privilégié** — RLS neutralisé, avec un
+     témoin qui le prouve — et vérifie qu'aucune campagne ne voit celle d'à
+     côté.
+  Raison du doublon : RLS ne s'applique qu'à un rôle ni `SUPERUSER` ni
+  `BYPASSRLS`, et ce n'est **pas** le défaut (l'image PostgreSQL officielle
+  fait de `POSTGRES_USER` un superutilisateur). Un rôle privilégié dégrade
+  désormais de « aucun mur » à « un mur ».
+  Ce n'est pas une propriété qu'on tient à la discipline sur 30 sites :
+  `TestEveryQueryOnAWalledTableNamesTheCampaign` lit le paquet en AST et
+  exige, **par alias de table**, le prédicat `org_id` — un seul croisement
+  est exempté, `db.go:removeStale`, parce que la liste des maires est
+  commune et qu'y supprimer une ligne doit tenir compte de TOUTES les
+  campagnes.
+  Dans `assignmentJoin`, le prédicat est dans la **condition de jointure**,
+  jamais dans le `WHERE` : en `WHERE`, la jointure externe devient interne et
+  tous les maires que personne n'a encore pris disparaissent.
+  La revue avait déjà trouvé deux trous de périmètre dans ce code
+  (`/export.csv`, `/statut`) ; un troisième entre campagnes ferait fuiter le
+  travail d'une campagne chez une autre.
 - **Deux périmètres sentinelles**, impossibles en base (les identités
   commencent à 1) : `0` = instance (apex, ne voit AUCUNE ligne de travail),
   `-1` = maintenance (import et migrations, traversent les campagnes).

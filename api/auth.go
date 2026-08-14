@@ -92,8 +92,9 @@ func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 		"SELECT c.email, c.name, c.role, c.team_id, c.active, "+
 			"COALESCE(c.personal_note,''), COALESCE(c.created_at,''), "+
 			"COALESCE(c.created_by,''), g.name "+
-			"FROM accounts c LEFT JOIN teams g ON g.id = c.team_id "+
-			"WHERE c.email=$1 AND c.active", email).
+			"FROM accounts c LEFT JOIN teams g "+
+			"ON g.id = c.team_id AND g.org_id = c.org_id "+
+			"WHERE c.org_id=$1 AND c.email=$2 AND c.active", scopeOrg(r), email).
 		Scan(&c.Email, &c.Name, &c.Role, &c.TeamID, &c.Active, &c.PersonalNote,
 			&c.CreatedAt, &c.CreatedBy, &c.TeamName)
 	if errors.Is(err, pgx.ErrNoRows) {

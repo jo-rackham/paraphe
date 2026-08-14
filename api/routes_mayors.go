@@ -39,14 +39,27 @@ const maxBatchRounds = 8
 const (
 	mayorSelection = "m.*, t.volunteer, COALESCE(t.status,'to_contact') AS status, " +
 		"t.updated_at, t.team_id, c.name AS volunteer_name"
-	assignmentJoin = " FROM mayors m " +
-		"LEFT JOIN assignments t ON t.insee_code = m.insee_code " +
-		"LEFT JOIN accounts c ON c.email = t.volunteer"
+	// mayors is the common, read-only list: it carries no org_id. The work
+	// rows do, and the campaign is named in the JOIN CONDITION, never in a
+	// WHERE: `WHERE t.org_id = …` would turn these outer joins into inner
+	// ones and drop every mayor nobody has taken yet — that is, exactly the
+	// ones `mayorAvailable` exists to find.
+	assignmentJoinFmt = " FROM mayors m " +
+		"LEFT JOIN assignments t ON t.insee_code = m.insee_code AND t.org_id = %[1]s " +
+		"LEFT JOIN accounts c ON c.email = t.volunteer AND c.org_id = %[1]s"
 	// Available: no work row, or a row nobody took and on which nothing was
 	// done.
 	mayorAvailable = "(t.insee_code IS NULL OR " +
 		"(t.volunteer IS NULL AND t.status = 'to_contact'))"
 )
+
+// assignmentJoin binds the join to one campaign. It takes the placeholder
+// rather than the value so that callers numbering their parameters as they
+// go keep doing so — and so that no caller can use the join without having
+// said which campaign it is about.
+func assignmentJoin(orgPlaceholder string) string {
+	return fmt.Sprintf(assignmentJoinFmt, orgPlaceholder)
+}
 
 // GET /api/tableau — the home screen: where the campaign stands, where I
 // stand.
@@ -60,7 +73,7 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 		stats[st.Key] = 0
 	}
 	byStatus, err := s.counters(r, "SELECT COALESCE(t.status,'to_contact'), "+
-		"COUNT(*)"+assignmentJoin+" GROUP BY 1")
+		"COUNT(*)"+assignmentJoin("$1")+" GROUP BY 1", scopeOrg(r))
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -76,18 +89,19 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 	promisedDepts, err := s.orderedCounters(r,
 		"SELECT m.department, COUNT(*) FROM assignments t "+
 			"JOIN mayors m ON m.insee_code = t.insee_code "+
-			"WHERE t.status IN ('promised','signed') GROUP BY m.department "+
-			"ORDER BY COUNT(*) DESC, m.department")
+			"WHERE t.org_id=$1 AND t.status IN ('promised','signed') "+
+			"GROUP BY m.department ORDER BY COUNT(*) DESC, m.department",
+		scopeOrg(r))
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
 
-	mine, err := s.rows(r, "SELECT "+mayorSelection+assignmentJoin+
-		" WHERE t.volunteer=$1 AND t.team_id IS NOT DISTINCT FROM $2 "+
+	mine, err := s.rows(r, "SELECT "+mayorSelection+assignmentJoin("$1")+
+		" WHERE t.volunteer=$2 AND t.team_id IS NOT DISTINCT FROM $3 "+
 		"ORDER BY CASE t.status WHEN 'to_call_back' THEN 0 WHEN 'to_contact' "+
 		"THEN 1 ELSE 2 END, COALESCE(NULLIF(m.score,'')::int, 0) DESC",
-		c.Email, c.MyTeam())
+		scopeOrg(r), c.Email, c.MyTeam())
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -99,10 +113,11 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 		team, err = s.rows(r,
 			"SELECT COALESCE(c.name, t.volunteer) AS who, COUNT(*) AS n, "+
 				"COUNT(*) FILTER (WHERE t.status <> 'to_contact') AS done "+
-				"FROM assignments t LEFT JOIN accounts c ON c.email = t.volunteer "+
-				"WHERE t.team_id IS NOT NULL AND t.team_id=$1 "+
+				"FROM assignments t LEFT JOIN accounts c "+
+				"ON c.email = t.volunteer AND c.org_id = t.org_id "+
+				"WHERE t.org_id=$1 AND t.team_id IS NOT NULL AND t.team_id=$2 "+
 				"AND t.volunteer IS NOT NULL GROUP BY who ORDER BY n DESC",
-			c.MyTeam())
+			scopeOrg(r), c.MyTeam())
 		if err != nil {
 			s.failure(w, err)
 			return
@@ -114,8 +129,9 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	available, err := s.column(r, "SELECT DISTINCT m.department"+assignmentJoin+
-		" WHERE "+mayorAvailable+" ORDER BY m.department")
+	available, err := s.column(r, "SELECT DISTINCT m.department"+
+		assignmentJoin("$1")+" WHERE "+mayorAvailable+" ORDER BY m.department",
+		scopeOrg(r))
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -215,9 +231,14 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 	where = append(where, teamScope(c, req))
 	filter := strings.Join(where, " AND ")
 
+	// One placeholder for both queries below: they share `req`, so binding
+	// the campaign twice left the first binding referenced by no SQL at all,
+	// and PostgreSQL cannot type a parameter a query never mentions.
+	join := assignmentJoin(req.p(scopeOrg(r)))
+
 	var total int
 	if err := s.tx(r).QueryRow(r.Context(),
-		"SELECT COUNT(*)"+assignmentJoin+" WHERE "+filter,
+		"SELECT COUNT(*)"+join+" WHERE "+filter,
 		req.args...).Scan(&total); err != nil {
 		s.failure(w, err)
 		return
@@ -240,7 +261,7 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 		"SELECT %s%s WHERE %s ORDER BY "+
 			"-COALESCE(NULLIF(m.score,'')::int, 0), m.department, "+
 			"m.commune, m.insee_code LIMIT %s",
-		mayorSelection, assignmentJoin, filter, req.p(mayorsPerPage)), req.args...)
+		mayorSelection, join, filter, req.p(mayorsPerPage)), req.args...)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -291,8 +312,10 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 	// Nobody has contacted one mayor 200 times.
 	notes, err := s.rows(r,
 		"SELECT COALESCE(c.name, n.volunteer) AS volunteer, n.status, n.note, n.ts "+
-			"FROM notes n LEFT JOIN accounts c ON c.email = n.volunteer "+
-			"WHERE "+filter+" ORDER BY n.id DESC LIMIT 200", req.args...)
+			"FROM notes n LEFT JOIN accounts c "+
+			"ON c.email = n.volunteer AND c.org_id = n.org_id "+
+			"WHERE n.org_id="+req.p(scopeOrg(r))+" AND "+filter+
+			" ORDER BY n.id DESC LIMIT 200", req.args...)
 	if err != nil {
 		s.failure(w, err)
 		return nil, false
@@ -461,7 +484,8 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 
 	availReq := &query{}
 	availSQL := fmt.Sprintf("SELECT EXISTS(SELECT 1%s WHERE %s)",
-		assignmentJoin, strings.Join(criteria(availReq), " AND "))
+		assignmentJoin(availReq.p(scopeOrg(r))),
+		strings.Join(criteria(availReq), " AND "))
 
 	// The allocation is the INSERT itself, not a read followed by a write:
 	// two volunteers clicking at the same moment on different instances aim
@@ -478,7 +502,7 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (org_id, insee_code) DO UPDATE
 		  SET volunteer=excluded.volunteer, team_id=excluded.team_id
 		  WHERE assignments.volunteer IS NULL AND assignments.status='to_contact'`,
-		org, team, me, assignmentJoin, strings.Join(filters, " AND "), remaining)
+		org, team, me, assignmentJoin(org), strings.Join(filters, " AND "), remaining)
 
 	// Volunteers all aim at the best-scored: on a simultaneous click, seven
 	// losers out of eight would walk away empty-handed with "the pool is
@@ -551,7 +575,8 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.tx(r).Query(r.Context(), fmt.Sprintf(
 		"SELECT %s%s WHERE %s ORDER BY m.department, m.commune",
-		strings.Join(selection, ","), assignmentJoin, filter), req.args...)
+		strings.Join(selection, ","), assignmentJoin(req.p(scopeOrg(r))), filter),
+		req.args...)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -606,7 +631,8 @@ func truncatedExport(err error) {
 func (s *Server) loadMayor(w http.ResponseWriter, r *http.Request,
 	insee string) (map[string]any, bool) {
 	rows, err := s.tx(r).Query(r.Context(),
-		"SELECT "+mayorSelection+assignmentJoin+" WHERE m.insee_code=$1", insee)
+		"SELECT "+mayorSelection+assignmentJoin("$1")+" WHERE m.insee_code=$2",
+		scopeOrg(r), insee)
 	if err != nil {
 		s.failure(w, err)
 		return nil, false

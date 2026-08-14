@@ -21,7 +21,7 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 	var noAccount bool
 	var one int
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT 1 FROM accounts WHERE active").Scan(&one)
+		"SELECT 1 FROM accounts WHERE org_id=$1 AND active", scopeOrg(r)).Scan(&one)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		noAccount = true
@@ -70,10 +70,12 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 
 	var stored string
 	var active bool
-	// RLS bounds the lookup to the campaign being served: an address that
-	// exists in another campaign hosted here is, seen from here, unknown.
+	// Bounded to the campaign being served: an address that exists in
+	// another campaign hosted here is, seen from here, unknown. Stated in the
+	// query AND enforced by RLS — either alone would do, which is the point.
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT password_hash, active FROM accounts WHERE email=$1", email).Scan(&stored, &active)
+		"SELECT password_hash, active FROM accounts WHERE org_id=$1 AND email=$2",
+		scopeOrg(r), email).Scan(&stored, &active)
 	found := true
 	if errors.Is(err, pgx.ErrNoRows) {
 		// decoy hash when the account does not exist: without it, the
@@ -151,8 +153,8 @@ func (s *Server) teamDepartments(r *http.Request, c *Account) ([]string, error) 
 	}
 	var raw string
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT COALESCE(departments,'') FROM teams WHERE id=$1",
-		c.MyTeam()).Scan(&raw)
+		"SELECT COALESCE(departments,'') FROM teams WHERE org_id=$1 AND id=$2",
+		scopeOrg(r), c.MyTeam()).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []string{}, nil
 	}
@@ -189,8 +191,8 @@ func (s *Server) routePersonalNote(w http.ResponseWriter, r *http.Request) {
 	}
 	c := accountOf(r)
 	if _, err := s.tx(r).Exec(r.Context(),
-		"UPDATE accounts SET personal_note=$1 WHERE email=$2",
-		strings.TrimSpace(d.PersonalNote), c.Email); err != nil {
+		"UPDATE accounts SET personal_note=$1 WHERE org_id=$2 AND email=$3",
+		strings.TrimSpace(d.PersonalNote), scopeOrg(r), c.Email); err != nil {
 		s.failure(w, err)
 		return
 	}
