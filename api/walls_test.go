@@ -74,6 +74,16 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 			"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
 				"VALUES($1,$2,$3,'x','volunteer',true)", org, shared, name)
 	}
+	// …and give that address work in A. Without it no join ever reaches the
+	// account: the card, the notes and the export all join accounts through
+	// `assignments.volunteer`, so the homonym was only ever exercised by
+	// /api/team.
+	// `email_sent`, not `signed`: this row exists to make the joins reach the
+	// account, not to give A coverage — the counters below assert that every
+	// promise and every signature visible to A belongs to B.
+	execAsMaintenance(t, s,
+		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
+			"VALUES($1,'01005',$2,'email_sent')", a, shared)
 
 	// an account in A, to sign in with
 	const mine = "a-only@exemple.fr"
@@ -171,16 +181,44 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	// Writes. A campaign must not be able to touch its neighbour's rows, and
 	// the read-only version of this test could not have told.
 	before := neighbourRows(t, s, b)
-	c.call(http.MethodPost, "/api/mayors/01001/status",
-		map[string]any{"status": "to_call_back", "note": "note de A"})
-	c.call(http.MethodPost, "/api/batch", map[string]any{})
-	toggle, _ := c.call(http.MethodPost,
-		"/api/team/account/"+neighbourVolunteer+"/active", nil)
-	if toggle == http.StatusOK {
-		t.Errorf("A deactivated an account that belongs to B")
+	// The return codes are asserted, not discarded: a handler answering 400
+	// writes nothing, the neighbour's rows are trivially unchanged, and the
+	// check certifies a write that never happened.
+	if code, rep := c.call(http.MethodPost, "/api/mayors/01001/status",
+		map[string]any{"status": "to_call_back", "note": "note de A"}); code != http.StatusOK {
+		t.Fatalf("A can no longer write a status on its own card: %d %v", code, rep)
 	}
-	if after := neighbourRows(t, s, b); after != before {
-		t.Errorf("B held %d work rows before A wrote, %d after", before, after)
+	if code, rep := c.call(http.MethodPost, "/api/batch",
+		map[string]any{}); code != http.StatusOK {
+		t.Fatalf("A can no longer draw a batch: %d %v", code, rep)
+	}
+	// An EMPTY BODY, not nil: `client.request` only sets Content-Type when a
+	// body is given, and jsonOnly then answers 415 — so `toggle == 200` was
+	// never true and the assertion certified itself.
+	toggle, _ := c.call(http.MethodPost,
+		"/api/team/account/"+neighbourVolunteer+"/active", map[string]any{})
+	if toggle != http.StatusNotFound && toggle != http.StatusForbidden {
+		t.Errorf("deactivating an account of B answered %d; expected 404 or "+
+			"403 — anything else means the route did not even look", toggle)
+	}
+	after := neighbourRows(t, s, b)
+	for table, n := range before {
+		if after[table] != n {
+			t.Errorf("B held %d rows in %s before A wrote, %d after",
+				n, table, after[table])
+		}
+	}
+	// A count is blind to an UPDATE. The neighbour's notes are read back.
+	var strayed int
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"SELECT count(*) FROM notes WHERE org_id=$1 AND note LIKE '%de A%'",
+			b).Scan(&strayed); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strayed != 0 {
+		t.Errorf("%d note(s) written by A landed in campaign B", strayed)
 	}
 
 	for _, path := range []string{
@@ -205,14 +243,21 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 // neighbourRows: how many work rows the other campaign holds, read from the
 // scope that crosses campaigns — the only place able to check that a write
 // left them alone.
-func neighbourRows(t *testing.T, s *Server, org int) int {
+// neighbourRows: what the other campaign holds, table by table, read from
+// the scope that crosses campaigns. Counting `assignments` alone let a note
+// written by A land in B without a word.
+func neighbourRows(t *testing.T, s *Server, org int) map[string]int {
 	t.Helper()
-	var n int
+	counts := map[string]int{}
 	asMaintenance(t, s.pool, func(tx pgx.Tx) {
-		if err := tx.QueryRow(context.Background(),
-			"SELECT count(*) FROM assignments WHERE org_id=$1", org).Scan(&n); err != nil {
-			t.Fatal(err)
+		for _, table := range walledTables {
+			var n int
+			if err := tx.QueryRow(context.Background(),
+				"SELECT count(*) FROM "+table+" WHERE org_id=$1", org).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			counts[table] = n
 		}
 	})
-	return n
+	return counts
 }

@@ -55,14 +55,21 @@ func orgOf(r *http.Request) *Org {
 	return nil
 }
 
-// scopeOrg: the request's scope as a number, to bind in every query touching a
-// walled table. Unlike orgOf it is never nil — the apex is 0, a scope that
-// owns no campaign row.
+// scopeOrg: the request's scope as a number, to bind in every query touching
+// a walled table. The apex is 0 — a scope that owns no campaign row.
+//
+// A request that never went through inScope has NO scope, and answering 0
+// there would quietly serve the instance scope instead of failing. Every
+// route that queries goes through inScope, so this cannot happen; if it ever
+// does, it must be loud. `s.tx(r)` panics on the same condition, one line
+// later, for the same reason.
 func scopeOrg(r *http.Request) int {
-	if p := scopeOf(r); p != nil {
-		return p.OrgID
+	p := scopeOf(r)
+	if p == nil {
+		panic("scopeOrg outside a scope: this request never went through " +
+			"inScope, and binding a default campaign would hide it")
 	}
-	return OrgInstance
+	return p.OrgID
 }
 
 // commit closes a write's transaction. Call it before replying.

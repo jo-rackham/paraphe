@@ -37,13 +37,17 @@ var (
 	sqlLineComment  = regexp.MustCompile(`--[^\n]*`)
 	sqlBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 	sqlStringLit    = regexp.MustCompile(`'[^']*'`)
-	sqlSpaces       = regexp.MustCompile(`\s+`)
-	// A predicate, not a mention. The right-hand side is deliberately not
-	// pinned: it is `$1`, or a `%[1]s` placeholder in a format string, or
-	// another table's org_id in a join, or an expression the resolver could
-	// not read. What matters is the EQUALITY — `SELECT org_id, email FROM
-	// accounts` passed the version that only looked for the word.
-	orgPredicate = regexp.MustCompile(`([A-Z][A-Z0-9_]*\.)?ORG_ID\s*=`)
+	// The OPENING tag of a PostgreSQL dollar-quoted string. `$1` is not one:
+	// a tag never starts with a digit.
+	dollarOpen = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$`)
+	sqlSpaces  = regexp.MustCompile(`\s+`)
+	// A predicate whose RIGHT-hand side is bounded. Checking the equality
+	// alone accepted `org_id = org_id`, `org_id = COALESCE($1, org_id)` and
+	// `org_id = ANY(SELECT id FROM orgs)` — three ways of writing "every
+	// campaign" that read as a filter.
+	orgPredicate = regexp.MustCompile(
+		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID(?:::[A-Z]+)?\s*=\s*` +
+			`(\$\?|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
 	// Predicates that are always true, whatever else the statement says.
 	neutralised = regexp.MustCompile(`\bOR\s+(TRUE|1\s*=\s*1)\b`)
 	// A statement whose TABLE is a format verb: which table it reads cannot
@@ -61,17 +65,87 @@ var (
 // REMOVED — "org_id" inside either is not a filter, and both were used to
 // walk past the first version.
 func normaliseSQL(sql string) string {
+	// Literals FIRST. Run the other way round, the block-comment pattern
+	// spanned two strings — `WHERE a='/*' AND org_id=$1 AND b='*/'` — and ate
+	// the real predicate between them.
+	sql = stripDollarQuoted(sql)
+	sql = sqlStringLit.ReplaceAllString(sql, "''")
 	sql = sqlBlockComment.ReplaceAllString(sql, " ")
 	sql = sqlLineComment.ReplaceAllString(sql, " ")
-	sql = sqlStringLit.ReplaceAllString(sql, "''")
 	return sqlSpaces.ReplaceAllString(strings.ToUpper(sql), " ")
+}
+
+// sqlTextMarked is sqlText with a difference that matters: an expression it
+// cannot resolve becomes the marker `$?` instead of vanishing. Dropped, a
+// bound parameter written `"org_id="+req.p(org)` left the text reading
+// `ORG_ID=` — no right-hand side — and a predicate that IS bound looked like
+// one that is not. The marker counts as bound; a right-hand side the
+// resolver CAN read is judged on its merits.
+func sqlTextMarked(expr ast.Expr, values map[string]string) string {
+	switch e := expr.(type) {
+	case *ast.BinaryExpr:
+		return sqlTextMarked(e.X, values) + sqlTextMarked(e.Y, values)
+	case *ast.ParenExpr:
+		return sqlTextMarked(e.X, values)
+	case *ast.CallExpr:
+		// fmt.Sprintf and friends: the format string plus its arguments is
+		// as close to the statement as source can get.
+		var out string
+		for _, a := range e.Args {
+			out += sqlTextMarked(a, values)
+		}
+		if out == "" {
+			return "$?"
+		}
+		return out
+	}
+	if txt, ok := resolveString(expr, values); ok {
+		return txt
+	}
+	return "$?"
+}
+
+// stripDollarQuoted removes PostgreSQL dollar-quoted strings. RE2 has no
+// backreferences, so "the same tag again" cannot be written as a pattern —
+// the scan is spelled out instead. Left standing, `$$fake org_id = $1$$`
+// made a string comparison read as a filter.
+func stripDollarQuoted(sql string) string {
+	for {
+		loc := dollarOpen.FindStringIndex(sql)
+		if loc == nil {
+			return sql
+		}
+		tag := sql[loc[0]:loc[1]]
+		rest := sql[loc[1]:]
+		end := strings.Index(rest, tag)
+		if end < 0 {
+			// unterminated: not valid SQL, and nothing to strip
+			return sql
+		}
+		sql = sql[:loc[0]] + "''" + rest[end+len(tag):]
+	}
+}
+
+// outerStatement: what is left once every balanced parenthesis is folded
+// away — that is, the statement itself, without its subqueries. A predicate
+// living inside `IN (SELECT … WHERE org_id = $1)` constrains the subquery,
+// not the DELETE around it.
+func outerStatement(sql string) string {
+	inner := regexp.MustCompile(`\([^()]*\)`)
+	for {
+		next := inner.ReplaceAllString(sql, " ")
+		if next == sql {
+			return next
+		}
+		sql = next
+	}
 }
 
 // tableRef matches a walled table however it is written: schema-qualified,
 // quoted, aliased with or without AS, and after USING as well as FROM/JOIN.
 func tableRef(table string) *regexp.Regexp {
 	return regexp.MustCompile(
-		`(?:FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:[A-Z_]+\.)?"?` + table +
+		`(FROM|JOIN|INTO|USING|UPDATE|,)\s+(?:[A-Z_]+\.)?"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
@@ -146,7 +220,8 @@ func sqlStatements(t *testing.T) []statement {
 				if a, ok := n.(*ast.AssignStmt); ok &&
 					len(a.Lhs) == 1 && len(a.Rhs) == 1 {
 					if id, ok := a.Lhs[0].(*ast.Ident); ok {
-						if txt := sqlText(a.Rhs[0], values); txt != "" {
+						if txt := sqlTextMarked(a.Rhs[0], values); txt != "" &&
+							txt != "$?" {
 							if a.Tok.String() == "+=" {
 								scoped[id.Name] += txt
 							} else {
@@ -163,10 +238,11 @@ func sqlStatements(t *testing.T) []statement {
 					return true
 				}
 				for _, arg := range call.Args {
-					if sql := sqlText(arg, scoped); sql != "" {
-						out = append(out, statement{name, fn.Name.Name,
-							normaliseSQL(sql)})
+					if sqlText(arg, scoped) == "" {
+						continue
 					}
+					out = append(out, statement{name, fn.Name.Name,
+						normaliseSQL(sqlTextMarked(arg, scoped))})
 				}
 				return true
 			})
@@ -180,6 +256,35 @@ func sqlStatements(t *testing.T) []statement {
 func insertNaming(table string) *regexp.Regexp {
 	return regexp.MustCompile(`INSERT INTO\s+(?:[A-Z_]+\.)?"?` + table +
 		`"?\s*\(\s*ORG_ID\b`)
+}
+
+// boundPredicate: does one of the statement's predicates bind `alias` to
+// something bounded — a parameter, or ANOTHER table's org_id in a join?
+// `org_id = org_id` on the same table is a tautology, not a filter.
+func boundPredicate(preds [][]string, alias string) bool {
+	for _, p := range preds {
+		if p[1] != alias {
+			continue
+		}
+		rhs := p[2]
+		if strings.HasPrefix(rhs, "$") || strings.HasPrefix(rhs, "%") {
+			return true
+		}
+		// <other>.ORG_ID: a join between two walled tables, which is how the
+		// campaign travels from one to the other. The SAME alias on both
+		// sides says nothing at all.
+		if p[3] != "" && p[3] != alias {
+			return true
+		}
+	}
+	return false
+}
+
+func aliasOrTable(alias, table string) string {
+	if alias == "" {
+		return table
+	}
+	return alias
 }
 
 func fingerprint(sql string) string {
@@ -202,45 +307,47 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 
 	used := map[string]bool{}
 	for _, st := range statements {
+		// Subqueries fold away: what remains is the statement itself. A
+		// predicate inside `IN (SELECT … WHERE org_id = $1)` constrains the
+		// subquery, and the DELETE around it stays unbounded.
+		outer := outerStatement(st.SQL)
+		preds := orgPredicate.FindAllStringSubmatch(outer, -1)
 		for _, table := range tables {
-			m := refs[table].FindStringSubmatch(st.SQL)
-			if m == nil {
-				continue
-			}
-			print := fingerprint(st.SQL)
-			if _, allowed := crossesCampaigns[print]; allowed {
-				used[print] = true
-				continue
-			}
-			where := st.File + ":" + st.Func
-			if neutralised.MatchString(st.SQL) {
-				t.Errorf("%s: this query on %s carries an always-true "+
-					"disjunction, which cancels whatever else it says:\n\t%s",
-					where, table, st.SQL)
-				continue
-			}
-			want := "ORG_ID"
-			if alias := m[1]; alias != "" && !notAnAlias[alias] {
-				want = alias + ".ORG_ID"
-			}
-			found := false
-			for _, p := range orgPredicate.FindAllString(st.SQL, -1) {
-				if strings.HasPrefix(p, want) {
-					found = true
-					break
+			// EVERY reference, not the first: an INSERT INTO t(org_id, …)
+			// SELECT … FROM t satisfied the column list and the second
+			// reference was never looked at.
+			for _, m := range refs[table].FindAllStringSubmatch(outer, -1) {
+				print := fingerprint(st.SQL)
+				if _, allowed := crossesCampaigns[print]; allowed {
+					used[print] = true
+					continue
 				}
-			}
-			// An INSERT names the campaign by writing it: the column list
-			// carries org_id and the value is bound.
-			if !found && insertNaming(table).MatchString(st.SQL) {
-				found = true
-			}
-			if !found {
-				t.Errorf("%s: this query touches %s and never FILTERS on the "+
-					"campaign (looked for %s = $n). A privileged database role "+
-					"would serve one campaign's work to another. If the "+
-					"crossing is deliberate, add %q to crossesCampaigns:\n\t%s",
-					where, table, want, print, st.SQL)
+				where := st.File + ":" + st.Func
+				if neutralised.MatchString(outer) {
+					t.Errorf("%s: this query on %s carries an always-true "+
+						"disjunction, which cancels whatever else it says:\n\t%s",
+						where, table, st.SQL)
+					continue
+				}
+				alias := m[2]
+				if notAnAlias[alias] {
+					alias = ""
+				}
+				if boundPredicate(preds, alias) {
+					continue
+				}
+				// An INSERT names the campaign by writing it, but only for
+				// the row it writes: `INTO` is the one keyword that counts.
+				if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") &&
+					insertNaming(table).MatchString(st.SQL) {
+					continue
+				}
+				t.Errorf("%s: this reference to %s is not bounded to the "+
+					"campaign (%s.org_id = $n, on the statement itself). A "+
+					"privileged database role would serve one campaign's work "+
+					"to another. If the crossing is deliberate, add %q to "+
+					"crossesCampaigns:\n\t%s",
+					where, table, aliasOrTable(alias, table), print, st.SQL)
 			}
 		}
 	}
