@@ -113,26 +113,30 @@ func TestACampaignCannotRewriteAnother(t *testing.T) {
 	a := orgID(t, s, testSlug)
 	b := createOrg(t, s, "other", "Other campaign")
 
+	// One probe per command: `orgs` has a policy for each, and a command no
+	// probe exercises has no wall that anyone would notice losing. DELETE was
+	// exactly that — opened wide, the whole suite stayed green.
+	walledOff(t, s, a, "renaming a neighbour",
+		"UPDATE orgs SET name=$1 WHERE id=$2", "PRIS PAR A", b)
+	walledOff(t, s, a, "deleting a neighbour",
+		"DELETE FROM orgs WHERE id=$1", b)
+	walledOff(t, s, a, "creating a campaign of its own",
+		"INSERT INTO orgs(slug, name, campaign, batch_size, state) "+
+			"VALUES('squatted','Squatted','{}'::jsonb,2,'active')")
+
+	// The witness. Without it, "A changed nothing" would also hold if A could
+	// write no orgs row at all, and every refusal above would be about a write
+	// that never had a chance to happen.
 	asOrg(t, s.pool, a, func(tx pgx.Tx) {
 		tag, err := tx.Exec(context.Background(),
-			"UPDATE orgs SET name=$1 WHERE id=$2", "PRIS PAR A", b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := tag.RowsAffected(); n != 0 {
-			t.Errorf("campaign A rewrote %d row(s) belonging to campaign B", n)
-		}
-		// The witness. Without it, "A changed nothing" would also hold if A
-		// could write no orgs row at all, and the assertion above would be
-		// about a write that never had a chance to happen.
-		tag, err = tx.Exec(context.Background(),
 			"UPDATE orgs SET name=$1 WHERE id=$2", "A renamed itself", a)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("campaign A cannot write its own row (%v): every refusal "+
+				"above proves nothing", err)
 		}
 		if n := tag.RowsAffected(); n != 1 {
 			t.Fatalf("campaign A cannot write its OWN row either (%d rows): "+
-				"the assertion above proves nothing", n)
+				"every refusal above proves nothing", n)
 		}
 	})
 
@@ -144,22 +148,37 @@ func TestACampaignCannotRewriteAnother(t *testing.T) {
 	if name != "Other campaign" {
 		t.Errorf("campaign B is now named %q", name)
 	}
+}
 
-	// Creating a campaign belongs to the instance, never to a campaign. The
-	// refusal aborts its transaction, so this probe gets one of its own.
+// walledOff runs one write from inside campaign `org`, in a transaction of its
+// own because a refusal aborts it, and demands that the wall stop it ONE WAY
+// OR THE OTHER: no row matched, or PostgreSQL refused it outright.
+//
+// The two are not interchangeable and the difference is the finding: a policy
+// weakened to `USING (true) WITH CHECK (<narrow>)` stops matching nothing and
+// starts raising instead. Read through a bare `t.Fatal(err)`, that regression
+// showed up as an infrastructure error at a line that names nothing, and the
+// assertion meant to catch it was never reached.
+func walledOff(t *testing.T, s *Server, org int, what, sql string, args ...any) {
+	t.Helper()
 	ctx := context.Background()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // the insert is meant to fail
-	if err := setOrgScope(ctx, tx, a); err != nil {
+	defer tx.Rollback(ctx) //nolint:errcheck // the write is meant to fail
+	if err := setOrgScope(ctx, tx, org); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx,
-		"INSERT INTO orgs(slug, name, campaign, batch_size, state) "+
-			"VALUES('squatted','Squatted','{}'::jsonb,2,'active')"); err == nil {
-		t.Error("campaign A created a campaign of its own")
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		if !strings.Contains(err.Error(), "row-level security") {
+			t.Fatalf("%s: refused, but NOT by the wall — %v", what, err)
+		}
+		return
+	}
+	if n := tag.RowsAffected(); n != 0 {
+		t.Errorf("%s: campaign A reached %d row(s) it does not own", what, n)
 	}
 }
 
