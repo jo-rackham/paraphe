@@ -702,8 +702,8 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
               {data.departments_with_promise.map((d) => (
                 <span
                   key={d.key}
-                  className="chip"
-                  style={{ background: "#bbf7d0", marginRight: ".3rem" }}
+                  className="chip chip-vert"
+                  style={{ marginRight: ".3rem" }}
                 >
                   {d.key} : {d.n}
                 </span>

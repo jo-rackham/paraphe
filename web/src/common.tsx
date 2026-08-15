@@ -17,16 +17,20 @@ import type { Campaign, Mayor, Message, Note } from "./types.ts";
 // there. Two copies of this screen would be two occasions to thank someone
 // for an endorsement they never made.
 
+// label + chip tone. The tone names a CSS class (`chip-<tone>`) whose dot
+// colour is declared per colour scheme — a hex here forced light-mode
+// pastels onto the dark theme. The dot is redundant with the label, which
+// alone carries the state.
 export const STATUSES: Record<string, [string, string]> = {
-  to_contact: ["À contacter", "#e2e8f0"],
-  email_sent: ["Email envoyé", "#bfdbfe"],
-  letter_sent: ["Courrier envoyé", "#c7d2fe"],
-  to_call_back: ["À rappeler", "#fde68a"],
-  promised: ["Promesse de présentation", "#bbf7d0"],
-  signed: ["A signé (publié par le CC)", "#86efac"],
-  promised_elsewhere: ["Déjà promis à un autre candidat", "#fed7aa"],
-  refused: ["Refus", "#fecaca"],
-  do_not_contact: ["Ne plus contacter", "#e5e5e5"],
+  to_contact: ["À contacter", "gris"],
+  email_sent: ["Email envoyé", "bleu"],
+  letter_sent: ["Courrier envoyé", "indigo"],
+  to_call_back: ["À rappeler", "ambre"],
+  promised: ["Promesse de présentation", "vert"],
+  signed: ["A signé (publié par le CC)", "vert-fort"],
+  promised_elsewhere: ["Déjà promis à un autre candidat", "orange"],
+  refused: ["Refus", "rouge"],
+  do_not_contact: ["Ne plus contacter", "encre"],
 };
 
 // The data model is English, the screen is French. Rendering a value as it
@@ -301,8 +305,7 @@ export function Chip({ status }: { status: string }) {
   if (!known) {
     return (
       <span
-        className="chip"
-        style={{ background: "#fef08a" }}
+        className="chip chip-inconnu"
         title="Statut inconnu de cette version de l'application"
       >
         {status} <Emoji>⚠</Emoji>
@@ -314,12 +317,8 @@ export function Chip({ status }: { status: string }) {
       </span>
     );
   }
-  const [label, colour] = known;
-  return (
-    <span className="chip" style={{ background: colour }}>
-      {label}
-    </span>
-  );
+  const [label, tone] = known;
+  return <span className={`chip chip-${tone}`}>{label}</span>;
 }
 
 /**

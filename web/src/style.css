@@ -26,6 +26,11 @@
   /* cards float a hair off the page in light; in dark the border alone
      carries the edge — a shadow there only muddies it */
   --ombre: 0 1px 2px rgba(20, 18, 16, .06);
+  /* status dots, one hue per state, stepped per scheme */
+  --pastille-gris: #64748b; --pastille-bleu: #2563eb;
+  --pastille-indigo: #4f46e5; --pastille-ambre: #b45309;
+  --pastille-vert: #15803d; --pastille-vert-fort: #166534;
+  --pastille-orange: #c2410c; --pastille-rouge: #b91c1c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -37,6 +42,10 @@
     --piste: #332e22;
     --champ-trait: #6b6559;
     --ombre: none;
+    --pastille-gris: #94a3b8; --pastille-bleu: #60a5fa;
+    --pastille-indigo: #a5b4fc; --pastille-ambre: #fbbf24;
+    --pastille-vert: #4ade80; --pastille-vert-fort: #86efac;
+    --pastille-orange: #fb923c; --pastille-rouge: #f87171;
   }
 }
 * { box-sizing: border-box; }
@@ -103,8 +112,28 @@ a { color: var(--lien); }
          overflow-x: auto; box-shadow: var(--ombre); }
 /* sign-in: two fields lost on a 64 rem line — a narrow centred card */
 .carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
-.chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
-        font-size: .82rem; border: 1px solid rgba(0,0,0,.12); color: #141210; }
+/* Status chip: a dot in the status hue, a quiet border, the theme's own
+   text — the old hardcoded pastels forced light backgrounds onto the dark
+   scheme. The dot is decorative; the label alone carries the state. */
+.chip { display: inline-flex; align-items: center; gap: .35rem;
+        padding: .12rem .6rem .12rem .5rem; border-radius: 999px;
+        font-size: .82rem; border: 1px solid var(--trait);
+        background: var(--carte); color: var(--texte);
+        white-space: nowrap; }
+.chip::before { content: ""; width: .55em; height: .55em;
+                border-radius: 50%; flex: none;
+                background: var(--pastille, var(--texte-sec)); }
+.chip-gris { --pastille: var(--pastille-gris); }
+.chip-bleu { --pastille: var(--pastille-bleu); }
+.chip-indigo { --pastille: var(--pastille-indigo); }
+.chip-ambre { --pastille: var(--pastille-ambre); }
+.chip-vert { --pastille: var(--pastille-vert); }
+.chip-vert-fort { --pastille: var(--pastille-vert-fort); }
+.chip-orange { --pastille: var(--pastille-orange); }
+.chip-rouge { --pastille: var(--pastille-rouge); }
+.chip-encre { --pastille: var(--texte); }
+.chip-inconnu { background: var(--alerte-fond);
+                border-color: var(--alerte-trait); }
 table { border-collapse: collapse; width: 100%; }
 td, th { padding: .5rem .55rem; border-bottom: 1px solid var(--trait);
          text-align: left; vertical-align: top; }
