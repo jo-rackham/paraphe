@@ -159,12 +159,19 @@ func reservedSlug(s string) bool { return reservedSlugs[s] }
 func UnfilledKeys(campaign map[string]string) []string {
 	unfilled := []string{}
 	for _, k := range CampaignKeys {
-		v := normaliseForTemplateCheck(campaign[k])
-		if v == "" || templateValues[strings.ToLower(v)] || rxPlaceholder.MatchString(v) {
+		if templateValue(campaign[k]) {
 			unfilled = append(unfilled, k)
 		}
 	}
 	return unfilled
+}
+
+// templateValue: is this ONE value still the shipped template's — empty, a
+// known example, or a {placeholder} left in place? The campaign keys are
+// judged by it, and so is the public name the apex directory advertises.
+func templateValue(s string) bool {
+	v := normaliseForTemplateCheck(s)
+	return v == "" || templateValues[strings.ToLower(v)] || rxPlaceholder.MatchString(v)
 }
 
 // NFC, without zero-width characters, spaces collapsed: a "é" pasted from

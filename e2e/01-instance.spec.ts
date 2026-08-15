@@ -162,6 +162,12 @@ test.describe
       await expect(
         page.getByRole("link", { name: "Campagne ouverte en direct" }),
       ).toBeVisible();
+      // the bootstrap campaign is still named by the shipped template
+      // (« Prénom NOM ») : that is no identity to advertise, and its
+      // address must not appear until its coordination names it
+      await expect(page.getByText(`${FIRST_CAMPAIGN}.localhost`)).toHaveCount(
+        0,
+      );
       // typing narrows the list as you go
       await page.getByLabel("Rechercher une campagne").fill("direct");
       await expect(
@@ -170,7 +176,7 @@ test.describe
       await expect(
         page.getByRole("link", { name: "Campagne ouverte en direct" }),
       ).toBeVisible();
-      await expect(page.getByText("1/3 campagne(s)")).toBeVisible();
+      await expect(page.getByText("1/2 campagne(s)")).toBeVisible();
     });
 
     test("the instance administrator never sees a campaign's work", async ({

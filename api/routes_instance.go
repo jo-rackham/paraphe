@@ -474,12 +474,25 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 // already public by construction — the subdomain answers, and its public
 // campaign endpoint says the name.
 func (s *Server) routeCampaignDirectory(w http.ResponseWriter, r *http.Request) {
-	campaigns, err := s.rows(r,
+	rows, err := s.rows(r,
 		"SELECT slug, name FROM orgs WHERE state=$1 ORDER BY name, slug",
 		OrgActive)
 	if err != nil {
 		s.failure(w, err)
 		return
+	}
+	// A name still at the shipped template ("Prénom NOM") is not an identity
+	// to advertise: the campaign appears once its coordination has named it —
+	// the same doctrine as the banner and the mass mailing's refusal. The
+	// bootstrap campaign is born in that state; a moderated one arrives with
+	// the name its hosting request carried.
+	campaigns := make([]map[string]any, 0, len(rows))
+	for _, c := range rows {
+		name, _ := c["name"].(string)
+		if templateValue(name) {
+			continue
+		}
+		campaigns = append(campaigns, c)
 	}
 	replyJSON(w, http.StatusOK, map[string]any{
 		"campaigns": campaigns, "base_domain": BaseDomain(),

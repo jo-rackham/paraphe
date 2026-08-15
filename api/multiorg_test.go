@@ -451,6 +451,8 @@ func TestApexListsHostedCampaigns(t *testing.T) {
 	suspended := createOrg(t, s, "suspendue", "Campagne suspendue")
 	execAsMaintenance(t, s,
 		"UPDATE orgs SET state=$1 WHERE id=$2", OrgSuspended, suspended)
+	// still named by the shipped template: not an identity to advertise
+	createOrg(t, s, "gabarit", "Prénom NOM")
 
 	apex := clientOn(t, srv, "paraphe.test")
 	code, rep := apex.call(http.MethodGet, "/api/campaigns", nil)
@@ -468,6 +470,11 @@ func TestApexListsHostedCampaigns(t *testing.T) {
 	// a suspended campaign is not advertised: its address answers nobody
 	if slugs["suspendue"] {
 		t.Fatal("a suspended campaign is advertised on the home page")
+	}
+	// a template name is not advertised: « Prénom NOM » on the public home
+	// is the bootstrap campaign before anyone configured it
+	if slugs["gabarit"] {
+		t.Fatal("a campaign still named by the template is advertised")
 	}
 	// name and slug, and NOTHING else — a column added to orgs must not
 	// leak here by accident
