@@ -73,6 +73,11 @@ spec:
         checksum/secret: {{ printf "%s|%s" (include (print $.Template.BasePath "/secret.yaml") .)
             (.Values.secrets.existingSecret | default "") | sha256sum }}
     spec:
+      # kubelet injects one PARAPHE_* variable per Service port here too. No
+      # Valkey setting collides with them today, which is exactly why the
+      # flag belongs on every pod the chart draws rather than on the one
+      # where the collision was noticed.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         # the official image's valkey user

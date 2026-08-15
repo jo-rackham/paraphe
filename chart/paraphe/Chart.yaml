@@ -2,11 +2,13 @@ apiVersion: v2
 name: paraphe
 description: Outillage de recherche de parrainages d'élus — app d'équipe, données publiques
 type: application
-# `lifecycle.preStop.sleep` est GA en 1.30 et bêta en 1.29 : sans cette
-# borne, helm installe sur un cluster plus ancien et le drain n'existe
-# tout simplement pas — le pod reçoit SIGTERM pendant qu'on lui envoie
-# encore des requêtes, ce que le champ est là pour empêcher.
-kubeVersion: ">=1.29.0-0"
+# `lifecycle.preStop.sleep` est bêta et ACTIF PAR DÉFAUT à partir de 1.30
+# (en 1.29 il est alpha, donc désactivé) : sans cette borne, helm installe
+# sur un cluster où l'API retire le champ en silence — le pod reçoit
+# SIGTERM pendant qu'on lui envoie encore des requêtes, ce que le champ est
+# là pour empêcher. Un refus à l'installation vaut mieux qu'un drain qui
+# n'a jamais eu lieu.
+kubeVersion: ">=1.30.0-0"
 version: 0.1.0
 appVersion: "0.1.0"
 home: https://github.com/jo-rackham/paraphe

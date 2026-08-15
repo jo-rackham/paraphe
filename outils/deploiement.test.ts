@@ -167,6 +167,64 @@ describe("the deployment files", () => {
     ).toBeGreaterThan(10);
   });
 
+  // kubelet injects one legacy Docker-links variable per Service port into
+  // every container. The Service is named `paraphe`, so they arrive as
+  // PARAPHE_PORT=tcp://<ip>:80 — the name the application reads as its own
+  // setting. The flag that refuses them belongs on every pod the chart
+  // draws: put on the one where the collision was noticed, it says nothing
+  // about the next template somebody adds.
+  it("refuse the kubelet's service variables on every pod they draw", () => {
+    const templates = join(ROOT, "chart", "paraphe", "templates");
+    const bare: string[] = [];
+    let covered = 0;
+    for (const name of readdirSync(templates).filter((f) =>
+      f.endsWith(".yaml"),
+    )) {
+      const text = readFileSync(join(templates, name), "utf8");
+      // a pod template of OUR making: `spec.template.spec`. CNPG's Cluster
+      // draws its own pods and takes no such field.
+      for (const doc of text.split(/^---$/m)) {
+        if (!/^\s+template:\s*$/m.test(doc)) continue;
+        if (/enableServiceLinks:\s*false/.test(doc)) covered++;
+        else bare.push(name);
+      }
+    }
+    expect(
+      bare,
+      "these pod templates take the kubelet's PARAPHE_* variables",
+    ).toEqual([]);
+    expect(
+      covered,
+      "no pod template found: the check read nothing",
+    ).toBeGreaterThan(1);
+  });
+
+  // `lifecycle.preStop.sleep` is only honoured where its feature gate is on
+  // by default — beta in 1.30, alpha (hence OFF) in 1.29. Below that floor
+  // the API server strips the field without a word, and the drain the
+  // Deployment relies on never happens. The floor and the field are one
+  // decision: whoever removes the sleep should lower the floor knowingly,
+  // and whoever lowers the floor should learn what it costs here.
+  it("bound the cluster version the preStop drain needs", () => {
+    const chart = readFileSync(
+      join(ROOT, "chart", "paraphe", "Chart.yaml"),
+      "utf8",
+    );
+    const deployment = readFileSync(
+      join(ROOT, "chart", "paraphe", "templates", "deployment.yaml"),
+      "utf8",
+    );
+    if (!/preStop:\s*\n\s*sleep:/.test(deployment)) return; // no sleep, no floor
+    const floor = /^kubeVersion:\s*">=(\d+)\.(\d+)\./m.exec(chart);
+    expect(floor, "the chart declares no kubeVersion floor").toBeTruthy();
+    const [major, minor] = [Number(floor![1]), Number(floor![2])];
+    expect(
+      major * 1000 + minor,
+      "preStop.sleep is alpha and OFF by default below 1.30: the chart " +
+        "would install where the drain is silently dropped",
+    ).toBeGreaterThanOrEqual(1030);
+  });
+
   // The pages and the JSON come from ONE process, so `securityHeaders`
   // wraps both and there is no second implementation to hold in step. What
   // remains checkable here is that the middleware is still what wraps the
