@@ -590,6 +590,8 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=suivi_maires.csv")
+	// nominative rows behind a session: never for a shared cache
+	w.Header().Set("Cache-Control", "no-store")
 	// BOM: Excel and LibreOffice otherwise open UTF-8 as latin-1
 	if _, err := w.Write([]byte("\uFEFF")); err != nil {
 		return

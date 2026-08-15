@@ -1043,6 +1043,10 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		"routes_mayors.go:counters":        true,
 		"routes_mayors.go:orderedCounters": true,
 		"db.go:textColumn":                 true,
+		// Not SQL at all: valkey-go's Lua Exec, running the rate-limit
+		// counter script against Valkey. No PostgreSQL driver is in reach of
+		// that call, so there is no walled table it could touch.
+		"limiter_valkey.go:count": true,
 	}
 
 	files := apiPackage(t)

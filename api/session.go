@@ -37,7 +37,12 @@ import (
 // so a deactivated account loses access on the very next call, whatever the
 // token's lifetime.
 const (
-	SessionCookieName = "paraphe_session"
+	// The __Host- prefix is enforced by the BROWSER: it refuses the cookie
+	// unless it is Secure, carries Path=/ and no Domain attribute. The
+	// server already sets all three unconditionally; the prefix makes a
+	// future regression impossible to ship silently, because no browser
+	// would keep the session.
+	SessionCookieName = "__Host-paraphe_session"
 	SessionDuration   = 12 * time.Hour
 
 	jwtIssuer = "paraphe"

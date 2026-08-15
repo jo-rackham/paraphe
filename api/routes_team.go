@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -256,6 +257,9 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	s.securityEvent(r, slog.LevelInfo, "account_toggled",
+		"account", s.accountPseudonym(target),
+		"by", s.accountPseudonym(me.Email), "active", active)
 	replyJSON(w, http.StatusOK, map[string]any{"email": target, "active": active})
 }
 

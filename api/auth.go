@@ -327,6 +327,10 @@ func carriesNul(v reflect.Value) bool {
 
 func replyJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// Every API answer is either personal to a session or freshly computed;
+	// none is for a cache. Without the header, a shared proxy is ALLOWED to
+	// cache a 200 heuristically — and these bodies carry nominative data.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	if v == nil {
 		return

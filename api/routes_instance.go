@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -331,5 +332,10 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// the slug is on its way to being a public subdomain — not a secret;
+	// the moderator, like every account in these logs, is a pseudonym
+	s.securityEvent(r, slog.LevelInfo, "hosting_decided",
+		"slug", slug, "decision", d.Decision,
+		"by", s.accountPseudonym(accountOf(r).Email))
 	replyJSON(w, http.StatusOK, response)
 }

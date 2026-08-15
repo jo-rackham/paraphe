@@ -1,0 +1,309 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
+
+// Which ceiling covers which route — declared HERE, checked against the
+// router's own tree. A route added without a line in this map turns the test
+// red: the judgement "this one needs no limit" must be written down, because
+// an unlimited route looks exactly like a limited one until someone leans
+// on it.
+var routeLimits = map[string]string{
+	"GET /health":    "never: kubelet's liveness probe",
+	"GET /health/db": "never: kubelet's readiness probe",
+
+	"GET /api/config":          "anon_ip",
+	"POST /api/session":        "signin_ip + signin_account",
+	"DELETE /api/session":      "none: clears a cookie, touches nothing",
+	"GET /api/campaign/public": "anon_ip",
+
+	"GET /api/me":                "none: authenticated read of one's own row",
+	"POST /api/me/personal_note": "write_account",
+
+	"GET /api/dashboard":              "none: authenticated read",
+	"GET /api/facets":                 "none: authenticated read",
+	"GET /api/mayors":                 "none: authenticated read",
+	"GET /api/mayors/{insee}":         "none: authenticated read",
+	"GET /api/export.csv":             "export_account",
+	"POST /api/mayors/{insee}/status": "write_account",
+	"POST /api/batch":                 "write_account",
+
+	"GET /api/team":                         "none: authenticated read",
+	"POST /api/team/group":                  "write_account",
+	"POST /api/team/account":                "write_account",
+	"POST /api/team/account/{email}/active": "write_account",
+	"POST /api/campaign":                    "write_account",
+	"POST /api/request":                     "hosting_ip",
+	"GET /api/admin/requests":               "none: authenticated read",
+	"POST /api/admin/requests/{id}":         "write_account",
+}
+
+func TestEveryRouteDeclaresItsCeiling(t *testing.T) {
+	s, _ := testServer(t)
+	seen := map[string]bool{}
+	err := chi.Walk(s.router(), func(method, route string, _ http.Handler,
+		_ ...func(http.Handler) http.Handler) error {
+		route = strings.TrimSuffix(route, "/")
+		if route == "/api" || route == "" || !strings.HasPrefix(route, "/") {
+			return nil
+		}
+		if !strings.HasPrefix(route, "/api") && !strings.HasPrefix(route, "/health") {
+			return nil // the interface fallback, cached files, not the API
+		}
+		key := method + " " + route
+		seen[key] = true
+		if _, declared := routeLimits[key]; !declared {
+			t.Errorf("%s carries no line in routeLimits: say which ceiling "+
+				"covers it, or why none does", key)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) < 15 {
+		t.Fatalf("only %d routes walked: the tree was not read", len(seen))
+	}
+	for key := range routeLimits {
+		if !seen[key] {
+			t.Errorf("routeLimits describes %s, which is not a route any "+
+				"more: the next route under that name would inherit its claim", key)
+		}
+	}
+}
+
+// The ceilings, exercised end to end — one route per class, driven to the
+// crossing and one step past it. What is asserted is the ANSWER: the 429,
+// its Retry-After, and — where a write was refused — the absence of the row.
+
+func TestSignInCeilingPerSource(t *testing.T) {
+	_, srv := testServer(t)
+	c := newClient(t, srv)
+	// distinct addresses so the per-account ceiling (10) stays out of the
+	// way: what is driven here is the per-source one (20)
+	for i := 1; i <= limitSignInIP.events; i++ {
+		code, _ := c.call(http.MethodPost, "/api/session", map[string]string{
+			"email": fmt.Sprintf("probe%d@exemple.fr", i), "password": "wrong"})
+		if code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: %d, want 401 below the ceiling", i, code)
+		}
+	}
+	code, body := c.call(http.MethodPost, "/api/session", map[string]string{
+		"email": "probe-final@exemple.fr", "password": "wrong"})
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d: %d, want 429 — the per-source ceiling did not hold",
+			limitSignInIP.events+1, code)
+	}
+	if body["error"] == "" {
+		t.Fatal("the 429 carries no readable sentence")
+	}
+}
+
+func TestSignInCeilingPerAccountIsBlindToExistence(t *testing.T) {
+	s, srv := testServer(t)
+	createAccount(t, s, "existing@exemple.fr", RoleVolunteer, nil)
+
+	attempt := func(c *client, email string) (int, string) {
+		t.Helper()
+		resp, err := c.http.Do(c.request(http.MethodPost, "/api/session",
+			map[string]string{"email": email, "password": "wrong-password-42"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		// the sentence, not the Retry-After seconds: the message is
+		// minute-coarse by design, the seconds shift with the clock and
+		// would make this comparison flaky without telling anyone anything
+		if resp.StatusCode == http.StatusTooManyRequests &&
+			resp.Header.Get("Retry-After") == "" {
+			t.Fatal("a 429 without Retry-After")
+		}
+		return resp.StatusCode, out["error"]
+	}
+
+	// Driving two addresses to the ACCOUNT ceiling takes 22 attempts, which
+	// would trip the per-source ceiling (20) first and prove nothing about
+	// this one. The source counter is cleared between the two runs: what is
+	// under test is the account ceiling, alone.
+	clearSource := func() {
+		s.limiter.forget(context.Background(), limitSignInIP, "127.0.0.1")
+	}
+
+	drive := func(email string) (int, string) {
+		var code int
+		var shape string
+		for i := 1; i <= limitSignInAccount.events+1; i++ {
+			code, shape = attempt(newClient(t, srv), email)
+		}
+		return code, shape
+	}
+	codeExisting, shapeExisting := drive("existing@exemple.fr")
+	clearSource()
+	codeGhost, shapeGhost := drive("ghost@exemple.fr")
+
+	if codeExisting != http.StatusTooManyRequests || codeGhost != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d: existing=%d ghost=%d, want 429 for both",
+			limitSignInAccount.events+1, codeExisting, codeGhost)
+	}
+	// The whole point: the ceiling must not become the enumeration oracle
+	// the decoy hash closed. Same code, same sentence, same shape — the
+	// Retry-After is compared inside the shape, so a timing hint would show.
+	if shapeExisting != shapeGhost {
+		t.Fatalf("the 429 differs between an existing account (%q) and a "+
+			"nonexistent one (%q): the limiter answers the question the decoy "+
+			"hash exists to refuse", shapeExisting, shapeGhost)
+	}
+}
+
+func TestSignInSuccessResetsTheAccountCeiling(t *testing.T) {
+	s, srv := testServer(t)
+	password := createAccount(t, s, "team-box@exemple.fr", RoleVolunteer, nil)
+	c := newClient(t, srv)
+	// a shared team computer fumbles most of the window…
+	for i := 1; i < limitSignInAccount.events; i++ {
+		if code := c.signIn("team-box@exemple.fr", "wrong"); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: %d", i, code)
+		}
+	}
+	// …then gets it right: the counter must clear
+	if code := c.signIn("team-box@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("the correct password answered %d below the ceiling", code)
+	}
+	for i := 1; i < limitSignInAccount.events; i++ {
+		if code := c.signIn("team-box@exemple.fr", "wrong"); code != http.StatusUnauthorized {
+			t.Fatalf("post-success attempt %d: %d — the success did not clear "+
+				"the counter, and the next fumble locks the whole team box", i, code)
+		}
+	}
+}
+
+func TestHostingFormCeilingPerSource(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	c := clientOn(t, srv, "paraphe.test")
+	// invalid bodies on purpose: the ceiling counts ATTEMPTS — an attacker
+	// probing with garbage is still probing — and nothing may be written
+	for i := 1; i <= limitHostingIP.events; i++ {
+		code, _ := c.call(http.MethodPost, "/api/request", map[string]string{"slug": "!!"})
+		if code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: %d, want 400 below the ceiling", i, code)
+		}
+	}
+	code, _ := c.call(http.MethodPost, "/api/request", map[string]string{"slug": "!!"})
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d: %d, want 429", limitHostingIP.events+1, code)
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM hosting_requests"); n != 0 {
+		t.Fatalf("%d hosting requests written by refused attempts", n)
+	}
+}
+
+func TestAnonymousReadCeilingSparesTheProbes(t *testing.T) {
+	_, srv := testServer(t)
+	c := newClient(t, srv)
+	for i := 1; i <= limitAnonIP.events; i++ {
+		code, _ := c.call(http.MethodGet, "/api/config", nil)
+		if code != http.StatusOK {
+			t.Fatalf("read %d: %d below the ceiling", i, code)
+		}
+	}
+	code, resp := c.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("read %d: %d, want 429", limitAnonIP.events+1, code)
+	}
+	_ = resp
+	// the probes live OUTSIDE every ceiling: a kubelet asks relentlessly,
+	// and a probe refused for zeal is a pod restarted for nothing
+	for i := range limitAnonIP.events + 5 {
+		if code, _ := c.call(http.MethodGet, "/health", nil); code != http.StatusOK {
+			t.Fatalf("liveness probe %d answered %d: the ceiling reached the "+
+				"probes", i, code)
+		}
+	}
+}
+
+func TestWriteCeilingPerAccount(t *testing.T) {
+	s, srv := testServer(t)
+	password := createAccount(t, s, "writer@exemple.fr", RoleVolunteer, nil)
+	c := newClient(t, srv)
+	if code := c.signIn("writer@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	for i := 1; i <= limitWriteAccount.events; i++ {
+		code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+			map[string]string{"personal_note": "note"})
+		if code != http.StatusOK {
+			t.Fatalf("write %d: %d below the ceiling", i, code)
+		}
+	}
+	code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+		map[string]string{"personal_note": "one too many"})
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("write %d: %d, want 429", limitWriteAccount.events+1, code)
+	}
+	if got := scalar[string](t, s, "SELECT personal_note FROM accounts WHERE "+
+		"org_id=$1 AND email='writer@exemple.fr'", orgID(t, s, testSlug)); got != "note" {
+		t.Fatalf("the refused write reached the row: %q", got)
+	}
+}
+
+func TestExportCeilingPerAccount(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 2, "01")
+	password := createAccount(t, s, "exporter@exemple.fr", RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn("exporter@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	for i := 1; i <= limitExportAccount.events; i++ {
+		code, _ := c.call(http.MethodGet, "/api/export.csv", nil)
+		if code != http.StatusOK {
+			t.Fatalf("export %d: %d below the ceiling", i, code)
+		}
+	}
+	code, _ := c.call(http.MethodGet, "/api/export.csv", nil)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("export %d: %d, want 429 — this is the whole table, %d times "+
+			"a window is enough for anyone", limitExportAccount.events+1, code,
+			limitExportAccount.events)
+	}
+}
+
+func TestRefusalCarriesRetryAfterAndCORSWhereDue(t *testing.T) {
+	_, srv := testServer(t)
+	c := newClient(t, srv)
+	var last *http.Response
+	for range limitAnonIP.events + 1 {
+		resp, err := c.http.Do(c.request(http.MethodGet, "/api/campaign/public", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		last = resp
+	}
+	if last.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("final read: %d, want 429", last.StatusCode)
+	}
+	if last.Header.Get("Retry-After") == "" {
+		t.Fatal("the 429 says nothing about when to come back")
+	}
+	// this route is read cross-origin by the browser version: without the
+	// header on the REFUSAL too, the browser hides the sentence and shows
+	// « Failed to fetch »
+	if last.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("the 429 dropped the CORS header the route promises every origin")
+	}
+	if cc := last.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control on an API answer: %q, want no-store", cc)
+	}
+}

@@ -13,12 +13,13 @@ import (
 // One HTTP request = one transaction, opened on the scope its Host header
 // designates.
 //
-// This is the non-negotiable counterpart of walling campaigns off by the
-// `org_id` column: the filter does not rest on the discipline of each SQL
-// query, but on `app.org_id` set here once and enforced by PostgreSQL. A
-// route that forgot its WHERE clause would still see nothing of another
-// campaign — which is exactly what TestNoCampaignSeesAnother
-// verifies.
+// The wall between campaigns is APPLICATIVE: every query touching a walled
+// table binds the scope resolved here as $1 (`scoped`, auth.go), and two
+// guards hold that discipline — TestEveryQueryOnAWalledTableNamesTheCampaign
+// reads the package's SQL, TestNoCampaignSeesAnother exercises two campaigns
+// against each other. PostgreSQL row-level security was a second wall and
+// was removed on 15/08/2026 (see CLAUDE.md): nothing below the queries
+// filters for them.
 
 const scopeKey contextKey = 1
 

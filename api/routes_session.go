@@ -89,16 +89,25 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	good, verifyErr := VerifyPassword(stored, d.Password)
 	if verifyErr != nil {
 		// an unreadable hash is an operations problem, not a typing error:
-		// it is logged in full. Telling the client would reveal that the
-		// account exists.
-		slog.Error("unusable password hash", "email", email, "error", verifyErr)
+		// its reason is logged in full — the account only as a pseudonym,
+		// like every subject in these logs. Telling the client would reveal
+		// that the account exists.
+		slog.Error("unusable password hash",
+			"account", s.accountPseudonym(email), "error", verifyErr)
 		good = false
 	}
 	if !found || !good {
+		// One event whatever the cause: distinguishing "no such address"
+		// from "wrong password" in the log would store exactly the
+		// existence signal the decoy hash exists to withhold.
+		s.securityEvent(r, slog.LevelInfo, "signin_failed",
+			"account", s.accountPseudonym(email))
 		errorJSON(w, http.StatusUnauthorized, "Adresse ou mot de passe incorrect.")
 		return
 	}
 	if !active {
+		s.securityEvent(r, slog.LevelInfo, "signin_refused_inactive",
+			"account", s.accountPseudonym(email))
 		errorJSON(w, http.StatusForbidden,
 			"Ce compte a été désactivé. Voyez votre référent.")
 		return
@@ -133,20 +142,29 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	// and refusing it because an upgrade could not be written would turn an
 	// improvement into an outage. The old hash still verifies.
 	if NeedsRehash(stored) {
+		account := s.accountPseudonym(email)
 		if fresh, hashErr := HashPassword(d.Password); hashErr != nil {
-			slog.Warn("password hash not upgraded", "email", email, "error", hashErr)
+			slog.Warn("password hash not upgraded", "account", account, "error", hashErr)
 		} else if _, execErr := s.tx(r).Exec(r.Context(),
 			"UPDATE accounts SET password_hash=$3 WHERE org_id=$1 AND email=$2",
 			scopeOrg(r), email, fresh); execErr != nil {
-			slog.Warn("password hash not upgraded", "email", email, "error", execErr)
+			slog.Warn("password hash not upgraded", "account", account, "error", execErr)
 		} else if commitErr := s.commit(r); commitErr != nil {
-			slog.Warn("password hash not upgraded", "email", email, "error", commitErr)
+			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
 	if err := s.sessions.Set(w, email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
 		return
 	}
+	// The attempt counter served its purpose: a signed-in account starts
+	// its next window clean, so a shared team box that fumbles a few times
+	// and then succeeds is not carrying failures towards the ceiling.
+	if subject, ok := s.signInSubjectFor(r, email); ok {
+		s.limiter.forget(r.Context(), limitSignInAccount, subject)
+	}
+	s.securityEvent(r, slog.LevelInfo, "signin_succeeded",
+		"account", s.accountPseudonym(email))
 	replyJSON(w, http.StatusOK, map[string]any{
 		"account":     c,
 		"departments": departments,

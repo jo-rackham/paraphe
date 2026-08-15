@@ -97,6 +97,15 @@ var Settings = []Setting{
 		Help: "mayors handed out per batch; overrides the campaign file"},
 	{Key: "log_level", Env: "PARAPHE_LOG_LEVEL", Flag: "log-level",
 		Default: "info", Help: "debug, info, warn or error"},
+	{Key: "valkey_url", Env: "PARAPHE_VALKEY_URL", Flag: "valkey-url",
+		Help: "shared rate-limit counters: valkey://host:6379, or " +
+			"valkey+sentinel://h1:26379,h2:26379,h3:26379/master-name; " +
+			"empty holds them in process memory (fine for one instance)"},
+	{Key: "valkey_password", Env: "PARAPHE_VALKEY_PASSWORD", Flag: "valkey-password",
+		Help: "password for Valkey and its sentinels; never put it in valkey_url"},
+	{Key: "trusted_proxies", Env: "PARAPHE_TRUSTED_PROXIES", Flag: "trusted-proxies",
+		Help: "CIDRs whose X-Forwarded-For is believed (the TLS proxy, the " +
+			"ingress); empty attributes every request to its TCP peer"},
 }
 
 // fromFile: the `server:` block, read once at startup. Empty until then, so

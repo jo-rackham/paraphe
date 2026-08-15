@@ -28,6 +28,11 @@ github.com/jackc/puddle/v2/internal/genstack
 ## explicit
 # github.com/rogpeppe/go-internal v1.16.0
 ## explicit; go 1.25
+# github.com/valkey-io/valkey-go v1.0.77
+## explicit; go 1.25.0
+github.com/valkey-io/valkey-go
+github.com/valkey-io/valkey-go/internal/cmds
+github.com/valkey-io/valkey-go/internal/util
 # golang.org/x/crypto v0.55.0
 ## explicit; go 1.25.0
 golang.org/x/crypto/argon2

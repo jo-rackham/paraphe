@@ -232,6 +232,10 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 		decoyHash:     decoy,
 		now:           time.Now,
 		webDir:        t.TempDir(),
+		// the process store, like production without valkey_url: each test
+		// server counts alone, and its counters die with it
+		limiter: newRateLimiter([]byte("test key"), nil, time.Now),
+		logKey:  deriveKey([]byte("test key"), "paraphe:log-pseudonyms:v1"),
 	}
 	// TLS, because the session cookie is Secure and Go's cookie jar applies
 	// RFC 6265 to the letter: it will not send such a cookie over http://,

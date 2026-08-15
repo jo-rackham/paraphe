@@ -55,6 +55,14 @@ type Server struct {
 	decoyHash     string
 	now           func() time.Time
 	webDir        string
+	// proxies: the networks whose X-Forwarded-For is believed (clientip.go)
+	proxies trustedProxies
+	// limiter: the rate limiter — Valkey-backed when valkey_url is set,
+	// this process's memory otherwise (limiter.go)
+	limiter *rateLimiter
+	// logKey derives the day-scoped pseudonyms the security events carry:
+	// no client address and no submitted email reaches a log line raw
+	logKey []byte
 	// marked index.html: see markInterface
 	landingPage []byte
 	// the same page, gzipped once at startup: it is served on every load
@@ -237,6 +245,30 @@ func run() error {
 		return err
 	}
 
+	proxies, err := parseTrustedProxies(Get("trusted_proxies"))
+	if err != nil {
+		return err
+	}
+	// The shared store exists only when the deployment asked for one; the
+	// process store always does. Reaching Valkey is checked here so a wrong
+	// URL or password is one startup line, but a Valkey outage does not
+	// hold the start hostage: the limiter degrades out loud instead.
+	var shared counterStore
+	var valkeyCounters *valkeyStore
+	if url := Get("valkey_url"); url != "" {
+		valkeyCounters, err = newValkeyStore(url, Get("valkey_password"))
+		if err != nil {
+			return err
+		}
+		defer valkeyCounters.close()
+		if err := valkeyCounters.ping(ctx); err != nil {
+			slog.Error("Valkey does not answer: rate limits start degraded, "+
+				"held per instance until it does", "error", err)
+		}
+		shared = valkeyCounters
+	}
+	limiterStartupLog(valkeyCounters, Get("valkey_url"))
+
 	s := &Server{
 		pool:          pool,
 		cfg:           cfg,
@@ -245,6 +277,9 @@ func run() error {
 		decoyHash:     decoy,
 		now:           time.Now,
 		webDir:        Get("web_dir"),
+		proxies:       proxies,
+		limiter:       newRateLimiter(secret, shared, time.Now),
+		logKey:        deriveKey(secret, "paraphe:log-pseudonyms:v1"),
 	}
 	// One image serves the pages AND the JSON, so an unreadable interface is
 	// a broken image and not a shape anybody deploys: it FAILS the start.
@@ -402,20 +437,31 @@ func (s *Server) router() chi.Router {
 		})
 
 		// No session yet: what the page needs to know before anyone signs in.
-		r.With(guard(s.inScope)).Get("/config", s.routeConfig)
-		r.With(guard(jsonOnly), guard(admitSignIn), guard(s.inScope)).
+		// The anonymous ceilings sit FIRST: a refused caller must not reach
+		// inScope, which is where a request starts holding a pool connection.
+		r.With(guard(s.limitIP(limitAnonIP)), guard(s.inScope)).
+			Get("/config", s.routeConfig)
+		// Sign-in counts twice: per source before anything is read, and per
+		// submitted address once jsonOnly has buffered the body. Both before
+		// admitSignIn — a refused attempt has no business queueing for the
+		// hash gate.
+		r.With(guard(s.limitIP(limitSignInIP)), guard(jsonOnly),
+			guard(s.limitSignInBody), guard(admitSignIn), guard(s.inScope)).
 			Post("/session", s.routeSignIn)
 		r.Delete("/session", s.routeSignOut)
 		// Read by the browser version from ANOTHER origin: no session, no
 		// cookie, only the campaign a mayor already reads in every message.
-		r.With(guard(publicToEveryOrigin), guard(s.inScope)).
+		// The CORS marker stays first so a 429 remains readable over there.
+		r.With(guard(publicToEveryOrigin), guard(s.limitIP(limitAnonIP)),
+			guard(s.inScope)).
 			Get("/campaign/public", s.routePublicCampaign)
 
 		// Signed in, whatever the scope.
 		r.Group(func(r chi.Router) {
 			r.Use(guard(s.signedIn))
 			r.Get("/me", s.routeMe)
-			r.With(guard(jsonOnly)).Post("/me/personal_note", s.routePersonalNote)
+			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/me/personal_note", s.routePersonalNote)
 		})
 
 		// Inside a campaign: everything a volunteer works with.
@@ -425,31 +471,43 @@ func (s *Server) router() chi.Router {
 			r.Get("/facets", s.routeFacets)
 			r.Get("/mayors", s.routeMayors)
 			r.Get("/mayors/{insee}", s.routeCard)
-			r.Get("/export.csv", s.routeExport)
-			r.With(guard(jsonOnly)).Post("/mayors/{insee}/status", s.routeStatus)
-			r.With(guard(jsonOnly)).Post("/batch", s.routeBatch)
+			r.With(guard(s.limitAccount(limitExportAccount))).
+				Get("/export.csv", s.routeExport)
+			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/mayors/{insee}/status", s.routeStatus)
+			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/batch", s.routeBatch)
 		})
 
 		// Managing the campaign's own teams and accounts.
 		r.Route("/team", func(r chi.Router) {
 			r.With(guard(s.managers)).Get("/", s.routeTeam)
-			r.With(guard(jsonOnly), guard(s.coordinationOnly)).
+			r.With(guard(s.coordinationOnly),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/group", s.routeCreateTeam)
-			r.With(guard(jsonOnly), guard(s.managers)).
+			r.With(guard(s.managers),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/account", s.routeCreateAccount)
-			r.With(guard(jsonOnly), guard(s.managers)).
+			r.With(guard(s.managers),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/account/{email}/active", s.routeToggleAccount)
 		})
-		r.With(guard(jsonOnly), guard(s.coordinationOnly)).
+		r.With(guard(s.coordinationOnly),
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/campaign", s.routeUpdateCampaign)
 
 		// The instance landing page: requesting a campaign, moderating.
-		r.With(guard(jsonOnly), guard(s.instanceOnly)).
+		// The public form is the narrowest ceiling of all: each request is
+		// moderation work for a human, and a thousand of them close the
+		// queue (maxPendingRequests) for everyone.
+		r.With(guard(s.limitIP(limitHostingIP)), guard(jsonOnly),
+			guard(s.instanceOnly)).
 			Post("/request", s.routeHostingRequest)
 		r.Route("/admin/requests", func(r chi.Router) {
 			r.Use(guard(s.administrationOnly))
 			r.Get("/", s.routeHostingQueue)
-			r.With(guard(jsonOnly)).Post("/{id}", s.routeDecideHosting)
+			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/{id}", s.routeDecideHosting)
 		})
 	})
 
@@ -748,6 +806,14 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// Unconditional, like the cookie flags: browsers only honour it
+		// over TLS, so it costs nothing locally and pins HTTPS wherever it
+		// counts. No `preload` — that is a semi-permanent commitment on the
+		// operator's domain, theirs to make, not this binary's.
+		h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		// The application uses none of these; saying so makes an injected
+		// script ask for nothing quietly.
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		next.ServeHTTP(w, r)
 	})
 }
