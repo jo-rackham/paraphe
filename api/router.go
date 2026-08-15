@@ -162,7 +162,11 @@ func (s *Server) router() chi.Router {
 			Post("/admin/campaigns", s.routeCreateCampaign)
 		// The public directory of the hosted campaigns, apex only. Names
 		// and addresses are public by construction: every subdomain answers.
-		r.With(guard(s.instanceOnly)).
+		// Public does not mean free: this one queries the database, is the
+		// front door of the instance, and nothing behind it identifies the
+		// caller — the same ceiling as /api/config, which it was already
+		// documented as sharing.
+		r.With(guard(s.limitIP(limitAnonIP)), guard(s.instanceOnly)).
 			Get("/campaigns", s.routeCampaignDirectory)
 	})
 

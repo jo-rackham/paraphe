@@ -45,7 +45,7 @@ var routeLimits = map[string]string{
 	"GET /api/admin/requests":               "none: authenticated read",
 	"POST /api/admin/requests/{id}":         "write_account",
 	"POST /api/admin/campaigns":             "write_account",
-	"GET /api/campaigns":                    "none: public read, same class as /api/config",
+	"GET /api/campaigns":                    "anon_ip",
 }
 
 func TestEveryRouteDeclaresItsCeiling(t *testing.T) {
@@ -199,6 +199,29 @@ func TestEveryAnonymousRouteIsUnderItsCeiling(t *testing.T) {
 		http.StatusTooManyRequests {
 		t.Errorf("GET /api/campaign/public answered %d with the anon_ip "+
 			"bucket exhausted: it carries no ceiling any more", code)
+	}
+}
+
+// The apex directory is the instance's front door: anonymous, and it queries
+// the database. Its line in routeLimits once read « none: public read, same
+// class as /api/config » — prose naming a ceiling, a value declaring none,
+// and the canary believes the value. Every OTHER route declared « none » is
+// an authenticated read; this was the only anonymous one.
+func TestTheApexDirectoryIsUnderTheAnonymousCeiling(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	_, srv := testServer(t)
+	c := clientOn(t, srv, "paraphe.test")
+	for i := 1; i <= limitAnonIP.events; i++ {
+		if code, _ := c.call(http.MethodGet, "/api/campaigns", nil); code ==
+			http.StatusTooManyRequests {
+			t.Fatalf("429 at attempt %d, below the ceiling of %d",
+				i, limitAnonIP.events)
+		}
+	}
+	if code, _ := c.call(http.MethodGet, "/api/campaigns", nil); code !=
+		http.StatusTooManyRequests {
+		t.Fatalf("the apex directory answered %d with the anon bucket "+
+			"exhausted: it carries no ceiling", code)
 	}
 }
 
