@@ -246,6 +246,44 @@ export function Emoji({ children }: { children: ReactNode }) {
   return <span aria-hidden="true">{children}</span>;
 }
 
+/**
+ * Where focus goes when the control under it destroys itself (« fermer »,
+ * « j'ai noté », accepting an offer): straight to the content landmark.
+ * Left alone, the browser drops it on <body> and the next Tab restarts at
+ * the top of the page.
+ */
+export function focusContenu() {
+  document.getElementById("contenu")?.focus();
+}
+
+/**
+ * For controls that die at the COMPLETION of an async action, not at the
+ * click — the Accueil's whole screen unmounts when the list lands, a
+ * moderated card vanishes once decided. The same triggers fire from
+ * screens where the button survives (the « Mes données » tab), so an
+ * unconditional focusContenu would steal focus from a living control:
+ * this one waits for React's commit and only rescues a focus that
+ * actually fell to <body>.
+ */
+export function rescueFocusAfterCommit() {
+  // nobody held focus when the action completed — the automatic first
+  // download, a background refresh: leave the browser's initial position
+  // alone, or the skip link stops being the first Tab of the page
+  const holder = document.activeElement;
+  if (!holder || holder === document.body) return;
+  const check = () => {
+    const a = document.activeElement;
+    if (!a || a === document.body) focusContenu();
+  };
+  // twice: the first tick usually lands after React's commit, but when the
+  // triggering state settles inside a batch still being flushed, the
+  // unmount — and the focus fall — arrive after it
+  setTimeout(() => {
+    check();
+    setTimeout(check, 60);
+  }, 0);
+}
+
 /** First focusable element of every page; its target is `<main id="contenu">`. */
 export function SkipLink() {
   return (
@@ -287,12 +325,27 @@ export function NavOnglets({
 }
 
 /**
+ * A view was already shown by SOME shell. Module-level on purpose: when
+ * the outage shell hands over to a mode (App unmounts one tree, Team
+ * mounts another), the mode's own hook instance is brand new — its ref
+ * says "first view" and it would skip the focus move, leaving focus on
+ * <body> where the vanished « Réessayer » button dropped it. Only the very
+ * first view of the PAGE must leave the browser's initial focus alone.
+ */
+let anyViewShown = false;
+
+/** Test-only: a page load resets this for free, sequential tests do not. */
+export function resetViewMemory() {
+  anyViewShown = false;
+}
+
+/**
  * SPA view change: the clicked control often unmounts with the old view,
  * and keyboard or screen-reader focus silently falls back to the top of
- * the document. When `key` changes (never on the first view), the new
- * view's h1 takes focus, and the document title says where the volunteer
- * landed. `title: null` marks a transient screen (loading) that is not a
- * view at all.
+ * the document. When `key` changes (never on the page's first view), the
+ * new view's h1 takes focus, and the document title says where the
+ * volunteer landed. `title: null` marks a transient screen (loading) that
+ * is not a view at all.
  */
 export function useViewFocus(key: string, title: string | null) {
   const shown = useRef<string | null>(null);
@@ -300,8 +353,9 @@ export function useViewFocus(key: string, title: string | null) {
     if (title === null) return;
     document.title = `${title} — paraphe`;
     if (shown.current === key) return;
-    const first = shown.current === null;
+    const first = shown.current === null && !anyViewShown;
     shown.current = key;
+    anyViewShown = true;
     if (first) return; // page load: the browser's own focus is right
     const h = document.querySelector<HTMLElement>("main h1");
     if (h) {
@@ -359,16 +413,36 @@ export class RenderGuard extends Component<
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <main>
+      // id="contenu" here too: this main REPLACES the page's — the skip
+      // link must keep a target on the error screen
+      <main id="contenu" tabIndex={-1}>
         <h1>Cet écran n'a pas pu s'afficher</h1>
-        <p className="alerte erreur">{this.state.error.message}</p>
+        <p className="alerte erreur">
+          Une erreur technique a interrompu l'affichage.
+        </p>
+        {/* raw runtime messages are English: said so, for the screen
+            readers that would read them with French phonetics */}
+        <details>
+          <summary>Détail technique</summary>
+          <pre className="dedans" lang="en">
+            {this.state.error.message}
+          </pre>
+        </details>
         <p>
           Votre travail n'est pas perdu. Revenez à la liste, ou rechargez la
           page ; si l'écran revient, signalez-le à la coordination avec le nom
           de la commune concernée.
         </p>
         <p>
-          <button type="button" onClick={() => this.setState({ error: null })}>
+          <button
+            type="button"
+            onClick={() => {
+              // this button unmounts with the whole error screen; the
+              // replacement main only exists after the commit
+              this.setState({ error: null });
+              rescueFocusAfterCommit();
+            }}
+          >
             Continuer
           </button>
         </p>
@@ -541,7 +615,16 @@ export function Alerte({
   const fermer = onClose && (
     <>
       {" "}
-      <button type="button" className="lien" onClick={onClose}>
+      <button
+        type="button"
+        className="lien"
+        onClick={() => {
+          // this very button unmounts with the message: hand focus to the
+          // content first, or it falls to <body>
+          focusContenu();
+          onClose();
+        }}
+      >
         fermer
       </button>
     </>
@@ -561,9 +644,12 @@ export function Alerte({
 }
 
 /**
- * "N affiché(s) sur T" — visible at once, SPOKEN only when the number
- * settles: announced on every keystroke, a polite region turns a search
- * into a stream of numbers.
+ * "N affiché(s) sur T" — ONE node, spoken and shown alike, updated only
+ * when the number settles. Announced on every keystroke, a polite region
+ * turns a search into a stream of numbers; split into a visible line plus
+ * an sr-only mirror, the two are read twice at the virtual cursor and
+ * DISAGREE while the mirror lags. The table itself is the instant
+ * feedback; this line can settle 400 ms behind it.
  */
 export function CompteurResultats({
   shown,
@@ -573,18 +659,17 @@ export function CompteurResultats({
   total: number;
 }) {
   const line = `${shown} affiché(s) sur ${total}.`;
-  const [announced, setAnnounced] = useState("");
+  // empty at mount, ALWAYS: seeded, the region appears together with its
+  // text — the very pattern the doctrine refuses everywhere else
+  const [settled, setSettled] = useState("");
   useEffect(() => {
-    const timer = setTimeout(() => setAnnounced(line), 600);
+    const timer = setTimeout(() => setSettled(line), 400);
     return () => clearTimeout(timer);
   }, [line]);
   return (
-    <>
-      <p className="gris">{line}</p>
-      <span role="status" className="sr-only">
-        {announced}
-      </span>
-    </>
+    <p className="gris" role="status">
+      {settled}
+    </p>
   );
 }
 
@@ -797,6 +882,7 @@ export function Fiche({
   });
 
   const save = async () => {
+    if (saving) return; // aria-disabled greys the button but keeps it live
     setStatusError(null);
     setSaved(false);
     setSaving(true);
@@ -1027,7 +1113,13 @@ export function Fiche({
               onChange={(e) => setNote(e.target.value)}
             />
           </label>
-          <button type="button" onClick={save} disabled={saving}>
+          {/* aria-disabled, never disabled: `disabled` on the focused
+              button drops keyboard focus to <body> in every browser */}
+          <button
+            type="button"
+            onClick={save}
+            aria-disabled={saving || undefined}
+          >
             {saving ? "Enregistrement…" : "Enregistrer"}
           </button>{" "}
           {/* always in the tree: a live region announces reliably only when

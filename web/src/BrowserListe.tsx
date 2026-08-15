@@ -105,7 +105,7 @@ export function Liste({
           <button
             type="button"
             className="lien"
-            disabled={!!download}
+            aria-disabled={download ? true : undefined}
             onClick={onComplete}
           >
             chargez les 34 826 maires de France

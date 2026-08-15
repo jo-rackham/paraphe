@@ -46,7 +46,11 @@ const PAGE = (
 </div>
 `;
 
-const STYLE = `<!doctype html><meta charset="utf-8">
+// A real document, lang included: the letters are proofread on screen by
+// volunteers whose screen reader picks its pronunciation engine from the
+// page language — without it, French letters are read with the browser's
+// default one (WCAG 3.1.1).
+const STYLE = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Courriers aux maires</title>
 <style>
 body { font: 12pt/1.5 Georgia, serif; margin: 0; }
@@ -58,6 +62,7 @@ body { font: 12pt/1.5 Georgia, serif; margin: 0; }
 .corps { white-space: pre-line; text-align: justify; }
 @media screen { .lettre { border-bottom: 2px dashed #999; } }
 </style>
+</head><body>
 `;
 
 const escapeHtml = (s: string): string =>
@@ -206,7 +211,11 @@ export function main(): void {
     writeCsv(EMAIL_COLS, withEmail),
     "utf8",
   );
-  writeFileSync(join(OUT, "courriers.html"), STYLE + pages.join("\n"), "utf8");
+  writeFileSync(
+    join(OUT, "courriers.html"),
+    `${STYLE + pages.join("\n")}</body></html>\n`,
+    "utf8",
+  );
   writeFileSync(
     join(OUT, "sans_email.csv"),
     writeCsv(sourceCols, withoutEmail as Record<string, unknown>[]),

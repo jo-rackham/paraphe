@@ -26,7 +26,7 @@ export function Accueil({ onCsv, onDemo, onDownload, download }: AccueilProps) {
         <p>
           <button
             type="button"
-            disabled={!!download}
+            aria-disabled={download ? true : undefined}
             onClick={() => onDownload("light")}
           >
             <Emoji>⬇ </Emoji>Charger la liste prioritaire
@@ -34,7 +34,7 @@ export function Accueil({ onCsv, onDemo, onDownload, download }: AccueilProps) {
           <button
             type="button"
             className="secondaire"
-            disabled={!!download}
+            aria-disabled={download ? true : undefined}
             onClick={() => onDownload("complete")}
           >
             <Emoji>⬇ </Emoji>Charger tous les maires de France

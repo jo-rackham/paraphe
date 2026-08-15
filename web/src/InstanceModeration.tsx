@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import * as API from "./api.ts";
-import { label, ORG_STATES, REQUEST_STATES } from "./common.tsx";
+import {
+  focusContenu,
+  label,
+  ORG_STATES,
+  REQUEST_STATES,
+  rescueFocusAfterCommit,
+} from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
@@ -32,6 +38,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   }, []);
 
   const decide = async (d: QueuedRequest, decision: "accepted" | "refused") => {
+    if (busy !== null) return; // aria-disabled keeps the pair focusable
     setBusy(d.id);
     try {
       const rep = await API.decideRequest(d.id, decision, reasons[d.id] ?? "");
@@ -49,6 +56,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
       onMessage({ tone: "erreur", text: (e as Error).message });
     } finally {
       setBusy(null);
+      // the decided card unmounts with the very button that decided it
+      rescueFocusAfterCommit();
     }
   };
 
@@ -94,7 +103,14 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           <p>
             <code>{opened.password}</code>
           </p>
-          <button type="button" onClick={() => setOpened(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              // this button unmounts with its card: hand focus back first
+              focusContenu();
+              setOpened(null);
+            }}
+          >
             J'ai noté
           </button>
         </div>
@@ -129,7 +145,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             {/* one pair of buttons per request: the name says which */}
             <button
               type="button"
-              disabled={busy === d.id}
+              aria-disabled={busy === d.id || undefined}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne
@@ -138,7 +154,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             <button
               type="button"
               className="lien"
-              disabled={busy === d.id}
+              aria-disabled={busy === d.id || undefined}
               onClick={() => decide(d, "refused")}
             >
               Refuser
@@ -218,6 +234,7 @@ function Creation({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setSending(true);
     try {
       await onCreate({
@@ -287,7 +304,7 @@ function Creation({
           />
         </label>
       </p>
-      <button type="submit" disabled={sending}>
+      <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Création…" : "Créer la campagne"}
       </button>
     </form>

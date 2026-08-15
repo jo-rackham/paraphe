@@ -10,11 +10,13 @@ import {
   type CardDraft,
   EMPTY_CFG,
   Fiche,
+  focusContenu,
   Guide,
   Hexagone,
   NavOnglets,
   PiedDePage,
   RenderGuard,
+  rescueFocusAfterCommit,
   SkipLink,
   useViewFocus,
 } from "./common.tsx";
@@ -103,6 +105,10 @@ export default function Browser() {
     } finally {
       inFlight.current = null;
       setDownload(null);
+      // a list landing unmounts the Accueil — and the very button that
+      // asked for it; from « Mes données » the button survives, and the
+      // rescue is then a no-op
+      rescueFocusAfterCommit();
     }
   }, []);
 
@@ -254,6 +260,8 @@ export default function Browser() {
         tone: "erreur",
         text: `Chargement impossible : ${(e as Error).message}`,
       });
+    } finally {
+      rescueFocusAfterCommit();
     }
   }, []);
 
@@ -268,6 +276,7 @@ export default function Browser() {
         `${DEMO_SET.length} maires FICTIFS chargés — pour découvrir l'outil. ` +
         "Chargez votre propre fichier avant toute campagne réelle.",
     });
+    rescueFocusAfterCommit();
   }, []);
 
   const exportAll = useCallback(async () => {
@@ -335,13 +344,11 @@ export default function Browser() {
         : (VIEW_TITLES[tab] ?? "paraphe"),
   );
 
-  if (!ready)
-    return (
-      <main>
-        <p role="status">Chargement…</p>
-      </main>
-    );
-
+  // No `!ready` early return: the shell — and above all the live regions
+  // inside it — must exist from the FIRST render. `setReady(true)` and the
+  // first download land in the same React batch, so a region living only
+  // in the ready tree mounts together with its first message, which some
+  // assistive technology never announces.
   return (
     <>
       <SkipLink />
@@ -375,79 +382,32 @@ export default function Browser() {
       <RenderGuard>
         <main id="contenu" tabIndex={-1}>
           <Alerte message={message} onClose={() => setMessage(null)} />
-          {offerError && (
-            <p className="alerte erreur" role="alert">
-              Ce lien ne propose aucune campagne : {offerError}{" "}
-              <button
-                type="button"
-                className="lien"
-                onClick={() => setOfferError(null)}
-              >
-                fermer
-              </button>
-            </p>
-          )}
-          {/* the draft, not cfg: the draft covers everything the volunteer
-            has — saved (it starts from cfg and follows every writer) or
-            still being typed under this very banner */}
-          {offer && untouchedCampaign(draft) && (
-            <Proposition
-              offer={offer}
-              onRefuse={() => {
-                setOffer(null);
-                // and it must STAY refused: left in the address bar, ?org=
-                // brought the offer back at every reload
-                const url = new URL(window.location.href);
-                url.searchParams.delete("org");
-                window.history.replaceState({}, "", url);
-              }}
-              onAccept={async () => {
-                // a rejected write (quota, private window, blocked base) must
-                // be SAID: without the catch the button silently did nothing
-                try {
-                  await DB.writeSetting("campagne", offer.campaign);
-                  setCfg(offer.campaign);
-                  setDraft(offer.campaign);
-                  setOffer(null);
-                  setMessage({
-                    tone: "ok",
-                    text:
-                      `Campagne « ${offer.name} » reprise. Elle reste dans ce ` +
-                      "navigateur, et vous pouvez la modifier dans « Ma campagne ».",
-                  });
-                } catch (e) {
-                  setMessage({
-                    tone: "erreur",
-                    text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
-                  });
-                }
-              }}
-            />
-          )}
-          {unfilled.length > 0 && (
-            <p className="alerte">
-              {/* one line, not the list of nine labels: the campaign tab
-                  marks each missing field itself, and a banner repeated on
-                  every screen must stay short enough to leave the screen
-                  to the work */}
-              <strong>Campagne non configurée.</strong> Les messages contiennent
-              encore des valeurs d'exemple : <strong>n'envoyez rien</strong>{" "}
-              avant d'avoir rempli l'onglet « Ma campagne ».
-              {tab !== "campagne" && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className="lien"
-                    onClick={() => setTab("campagne")}
-                  >
-                    Ouvrir l'onglet
-                  </button>
-                </>
-              )}
-            </p>
-          )}
-
+          {/* persistent, like Alerte: a broken ?org= link resolves in the
+              same breath as the first render, and the role sits on a
+              text-only span with the button beside it */}
+          <p className={offerError ? "alerte erreur" : "sr-only"}>
+            <span role="alert">
+              {offerError
+                ? `Ce lien ne propose aucune campagne : ${offerError}`
+                : ""}
+            </span>
+            {offerError && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="lien"
+                  onClick={() => {
+                    // this button unmounts with the message
+                    focusContenu();
+                    setOfferError(null);
+                  }}
+                >
+                  fermer
+                </button>
+              </>
+            )}
+          </p>
           {/* persistent region: the start of a download is announced by a
               text CHANGE here, not by the card mounting with its sentence —
               completion is announced by the Alerte above */}
@@ -456,115 +416,187 @@ export default function Browser() {
               ? `Téléchargement de la ${LISTS[download.key].name} en cours.`
               : ""}
           </span>
-          {download && <Progression state={download} />}
-
-          {tab === "liste" &&
-            (mayors.length === 0 ? (
-              <Accueil
-                onCsv={loadCsv}
-                onDemo={loadDemo}
-                onDownload={fetchList}
-                download={download}
-              />
-            ) : (
-              <Liste
-                mayors={filtered}
-                tracking={tracking}
-                counts={counts}
-                q={q}
-                setQ={setQ}
-                rankFilter={rankFilter}
-                setRankFilter={setRankFilter}
-                departments={departments}
-                deptFilter={deptFilter}
-                setDeptFilter={setDeptFilter}
-                onChoose={(m) => {
-                  setChosen(m);
-                  setTab("fiche");
-                }}
-                loadedList={loadedList}
-                onComplete={() => fetchList("complete")}
-                download={download}
-              />
-            ))}
-
-          {tab === "guide" && <Guide />}
-
-          {tab === "fiche" && chosen && (
-            <Fiche
-              mayor={chosen}
-              cfg={cfg}
-              personalNote={personalNote}
-              drafts={cardDrafts}
-              status={tracking[chosen.insee_code as string]?.status}
-              notes={(tracking[chosen.insee_code as string]?.notes ?? []).map(
-                (n) => ({ ...n, volunteer: null }),
+          {!ready ? (
+            <p role="status">Chargement…</p>
+          ) : (
+            <>
+              {/* the draft, not cfg: the draft covers everything the volunteer
+            has — saved (it starts from cfg and follows every writer) or
+            still being typed under this very banner */}
+              {offer && untouchedCampaign(draft) && (
+                <Proposition
+                  offer={offer}
+                  onRefuse={() => {
+                    // the card — and the clicked button — unmounts
+                    focusContenu();
+                    setOffer(null);
+                    // and it must STAY refused: left in the address bar, ?org=
+                    // brought the offer back at every reload
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete("org");
+                    window.history.replaceState({}, "", url);
+                  }}
+                  onAccept={async () => {
+                    // the card — and the clicked button — unmounts
+                    focusContenu();
+                    // a rejected write (quota, private window, blocked base) must
+                    // be SAID: without the catch the button silently did nothing
+                    try {
+                      await DB.writeSetting("campagne", offer.campaign);
+                      setCfg(offer.campaign);
+                      setDraft(offer.campaign);
+                      setOffer(null);
+                      setMessage({
+                        tone: "ok",
+                        text:
+                          `Campagne « ${offer.name} » reprise. Elle reste dans ce ` +
+                          "navigateur, et vous pouvez la modifier dans « Ma campagne ».",
+                      });
+                    } catch (e) {
+                      setMessage({
+                        tone: "erreur",
+                        text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
+                      });
+                    }
+                  }}
+                />
               )}
-              onBack={() => setTab("liste")}
-              onStatus={async (status, note) => {
-                const insee = chosen.insee_code as string;
-                const e = await DB.saveTracking(insee, status, note);
-                setTracking((s) => ({ ...s, [insee]: e }));
-              }}
-            />
-          )}
+              {unfilled.length > 0 && (
+                <p className="alerte">
+                  {/* one line, not the list of nine labels: the campaign tab
+                  marks each missing field itself, and a banner repeated on
+                  every screen must stay short enough to leave the screen
+                  to the work */}
+                  <strong>Campagne non configurée.</strong> Les messages
+                  contiennent encore des valeurs d'exemple :{" "}
+                  <strong>n'envoyez rien</strong> avant d'avoir rempli l'onglet
+                  « Ma campagne ».
+                  {tab !== "campagne" && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="lien"
+                        onClick={() => setTab("campagne")}
+                      >
+                        Ouvrir l'onglet
+                      </button>
+                    </>
+                  )}
+                </p>
+              )}
 
-          {tab === "donnees" && (
-            <Donnees
-              counts={counts}
-              onExport={exportAll}
-              onImport={importAll}
-              onCsv={loadCsv}
-              onDemo={loadDemo}
-              onDownload={fetchList}
-              loadedList={loadedList}
-              onErase={async () => {
-                await DB.eraseAll();
-                setMayors([]);
-                setTracking({});
-                setCfg(EMPTY_CFG);
-                setPersonalNote("");
-                setDraft(EMPTY_CFG);
-                setNoteDraft("");
-                // the drafts carry notes about named mayors: erased means erased
-                cardDrafts.current = {};
-                setLoadedList(null);
-                setMessage({
-                  tone: "ok",
-                  text: "Tout a été effacé de ce navigateur.",
-                });
-              }}
-            />
-          )}
+              {download && <Progression state={download} />}
 
-          {tab === "campagne" && (
-            <CampaignTab
-              draft={draft}
-              note={noteDraft}
-              dirty={dirty}
-              onEdit={setDraft}
-              onNote={setNoteDraft}
-              onSave={async (next, note) => {
-                try {
-                  await DB.writeSetting("campagne", next);
-                  await DB.writeSetting("argument", note);
-                  // cfg only: the draft may already carry keystrokes typed
-                  // while these writes are in flight, and they must stay —
-                  // the `dirty` marker then reappears on its own
-                  setCfg(next);
-                  setPersonalNote(note);
-                  setMessage({
-                    tone: "ok",
-                    text: "Campagne enregistrée dans ce navigateur.",
-                  });
-                } catch (e) {
-                  setMessage({
-                    tone: "erreur",
-                    text: `Enregistrement impossible : ${e instanceof Error ? e.message : String(e)}`,
-                  });
-                }
-              }}
-            />
+              {tab === "liste" &&
+                (mayors.length === 0 ? (
+                  <Accueil
+                    onCsv={loadCsv}
+                    onDemo={loadDemo}
+                    onDownload={fetchList}
+                    download={download}
+                  />
+                ) : (
+                  <Liste
+                    mayors={filtered}
+                    tracking={tracking}
+                    counts={counts}
+                    q={q}
+                    setQ={setQ}
+                    rankFilter={rankFilter}
+                    setRankFilter={setRankFilter}
+                    departments={departments}
+                    deptFilter={deptFilter}
+                    setDeptFilter={setDeptFilter}
+                    onChoose={(m) => {
+                      setChosen(m);
+                      setTab("fiche");
+                    }}
+                    loadedList={loadedList}
+                    onComplete={() => fetchList("complete")}
+                    download={download}
+                  />
+                ))}
+
+              {tab === "guide" && <Guide />}
+
+              {tab === "fiche" && chosen && (
+                <Fiche
+                  mayor={chosen}
+                  cfg={cfg}
+                  personalNote={personalNote}
+                  drafts={cardDrafts}
+                  status={tracking[chosen.insee_code as string]?.status}
+                  notes={(
+                    tracking[chosen.insee_code as string]?.notes ?? []
+                  ).map((n) => ({ ...n, volunteer: null }))}
+                  onBack={() => setTab("liste")}
+                  onStatus={async (status, note) => {
+                    const insee = chosen.insee_code as string;
+                    const e = await DB.saveTracking(insee, status, note);
+                    setTracking((s) => ({ ...s, [insee]: e }));
+                  }}
+                />
+              )}
+
+              {tab === "donnees" && (
+                <Donnees
+                  counts={counts}
+                  onExport={exportAll}
+                  onImport={importAll}
+                  onCsv={loadCsv}
+                  onDemo={loadDemo}
+                  onDownload={fetchList}
+                  loadedList={loadedList}
+                  onErase={async () => {
+                    await DB.eraseAll();
+                    setMayors([]);
+                    setTracking({});
+                    setCfg(EMPTY_CFG);
+                    setPersonalNote("");
+                    setDraft(EMPTY_CFG);
+                    setNoteDraft("");
+                    // the drafts carry notes about named mayors: erased means erased
+                    cardDrafts.current = {};
+                    setLoadedList(null);
+                    setMessage({
+                      tone: "ok",
+                      text: "Tout a été effacé de ce navigateur.",
+                    });
+                  }}
+                />
+              )}
+
+              {tab === "campagne" && (
+                <CampaignTab
+                  draft={draft}
+                  note={noteDraft}
+                  dirty={dirty}
+                  onEdit={setDraft}
+                  onNote={setNoteDraft}
+                  onSave={async (next, note) => {
+                    try {
+                      await DB.writeSetting("campagne", next);
+                      await DB.writeSetting("argument", note);
+                      // cfg only: the draft may already carry keystrokes typed
+                      // while these writes are in flight, and they must stay —
+                      // the `dirty` marker then reappears on its own
+                      setCfg(next);
+                      setPersonalNote(note);
+                      setMessage({
+                        tone: "ok",
+                        text: "Campagne enregistrée dans ce navigateur.",
+                      });
+                    } catch (e) {
+                      setMessage({
+                        tone: "erreur",
+                        text: `Enregistrement impossible : ${e instanceof Error ? e.message : String(e)}`,
+                      });
+                    }
+                  }}
+                />
+              )}
+            </>
           )}
         </main>
       </RenderGuard>

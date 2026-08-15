@@ -8,7 +8,13 @@
   --fond: #fbfaf5; --carte: #ffffff; --trait: #e4e0d2; --texte: #141210;
   --texte-sec: #6b6559; --accent: #f5c400; --accent-txt: #141210;
   --entete: #141210; --entete-txt: #efe9d8; --entete-hover: #2a2620;
-  --alerte-fond: #fff8d6; --alerte-trait: #f5c400; --champ: #ffffff;
+  /* the alert box is THE urgency surface: its border is what says "this
+     paragraph is a warning" to eyes that cannot read it yet, and yellow
+     read 1.5:1 on the alert background. Olive holds 4.6:1; the error bar
+     keeps the red (4.7:1 here — too dark for the dark scheme, which
+     overrides both). */
+  --alerte-fond: #fff8d6; --alerte-trait: #8a6d00;
+  --alerte-erreur-trait: #e1000f; --champ: #ffffff;
   --lien: #8a6d00;
   /* focus ring: yellow reads 1.6:1 against the light background, below the
      3:1 WCAG floor for non-text indicators — olive is the palette's own
@@ -36,7 +42,8 @@
   :root {
     --fond: #12100a; --carte: #1d1a12; --trait: #332e22; --texte: #f2ecdb;
     --texte-sec: #a09883; --accent: #ffd400; --entete: #0a0906;
-    --alerte-fond: #3a3007; --alerte-trait: #8a6d00; --champ: #12100a;
+    --alerte-fond: #3a3007; --alerte-trait: #ffd400;
+    --alerte-erreur-trait: #ff5560; --champ: #12100a;
     --lien: #ffd400;
     --focus: #ffd400;
     --piste: #332e22;
@@ -244,9 +251,9 @@ html { scroll-padding-bottom: 8rem; }
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);
-          border-left: 5px solid var(--jaune); border-radius: .45rem;
+          border-left: 5px solid var(--alerte-trait); border-radius: .45rem;
           padding: .5rem .8rem; }
-.alerte.erreur { border-left-color: var(--rouge); }
+.alerte.erreur { border-left-color: var(--alerte-erreur-trait); }
 /* stacked banners: the default 1em paragraph margins made three of them
    fill a phone's first screen */
 p.alerte { margin: .55rem 0; }
@@ -319,7 +326,7 @@ footer .officiel { border: 1px solid var(--trait);
 
 /* Téléchargement des listes : 2 Mo sans retour visuel, c'est un outil qui
    a l'air planté. */
-.chargement { border-left: 5px solid var(--jaune); }
+.chargement { border-left: 5px solid var(--alerte-trait); }
 .jauge { height: 10px; margin-top: .5rem; border-radius: 5px;
          background: var(--piste); overflow: hidden; }
 .jauge .barre { height: 100%; background: var(--jaune);
@@ -333,4 +340,10 @@ footer .officiel { border: 1px solid var(--trait);
   .jauge .barre { transition: none; }
   .jauge .barre.indeterminee { animation: none; }
 }
-button:disabled, .bouton:disabled { opacity: .5; cursor: progress; }
+/* aria-disabled instead of disabled on busy submits: `disabled` on the
+   focused button drops keyboard focus to <body>; aria-disabled keeps the
+   button in the tab order (the handler short-circuits) and this rule
+   keeps the greyed look identical */
+button:disabled, .bouton:disabled,
+button[aria-disabled="true"], .bouton[aria-disabled="true"] {
+  opacity: .5; cursor: progress; }

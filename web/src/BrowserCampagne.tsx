@@ -47,11 +47,11 @@ export function CampaignTab({
         <button type="button" onClick={() => onSave(draft, note)}>
           Enregistrer
         </button>
-        {dirty && (
-          <span className="gris" role="status" style={{ marginLeft: ".6rem" }}>
-            modifications non enregistrées
-          </span>
-        )}
+        {/* persistent: the marker appears as a text change, not as a node
+            mounting with its warning already written */}
+        <span className="gris" role="status" style={{ marginLeft: ".6rem" }}>
+          {dirty ? "modifications non enregistrées" : ""}
+        </span>
       </div>
     </>
   );

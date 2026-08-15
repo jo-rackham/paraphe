@@ -142,15 +142,16 @@ export default function Team({ config }: { config: ServerConfig }) {
   );
 
   if (!ready)
+    // the shell, not a bare main: its live regions must exist BEFORE the
+    // first message they will carry
     return (
-      <main>
+      <Coquille cfg={cfg}>
         <p role="status">Chargement…</p>
-      </main>
+      </Coquille>
     );
   if (!me) {
     return (
-      <Coquille cfg={cfg}>
-        <Alerte message={message} onClose={() => setMessage(null)} />
+      <Coquille cfg={cfg} message={message} onMessage={setMessage}>
         <Connexion
           cfg={cfg}
           onSignedIn={async (m: Me) => {
@@ -187,8 +188,15 @@ export default function Team({ config }: { config: ServerConfig }) {
   };
 
   return (
-    <Coquille cfg={cfg} me={me} tab={tab} setTab={setTab} onSignOut={signOut}>
-      <Alerte message={message} onClose={() => setMessage(null)} />
+    <Coquille
+      cfg={cfg}
+      me={me}
+      tab={tab}
+      setTab={setTab}
+      onSignOut={signOut}
+      message={message}
+      onMessage={setMessage}
+    >
       {cfg.unfilled?.length > 0 && (
         <p className="alerte">
           {/* one line, not the list of nine labels: the campaign form marks
@@ -299,6 +307,15 @@ interface CoquilleProps {
   tab?: string;
   setTab?: (v: string) => void;
   onSignOut?: () => void;
+  /**
+   * The page-level message lives in the SHELL so its live region exists
+   * from the very first render — loading screen included. A region that
+   * only mounts with the signed-in tree appears together with its first
+   * message when the two land in one React batch, and some assistive
+   * technology never announces that.
+   */
+  message?: Message | null;
+  onMessage?: (m: Message | null) => void;
   children: ReactNode;
 }
 
@@ -308,6 +325,8 @@ function Coquille({
   tab,
   setTab,
   onSignOut,
+  message,
+  onMessage,
   children,
 }: CoquilleProps) {
   const tabs: [string, string][] = [
@@ -351,6 +370,10 @@ function Coquille({
       <div className="rayures" aria-hidden="true" />
       <RenderGuard>
         <main id="contenu" tabIndex={-1}>
+          <Alerte
+            message={message ?? null}
+            onClose={onMessage ? () => onMessage(null) : undefined}
+          />
           {children}
         </main>
       </RenderGuard>
@@ -378,6 +401,7 @@ function Connexion({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setError(null);
     setSending(true);
     try {
@@ -425,7 +449,7 @@ function Connexion({
             />
           </label>
         </p>
-        <button type="submit" disabled={sending}>
+        <button type="submit" aria-disabled={sending || undefined}>
           {sending ? "Connexion…" : "Se connecter"}
         </button>
         <p className="gris">

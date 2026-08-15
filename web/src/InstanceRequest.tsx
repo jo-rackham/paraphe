@@ -24,6 +24,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setError(null);
     setSending(true);
     try {
@@ -115,7 +116,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
           />
         </label>
       </p>
-      <button type="submit" disabled={sending}>
+      <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Envoi…" : "Envoyer la demande"}
       </button>
     </form>

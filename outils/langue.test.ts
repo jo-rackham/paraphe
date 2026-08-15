@@ -161,4 +161,17 @@ describe("the French shown and the English written", () => {
         "a rename crossed the boundary",
     ).toEqual({});
   });
+
+  it("declares the mailing pages French", () => {
+    // courriers.html is read aloud by the volunteers' screen readers: with
+    // no <html lang="fr">, every letter is pronounced with the browser's
+    // default engine language (WCAG 3.1.1). Asserted on the SOURCE, the
+    // way deploiement.test.ts sweeps the workflows: the generated file
+    // only exists after `task messages`, which needs a filled campaign.
+    const source = readFileSync(join(ROOT, "outils/messages-masse.ts"), "utf8");
+    // anchored to the template definition and to the write call: the tag
+    // in a comment or a dead constant would not satisfy either
+    expect(source).toMatch(/const STYLE = `<!doctype html><html lang="fr">/);
+    expect(source).toMatch(/<\/body><\/html>\\n`,\n\s+"utf8",/);
+  });
 });

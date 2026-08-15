@@ -70,6 +70,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
   if (!data) return <p role="status">Chargement…</p>;
 
   const take = async () => {
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setSending(true);
     try {
       const r = await API.takeBatch({ department: dept, rank, democracy });
@@ -182,7 +183,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
               A parrainé une candidature sur le fonctionnement démocratique
             </label>
           </div>
-          <button type="submit" disabled={sending}>
+          <button type="submit" aria-disabled={sending || undefined}>
             {sending ? "Attribution…" : "Prendre un lot"}
           </button>
         </form>

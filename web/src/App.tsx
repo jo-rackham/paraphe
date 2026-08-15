@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Mode } from "./api.ts";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
+import { useViewFocus } from "./common.tsx";
 import Instance from "./Instance.tsx";
 import Team from "./Team.tsx";
 
@@ -37,28 +38,41 @@ export default function App() {
     };
   }, [attempt]);
 
-  if (mode === null)
+  const outage = mode?.kind === "outage" ? mode : null;
+  // the modes own their titles; this hook only speaks for the two screens
+  // App renders itself — and it moves focus to « Serveur injoignable »
+  useViewFocus(
+    mode === null ? "chargement" : mode.kind,
+    outage ? "Serveur injoignable" : null,
+  );
+
+  if (mode === null || outage) {
+    // One shell for loading AND outage: the alert region exists from the
+    // first paint, and the outage message lands in it as a TEXT change —
+    // an alert inserted together with its text is dropped by some
+    // assistive technology, and this message is addressed precisely to
+    // the volunteer who cannot see the screen.
     return (
       <main>
-        <p role="status">Chargement…</p>
-      </main>
-    );
-  if (mode.kind === "outage") {
-    // above all no fallback to browser mode: the work would go into the
-    // browser without ever reaching the team
-    return (
-      <main>
-        <h1>Serveur injoignable</h1>
-        <p className="alerte erreur" role="alert">
-          {mode.message}
+        <p className={outage ? "alerte erreur" : "sr-only"}>
+          <span role="alert">{outage ? outage.message : ""}</span>
         </p>
-        <p>
-          Votre travail est enregistré sur le serveur de la campagne : rien
-          n'est perdu, mais il faut attendre qu'il réponde.{" "}
-          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
-            Réessayer
-          </button>
-        </p>
+        {mode === null ? (
+          <p role="status">Chargement…</p>
+        ) : (
+          <>
+            {/* above all no fallback to browser mode: the work would go
+                into the browser without ever reaching the team */}
+            <h1>Serveur injoignable</h1>
+            <p>
+              Votre travail est enregistré sur le serveur de la campagne : rien
+              n'est perdu, mais il faut attendre qu'il réponde.{" "}
+              <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+                Réessayer
+              </button>
+            </p>
+          </>
+        )}
       </main>
     );
   }

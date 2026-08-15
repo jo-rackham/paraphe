@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import * as API from "./api.ts";
-import { ChampsCampagne, campaignLabel, label, ROLES } from "./common.tsx";
+import {
+  ChampsCampagne,
+  campaignLabel,
+  focusContenu,
+  label,
+  ROLES,
+} from "./common.tsx";
 import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
 
 // Labels of the campaign keys. A campaign opened from a hosting request
@@ -25,6 +31,7 @@ function ConfigurationCampagne({
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setSending(true);
     try {
       const r = await API.updateCampaign(values, Number(batchSize));
@@ -75,7 +82,7 @@ function ConfigurationCampagne({
           />
         </label>
       </p>
-      <button type="submit" disabled={sending}>
+      <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Enregistrement…" : "Enregistrer la campagne"}
       </button>
     </form>
@@ -184,7 +191,11 @@ export function GestionEquipe({
           <button
             type="button"
             className="lien"
-            onClick={() => setCreated(null)}
+            onClick={() => {
+              // this button unmounts with its card: hand focus back first
+              focusContenu();
+              setCreated(null);
+            }}
           >
             j'ai noté
           </button>

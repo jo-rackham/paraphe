@@ -323,6 +323,8 @@ jobs:
           # mode when /api/config has a bad minute
           curl -fsS http://127.0.0.1:8047/ | grep -q 'id="root"'
           curl -fsS http://127.0.0.1:8047/ | grep -q 'name="paraphe-mode" content="team"'
+          # and the words a volunteer without JavaScript is left with
+          curl -fsS http://127.0.0.1:8047/ | grep -q '<noscript>'
           # one page: a reload deep in the application renders it
           curl -fsS http://127.0.0.1:8047/equipe | grep -q 'id="root"'
           # the same process sets the page's security headers as the API's

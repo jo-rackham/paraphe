@@ -115,6 +115,12 @@ test.describe
       await page.locator("table button.lien").first().click();
       await expect(page.locator("main h1")).toBeFocused();
       await expect(page).toHaveTitle(/ — paraphe$/);
+
+      // the result counter is ONE node: a visible line plus an sr-only
+      // mirror was read twice, and the two disagreed while the mirror
+      // lagged behind its debounce
+      await page.getByRole("button", { name: "retour à la liste" }).click();
+      await expect(page.getByText(/affiché\(s\) sur/)).toHaveCount(1);
     });
 
     test("non-text contrast the scanner cannot see", async ({ page }) => {
@@ -132,6 +138,9 @@ test.describe
             piste: v("--piste"),
             champ: v("--champ"),
             champTrait: v("--champ-trait"),
+            alerteFond: v("--alerte-fond"),
+            alerteTrait: v("--alerte-trait"),
+            alerteErreurTrait: v("--alerte-erreur-trait"),
           };
         });
         expect(
@@ -141,6 +150,16 @@ test.describe
         expect(
           contrast(vars.champTrait, vars.champ),
           `${scheme}: field border vs field`,
+        ).toBeGreaterThanOrEqual(3);
+        // the alert box border is what says "warning" before the text is
+        // read — it went unlisted in round one and read 1.5:1
+        expect(
+          contrast(vars.alerteTrait, vars.alerteFond),
+          `${scheme}: alert border vs alert background`,
+        ).toBeGreaterThanOrEqual(3);
+        expect(
+          contrast(vars.alerteErreurTrait, vars.alerteFond),
+          `${scheme}: error bar vs alert background`,
         ).toBeGreaterThanOrEqual(3);
       }
     });
@@ -229,5 +248,73 @@ test.describe
         page.getByRole("heading", { name: "Demandes d'hébergement" }),
       ).toBeVisible();
       await checkA11y(page, "instance:moderation");
+    });
+
+    // The palette is hand-defined in both schemes, so both are scanned in
+    // all THREE modes — browser mode alone left the two screens a volunteer
+    // spends the campaign on unscanned in the dark.
+    test.describe(() => {
+      test.use({ colorScheme: "dark" });
+
+      test("team mode in dark", async ({ page }) => {
+        const origin = campaignOrigin(FIRST_CAMPAIGN);
+        await page.goto(`${origin}/`);
+        await expect(
+          page.getByRole("heading", { name: "Connexion" }),
+        ).toBeVisible();
+        await checkA11y(page, "team:connexion (sombre)");
+
+        await signIn(page, origin, COORDINATION.email, COORDINATION.password);
+        await openTab(page, "Mon tableau");
+        await expect(
+          page.getByRole("heading", { name: "Mon tableau de bord" }),
+        ).toBeVisible();
+        await checkA11y(page, "team:tableau (sombre)");
+
+        await openTab(page, "Les maires");
+        await expect(page.locator("table button.lien").first()).toBeVisible();
+        await checkA11y(page, "team:maires (sombre)");
+
+        await page.locator("table button.lien").first().click();
+        await expect(page.getByText("Pourquoi cette personne")).toBeVisible();
+        await checkA11y(page, "team:fiche (sombre)");
+
+        await openTab(page, "Mon équipe");
+        await expect(
+          page.getByRole("heading", { name: "Mon équipe" }),
+        ).toBeVisible();
+        await checkA11y(page, "team:equipe (sombre)");
+      });
+
+      test("instance apex in dark", async ({ page }) => {
+        await page.goto(`${API_ORIGIN}/`);
+        await expect(
+          page.getByRole("heading", { name: "Héberger une campagne" }),
+        ).toBeVisible();
+        await checkA11y(page, "instance:accueil (sombre)");
+      });
+    });
+
+    // The healthy path is the one that gets scanned, and the alert that
+    // only appears when something breaks is the one carrying a button
+    // inside a live region — the shape the doctrine forbids. Reached here
+    // by breaking the paginated read on purpose.
+    test("team mode: the interrupted-loading alert", async ({ page }) => {
+      const origin = campaignOrigin(FIRST_CAMPAIGN);
+      await page.goto(`${origin}/`);
+      await signIn(page, origin, COORDINATION.email, COORDINATION.password);
+      await openTab(page, "Les maires");
+      await expect(page.locator("table button.lien").first()).toBeVisible();
+
+      // only the CONTINUATION fails: the first page must have rendered, or
+      // the alert is not the one under test
+      await page.route(/\/api\/mayors\?.*after=/, (route) => route.abort());
+      await page.mouse.wheel(0, 40_000);
+      const alerte = page.getByText("Chargement interrompu.");
+      await expect(alerte).toBeVisible({ timeout: 15_000 });
+      await expect(
+        page.getByRole("button", { name: "Réessayer" }),
+      ).toBeVisible();
+      await checkA11y(page, "team:maires (chargement interrompu)");
     });
   });

@@ -190,27 +190,40 @@ export function ListeServeur({
             Chargement…
           </p>
         )}
-        {failed !== null && (
-          <p className="alerte" role="alert" style={{ textAlign: "center" }}>
-            Chargement interrompu.{" "}
-            <button
-              type="button"
-              className="lien"
-              onClick={() => {
-                setFailed(null);
-                API.mayors(JSON.parse(key))
-                  .then((r) => {
-                    setRows(r.rows);
-                    setTotal(r.total);
-                    setNext(r.next);
-                  })
-                  .catch(onError);
-              }}
-            >
-              Réessayer
-            </button>
-          </p>
-        )}
+        {/*
+          The role sits on a span holding the TEXT alone, as everywhere
+          else: an interactive control inside a live region is re-read on
+          every mutation, and focusing it re-announces the whole box.
+        */}
+        <p
+          className={failed !== null ? "alerte" : "sr-only"}
+          style={{ textAlign: "center" }}
+        >
+          <span role="alert">
+            {failed !== null ? "Chargement interrompu." : ""}
+          </span>
+          {failed !== null && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="lien"
+                onClick={() => {
+                  setFailed(null);
+                  API.mayors(JSON.parse(key))
+                    .then((r) => {
+                      setRows(r.rows);
+                      setTotal(r.total);
+                      setNext(r.next);
+                    })
+                    .catch(onError);
+                }}
+              >
+                Réessayer
+              </button>
+            </>
+          )}
+        </p>
         {failed === null && next === null && rows.length > 0 && (
           <p className="gris" style={{ textAlign: "center" }}>
             — fin de la liste —

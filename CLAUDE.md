@@ -133,8 +133,23 @@ licence for the RNE.
   `--piste` and `--champ-trait` exist for the latter two.
   The interface conventions: **a live region pre-exists, only its TEXT
   changes, and it holds no interactive control** — `Alerte`,
-  `CompteurResultats` (debounced) and the sr-only announcer spans follow
-  it; a card that appears with a button in it never carries the role.
+  `CompteurResultats` (one node, debounced) and the sr-only announcer
+  spans follow it; a card that appears with a button in it never carries
+  the role. **Pre-exists means from the SHELL, loading state included**:
+  `setReady(true)` and the first message land in one React batch, so a
+  region living only in the ready tree mounts together with its text —
+  that regression happened once. `web/src/live-regions.test.tsx` pins it.
+  Assumed exceptions: the transient « Chargement… » paragraphs mount with
+  their text (a missed one costs nothing), and card borders (`--trait`)
+  stay decorative.
+  **A control never vanishes or goes `disabled` under the user's focus**:
+  a self-unmounting button (« fermer », « j'ai noté », accepting an offer)
+  hands focus to the content first (`focusContenu`), and a busy submit
+  uses `aria-disabled` plus a re-entry guard in its handler — `disabled`
+  on the focused button drops keyboard focus to `<body>` in every
+  browser. Leaving the outage shell focuses the next view's h1
+  (`useViewFocus` remembers across shells). `web/src/focus.test.tsx` pins
+  all three.
   Tab strips go through `NavOnglets` (`aria-current="page"`), view changes
   through `useViewFocus` (focus to the h1, per-view `document.title`),
   decorative pictograms through `Emoji` (aria-hidden). `--focus` is the

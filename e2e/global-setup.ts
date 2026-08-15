@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 import pg from "pg";
 
@@ -79,6 +80,42 @@ function appDsn() {
   return url.toString();
 }
 
+/**
+ * A leftover server from a crashed run keeps its port, OUR server dies on
+ * EADDRINUSE — and waitFor() then accepts the stranger's answer: the whole
+ * suite certifies a build it is not serving. Refuse loud instead.
+ */
+function refuseOccupiedPort(port: number, what: string) {
+  // BOTH address families: the origins resolve through `localhost`, which
+  // many hosts map to ::1 as well — a v6-only leftover would slip past a
+  // v4-only probe and still answer waitFor() in our place
+  const families = ["127.0.0.1", "::1"];
+  return Promise.all(
+    families.map(
+      (host) =>
+        new Promise<void>((resolve, reject) => {
+          const probe = createConnection({ host, port }, () => {
+            probe.destroy();
+            reject(
+              new Error(
+                `port ${port} (${host}) is already taken: a previous run's ` +
+                  `${what} is still alive, and the suite would test ITS ` +
+                  "files, not this build's. Kill it, then re-run.",
+              ),
+            );
+          });
+          // nothing listening — or no IPv6 on this host: the port is ours
+          probe.on("error", () => resolve());
+          // a firewalled port answers nothing at all: do not hang the suite
+          probe.setTimeout(2000, () => {
+            probe.destroy();
+            resolve();
+          });
+        }),
+    ),
+  );
+}
+
 async function waitFor(url: string, what: string) {
   const deadline = Date.now() + 90_000;
   for (;;) {
@@ -127,6 +164,9 @@ export default async function globalSetup() {
   run("go", ["build", "-C", "api", "-o", apiBinary, "."]);
 
   await prepareDatabase();
+
+  await refuseOccupiedPort(API_PORT, "API");
+  await refuseOccupiedPort(STATIC_PORT, "static server");
 
   const api = spawn(apiBinary, [], {
     cwd: ROOT,

@@ -50,8 +50,9 @@ export function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
         </p>
         <button
           type="button"
-          disabled={sending}
+          aria-disabled={sending || undefined}
           onClick={async () => {
+            if (sending) return;
             setSending(true);
             try {
               const r = await API.savePersonalNote(personalNote);
