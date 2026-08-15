@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { campaignOrigin, COORDINATION, FIRST_CAMPAIGN } from "./config.ts";
+import { COORDINATION, campaignOrigin, FIRST_CAMPAIGN } from "./config.ts";
 import { openTab, signIn } from "./helpers.ts";
 
 // The volunteer's own path, end to end: configure the campaign, reserve a
@@ -13,43 +13,60 @@ import { openTab, signIn } from "./helpers.ts";
 const ORIGIN = campaignOrigin(FIRST_CAMPAIGN);
 const CANDIDATE = "Camille Durand";
 
-test.describe.serial("a campaign at work", () => {
-  test("its coordination fills in the campaign", async ({ page }) => {
-    await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    await openTab(page, "Mon équipe");
+test.describe
+  .serial("a campaign at work", () => {
+    test("its coordination fills in the campaign", async ({ page }) => {
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      await openTab(page, "Mon équipe");
 
-    const exact = { exact: true };
-    await page.getByLabel("Son nom", exact).fill(CANDIDATE);
-    await page.getByLabel("Qui c'est, en une ligne", exact)
-      .fill("candidate écologiste, médecin");
-    await page.getByLabel("Sa présentation en deux ou trois phrases", exact)
-      .fill("Je suis médecin. Je porte la santé environnementale.");
-    await page.getByLabel("Votre nom", exact).fill("Alex Coordination");
-    await page.getByLabel("En quelle qualité", exact).fill("équipe de campagne");
-    await page.getByLabel("Téléphone", exact).fill("06 12 34 56 78");
-    await page.getByLabel("Email", exact).fill("contact@premiere.test");
-    await page.getByLabel("Site de la campagne", exact).fill("https://premiere.test");
-    await page.getByLabel("Ville d'où vous écrivez", exact).fill("Lyon");
-    await page.getByRole("button", { name: "Enregistrer la campagne" }).click();
+      const exact = { exact: true };
+      await page.getByLabel("Son nom", exact).fill(CANDIDATE);
+      await page
+        .getByLabel("Qui c'est, en une ligne", exact)
+        .fill("candidate écologiste, médecin");
+      await page
+        .getByLabel("Sa présentation en deux ou trois phrases", exact)
+        .fill("Je suis médecin. Je porte la santé environnementale.");
+      await page.getByLabel("Votre nom", exact).fill("Alex Coordination");
+      await page
+        .getByLabel("En quelle qualité", exact)
+        .fill("équipe de campagne");
+      await page.getByLabel("Téléphone", exact).fill("06 12 34 56 78");
+      await page.getByLabel("Email", exact).fill("contact@premiere.test");
+      await page
+        .getByLabel("Site de la campagne", exact)
+        .fill("https://premiere.test");
+      await page.getByLabel("Ville d'où vous écrivez", exact).fill("Lyon");
+      await page
+        .getByRole("button", { name: "Enregistrer la campagne" })
+        .click();
 
-    await expect(page.getByText(/Les messages sont prêts à partir/)).toBeVisible();
-    // and the « campaign not configured » banner is gone: it is the banner
-    // that tells volunteers not to send anything yet
-    await expect(page.getByText("Campagne non configurée")).toHaveCount(0);
-  });
+      await expect(
+        page.getByText(/Les messages sont prêts à partir/),
+      ).toBeVisible();
+      // and the « campaign not configured » banner is gone: it is the banner
+      // that tells volunteers not to send anything yet
+      await expect(page.getByText("Campagne non configurée")).toHaveCount(0);
+    });
 
-  test("a volunteer reserves a batch nobody else will get", async ({ page }) => {
-    await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    await openTab(page, "Mon tableau");
+    test("a volunteer reserves a batch nobody else will get", async ({
+      page,
+    }) => {
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      await openTab(page, "Mon tableau");
 
-    await expect(page.getByRole("heading", { name: "Mes maires (0)" })).toBeVisible();
-    await page.getByRole("button", { name: "Prendre un lot" }).click();
-    await expect(page.getByRole("heading", { name: /Mes maires \([1-9]/ }))
-      .toBeVisible();
-  });
+      await expect(
+        page.getByRole("heading", { name: "Mes maires (0)" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Prendre un lot" }).click();
+      await expect(
+        page.getByRole("heading", { name: /Mes maires \([1-9]/ }),
+      ).toBeVisible();
+    });
 
-  test("a card carries the mayor's own data and a written message",
-    async ({ page }) => {
+    test("a card carries the mayor's own data and a written message", async ({
+      page,
+    }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
       await openTab(page, "Mon tableau");
 
@@ -60,7 +77,9 @@ test.describe.serial("a campaign at work", () => {
       // the card names the mayor and the town it came from: the row travelled
       // whole, from the database to the screen
       await expect(page.getByRole("heading", { level: 1 })).toContainText(/\w/);
-      await expect(page.getByText(town, { exact: false }).first()).toBeVisible();
+      await expect(
+        page.getByText(town, { exact: false }).first(),
+      ).toBeVisible();
 
       // the message is generated from the campaign configuration AND from the
       // mayor's row: both sides of the data path in a single assertion
@@ -69,8 +88,9 @@ test.describe.serial("a campaign at work", () => {
       expect(body).not.toMatch(/\{[^}]+\}/); // no placeholder left unfilled
     });
 
-  test("recording the outcome is shared, and shows in the history",
-    async ({ page }) => {
+    test("recording the outcome is shared, and shows in the history", async ({
+      page,
+    }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
       await openTab(page, "Mon tableau");
       await page.locator("table button.lien").first().click();
@@ -79,8 +99,12 @@ test.describe.serial("a campaign at work", () => {
       await page.getByLabel("Note").fill("écrit ce matin, réponse promise");
       await page.getByRole("button", { name: "Enregistrer" }).click();
 
-      await expect(page.getByRole("heading", { name: "Historique" })).toBeVisible();
-      await expect(page.getByText("écrit ce matin, réponse promise")).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Historique" }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("écrit ce matin, réponse promise"),
+      ).toBeVisible();
 
       // and it survives a reload: the work lives on the server, not in the tab
       await page.reload();
@@ -88,19 +112,21 @@ test.describe.serial("a campaign at work", () => {
       await expect(page.getByText("Email envoyé").first()).toBeVisible();
     });
 
-  test("the export carries the working columns", async ({ page }) => {
-    await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    const csv = await page.request.get(`${ORIGIN}/api/export.csv`);
-    expect(csv.status()).toBe(200);
-    expect(csv.headers()["content-type"]).toContain("text/csv");
+    test("the export carries the working columns", async ({ page }) => {
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      const csv = await page.request.get(`${ORIGIN}/api/export.csv`);
+      expect(csv.status()).toBe(200);
+      expect(csv.headers()["content-type"]).toContain("text/csv");
 
-    const text = await csv.text();
-    // the BOM is what makes Excel and LibreOffice read it as UTF-8
-    expect(text.startsWith("\uFEFF")).toBe(true);
-    const header = text.split("\n")[0];
-    for (const column of ["insee_code", "commune", "volunteer", "status"]) {
-      expect(header, `column ${column} missing from the export`).toContain(column);
-    }
-    expect(text).toContain(COORDINATION.email);
+      const text = await csv.text();
+      // the BOM is what makes Excel and LibreOffice read it as UTF-8
+      expect(text.startsWith("\uFEFF")).toBe(true);
+      const header = text.split("\n")[0];
+      for (const column of ["insee_code", "commune", "volunteer", "status"]) {
+        expect(header, `column ${column} missing from the export`).toContain(
+          column,
+        );
+      }
+      expect(text).toContain(COORDINATION.email);
+    });
   });
-});

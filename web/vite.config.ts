@@ -10,8 +10,9 @@ export default defineConfig({
     // The instance the published browser version may pre-fill a campaign
     // from, baked HERE and not read from the URL: a link is free to name a
     // campaign, never a host. Empty = the ?org= parameter does nothing.
-    "import.meta.env.PARAPHE_INSTANCE_DOMAIN":
-      JSON.stringify(process.env.PARAPHE_BASE_DOMAIN ?? ""),
+    "import.meta.env.PARAPHE_INSTANCE_DOMAIN": JSON.stringify(
+      process.env.PARAPHE_BASE_DOMAIN ?? "",
+    ),
   },
   plugins: [react()],
   build: {

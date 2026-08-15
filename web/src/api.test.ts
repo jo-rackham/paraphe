@@ -10,26 +10,34 @@ import { dashboard, detectMode, me, SESSION_LOST } from "./api.ts";
 import type { ServerConfig } from "./types.ts";
 
 const CONFIG: ServerConfig = {
-  mode: "team", campaign: { candidat: "Camille" }, batch_size: 10,
-  unfilled: [], source_url: "", no_account: false,
+  mode: "team",
+  campaign: { candidat: "Camille" },
+  batch_size: 10,
+  unfilled: [],
+  source_url: "",
+  no_account: false,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
   ranks: [{ key: "has_endorsed", label: "A déjà parrainé" }],
 };
 
 const mark = (value: string | null) => {
-  document.head.innerHTML = value === null ? ""
-    : `<meta name="paraphe-mode" content="${value}">`;
+  document.head.innerHTML =
+    value === null ? "" : `<meta name="paraphe-mode" content="${value}">`;
 };
 
 const respond = (
   body: unknown,
   { ok = true, status = 200, type = "application/json" } = {},
 ) => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok, status,
-    headers: { get: () => type },
-    json: async () => body,
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok,
+      status,
+      headers: { get: () => type },
+      json: async () => body,
+    }),
+  );
 };
 
 afterEach(() => {
@@ -62,16 +70,24 @@ describe("the page marked by the API", () => {
 
   it("reports an outage when the network drops", async () => {
     mark("team");
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+    );
     expect((await detectMode()).kind).toBe("outage");
   });
 });
 
 describe("the lost-session signal", () => {
   const watch = async (call: () => Promise<unknown>) => {
-    respond({ error: "Session absente ou expirée." }, { ok: false, status: 401 });
+    respond(
+      { error: "Session absente ou expirée." },
+      { ok: false, status: 401 },
+    );
     let signalled = false;
-    const listen = () => { signalled = true; };
+    const listen = () => {
+      signalled = true;
+    };
     window.addEventListener(SESSION_LOST, listen);
     try {
       await call().catch(() => {});
@@ -97,8 +113,11 @@ describe("the lost-session signal", () => {
 
 describe("the apex of a multi-campaign instance", () => {
   const INSTANCE = {
-    mode: "instance", base_domain: "paraphe.fr", source_url: "",
-    no_account: false, campaign_keys: ["candidat"],
+    mode: "instance",
+    base_domain: "paraphe.fr",
+    source_url: "",
+    no_account: false,
+    campaign_keys: ["candidat"],
   };
 
   it("serves the instance landing page, not a campaign", async () => {
@@ -120,7 +139,10 @@ describe("the apex of a multi-campaign instance", () => {
 describe("the UNMARKED page", () => {
   it("falls into browser mode when nothing answers", async () => {
     mark(null);
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+    );
     expect((await detectMode()).kind).toBe("browser");
   });
 

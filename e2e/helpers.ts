@@ -2,7 +2,10 @@ import { expect, type Page } from "@playwright/test";
 
 /** Signs in and waits for the application to be past the login form. */
 export async function signIn(
-  page: Page, origin: string, email: string, password: string,
+  page: Page,
+  origin: string,
+  email: string,
+  password: string,
 ) {
   await page.goto(`${origin}/`);
   await page.getByLabel("Adresse email").fill(email);

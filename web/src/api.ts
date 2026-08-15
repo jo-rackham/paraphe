@@ -7,8 +7,18 @@
 // seen in production.
 
 import type {
-  CampaignRequest, Dashboard, Facets, InstanceConfig, MayorCard, Me,
-  MayorsPage, ModerationQueue, Note, ServerConfig, Team, TeamData,
+  CampaignRequest,
+  Dashboard,
+  Facets,
+  InstanceConfig,
+  MayorCard,
+  MayorsPage,
+  Me,
+  ModerationQueue,
+  Note,
+  ServerConfig,
+  Team,
+  TeamData,
 } from "./types.ts";
 
 const ROOT = `${import.meta.env.BASE_URL}api/`;
@@ -39,9 +49,11 @@ async function call<T>(path: string, options: Request = {}): Promise<T> {
   });
   const type = resp.headers.get("content-type") || "";
   if (!type.includes("application/json")) {
-    throw new APIError(resp.status,
-      `Réponse inattendue du serveur (HTTP ${resp.status}). `
-      + "L'API est peut-être arrêtée ou un intermédiaire s'est intercalé.");
+    throw new APIError(
+      resp.status,
+      `Réponse inattendue du serveur (HTTP ${resp.status}). ` +
+        "L'API est peut-être arrêtée ou un intermédiaire s'est intercalé.",
+    );
   }
   const body = await resp.json();
   if (!resp.ok) {
@@ -57,7 +69,10 @@ async function call<T>(path: string, options: Request = {}): Promise<T> {
     if (resp.status === 401 && path !== "session" && path !== "me") {
       window.dispatchEvent(new CustomEvent(SESSION_LOST));
     }
-    throw new APIError(resp.status, body.error || `Erreur HTTP ${resp.status}.`);
+    throw new APIError(
+      resp.status,
+      body.error || `Erreur HTTP ${resp.status}.`,
+    );
   }
   return body as T;
 }
@@ -74,13 +89,18 @@ export type Mode =
 
 /** The API marks the page it serves (see api/main.go, markInterface). */
 const teamMarker = (): boolean =>
-  document.querySelector('meta[name="paraphe-mode"]')?.getAttribute("content")
-  === "team";
+  document
+    .querySelector('meta[name="paraphe-mode"]')
+    ?.getAttribute("content") === "team";
 
 /** An unusable configuration is an outage, not a mode. */
 function validConfig(cfg: ServerConfig): boolean {
-  return cfg?.mode === "team" && Array.isArray(cfg.statuses)
-    && Array.isArray(cfg.ranks) && typeof cfg.campaign === "object";
+  return (
+    cfg?.mode === "team" &&
+    Array.isArray(cfg.statuses) &&
+    Array.isArray(cfg.ranks) &&
+    typeof cfg.campaign === "object"
+  );
 }
 
 /**
@@ -109,8 +129,9 @@ export async function detectMode(): Promise<Mode> {
     if (!marked) return { kind: "browser" };
     return {
       kind: "outage",
-      message: "Le serveur a répondu quelque chose d'inattendu à la place de "
-        + "sa configuration. Prévenez la coordination.",
+      message:
+        "Le serveur a répondu quelque chose d'inattendu à la place de " +
+        "sa configuration. Prévenez la coordination.",
     };
   } catch (e) {
     if (!marked) return { kind: "browser" };
@@ -130,7 +151,10 @@ export const signOut = (): Promise<unknown> =>
 export const savePersonalNote = (
   personalNote: string,
 ): Promise<{ personal_note: string }> =>
-  call("me/personal_note", { method: "POST", body: { personal_note: personalNote } });
+  call("me/personal_note", {
+    method: "POST",
+    body: { personal_note: personalNote },
+  });
 
 export const dashboard = (): Promise<Dashboard> => call("dashboard");
 export const facets = (): Promise<Facets> => call("facets");
@@ -144,9 +168,14 @@ export interface Criteria {
   after?: string;
 }
 
-export function mayors(
-  { q, status, department, rank, democracy, after }: Criteria = {},
-): Promise<MayorsPage> {
+export function mayors({
+  q,
+  status,
+  department,
+  rank,
+  democracy,
+  after,
+}: Criteria = {}): Promise<MayorsPage> {
   const p = new URLSearchParams();
   if (q) p.set("q", q);
   if (status) p.set("status", status);
@@ -157,42 +186,75 @@ export function mayors(
   return call(`mayors?${p}`);
 }
 
-export interface Card { mayor: MayorCard; notes: Note[] }
+export interface Card {
+  mayor: MayorCard;
+  notes: Note[];
+}
 
 export const card = (insee: string): Promise<Card> =>
   call(`mayors/${encodeURIComponent(insee)}`);
-export const setStatus = (insee: string, status: string, note: string): Promise<Card> =>
-  call(`mayors/${encodeURIComponent(insee)}/status`,
-    { method: "POST", body: { status, note } });
-export const takeBatch = (
-  { department, rank, democracy }: { department?: string; rank?: string; democracy?: boolean },
-): Promise<{ taken: number; message: string }> =>
+export const setStatus = (
+  insee: string,
+  status: string,
+  note: string,
+): Promise<Card> =>
+  call(`mayors/${encodeURIComponent(insee)}/status`, {
+    method: "POST",
+    body: { status, note },
+  });
+export const takeBatch = ({
+  department,
+  rank,
+  democracy,
+}: {
+  department?: string;
+  rank?: string;
+  democracy?: boolean;
+}): Promise<{ taken: number; message: string }> =>
   call("batch", { method: "POST", body: { department, rank, democracy } });
 
 export const team = (): Promise<TeamData> => call("team");
-export const createTeam = (name: string, departments: string[]): Promise<Team> =>
+export const createTeam = (
+  name: string,
+  departments: string[],
+): Promise<Team> =>
   call("team/group", { method: "POST", body: { name, departments } });
 
 export interface NewAccount {
-  email: string; name: string; role?: string; team_id?: number;
+  email: string;
+  name: string;
+  role?: string;
+  team_id?: number;
 }
 
 export const createAccount = (
   account: NewAccount,
 ): Promise<{ email: string; name: string; role: string; password: string }> =>
   call("team/account", { method: "POST", body: account });
-export const toggleAccount = (email: string): Promise<{ email: string; active: boolean }> =>
-  call(`team/account/${encodeURIComponent(email)}/active`,
-    { method: "POST", body: {} });
+export const toggleAccount = (
+  email: string,
+): Promise<{ email: string; active: boolean }> =>
+  call(`team/account/${encodeURIComponent(email)}/active`, {
+    method: "POST",
+    body: {},
+  });
 
 export const exportUrl = () => `${ROOT}export.csv`;
 
 // -- Campaign configuration (coordination) ----------------------------------
 
 export const updateCampaign = (
-  campaign: Record<string, string>, batchSize?: number,
-): Promise<{ campaign: Record<string, string>; batch_size: number; unfilled: string[] }> =>
-  call("campaign", { method: "POST", body: { campaign, batch_size: batchSize } });
+  campaign: Record<string, string>,
+  batchSize?: number,
+): Promise<{
+  campaign: Record<string, string>;
+  batch_size: number;
+  unfilled: string[];
+}> =>
+  call("campaign", {
+    method: "POST",
+    body: { campaign, batch_size: batchSize },
+  });
 
 // -- Instance landing page (apex) -------------------------------------------
 
@@ -201,12 +263,19 @@ export const requestCampaign = (
 ): Promise<{ id: number; slug: string; message: string }> =>
   call("request", { method: "POST", body: request });
 
-export const moderationQueue = (): Promise<ModerationQueue> => call("admin/requests");
+export const moderationQueue = (): Promise<ModerationQueue> =>
+  call("admin/requests");
 
 export const decideRequest = (
-  id: number, decision: "accepted" | "refused", reason = "",
+  id: number,
+  decision: "accepted" | "refused",
+  reason = "",
 ): Promise<{
-  id: number; slug: string; decision: string;
-  address?: string; coordination?: string; password?: string;
+  id: number;
+  slug: string;
+  decision: string;
+  address?: string;
+  coordination?: string;
+  password?: string;
 }> =>
   call(`admin/requests/${id}`, { method: "POST", body: { decision, reason } });

@@ -4,7 +4,14 @@
 // matching, different mayors enter the list and nothing else signals it.
 
 import { describe, expect, it } from "vitest";
-import { closestMatch, norm, ratio, sexFromTitle, stripControls, titleCase } from "./texte.ts";
+import {
+  closestMatch,
+  norm,
+  ratio,
+  sexFromTitle,
+  stripControls,
+  titleCase,
+} from "./texte.ts";
 
 const REFERENCES: [string, string, number][] = [
   ["SAINT MARTIN", "SAINT MARTIN", 1.0],
@@ -76,8 +83,12 @@ describe("stripControls()", () => {
   // comes out "L'Ha-les-Roses". Œ sits one code point further, and Ÿ is
   // present in the national register of elected officials.
   it.each([
-    ["\u009f", "Ÿ"], ["\u008c", "Œ"], ["\u009c", "œ"], ["\u0080", "€"],
-    ["\u0092", "’"], ["\u009e", "ž"],
+    ["\u009f", "Ÿ"],
+    ["\u008c", "Œ"],
+    ["\u009c", "œ"],
+    ["\u0080", "€"],
+    ["\u0092", "’"],
+    ["\u009e", "ž"],
   ])("decodes CP1252 byte %j as %s", (raw, expected) => {
     expect(stripControls(`x${raw}y`)).toBe(`x${expected}y`);
   });
@@ -92,8 +103,9 @@ describe("stripControls()", () => {
   // Removing a control without putting anything in its place glued words
   // together, and five directory cards already carry line breaks.
   it("does not glue words separated by a control character", () => {
-    expect(stripControls("Hôtel de Ville\n1 place de la Mairie"))
-      .toBe("Hôtel de Ville 1 place de la Mairie");
+    expect(stripControls("Hôtel de Ville\n1 place de la Mairie")).toBe(
+      "Hôtel de Ville 1 place de la Mairie",
+    );
     expect(stripControls("Lun-Ven\t9h-12h")).toBe("Lun-Ven 9h-12h");
   });
 

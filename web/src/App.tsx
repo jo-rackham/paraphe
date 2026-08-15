@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
+import type { Mode } from "./api.ts";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
-import Team from "./Team.tsx";
 import Instance from "./Instance.tsx";
-import type { Mode } from "./api.ts";
+import Team from "./Team.tsx";
 
 // Two modes, one application.
 //
@@ -22,14 +22,27 @@ export default function App() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // `attempt` is a TRIGGER, not a value this effect reads. "Réessayer" bumps
+  // it, and that is the only thing that re-runs the detection. Removing it —
+  // which the rule asks for — leaves the button doing nothing at all.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a trigger, read by nothing
   useEffect(() => {
     let alive = true;
     setMode(null);
-    API.detectMode().then((m) => { if (alive) setMode(m); });
-    return () => { alive = false; };
+    API.detectMode().then((m) => {
+      if (alive) setMode(m);
+    });
+    return () => {
+      alive = false;
+    };
   }, [attempt]);
 
-  if (mode === null) return <main><p>Chargement…</p></main>;
+  if (mode === null)
+    return (
+      <main>
+        <p>Chargement…</p>
+      </main>
+    );
   if (mode.kind === "outage") {
     // above all no fallback to browser mode: the work would go into the
     // browser without ever reaching the team
@@ -40,13 +53,13 @@ export default function App() {
         <p>
           Votre travail est enregistré sur le serveur de la campagne : rien
           n'est perdu, mais il faut attendre qu'il réponde.{" "}
-          <button onClick={() => setAttempt((n) => n + 1)}>Réessayer</button>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            Réessayer
+          </button>
         </p>
       </main>
     );
   }
   if (mode.kind === "instance") return <Instance config={mode.config} />;
-  return mode.kind === "team"
-    ? <Team config={mode.config} />
-    : <Browser />;
+  return mode.kind === "team" ? <Team config={mode.config} /> : <Browser />;
 }

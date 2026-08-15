@@ -11,8 +11,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
-import { CAMPAIGN_KEYS, unfilledKeys, type Campaign, type Templates }
-  from "../noyau/messages.ts";
+import {
+  CAMPAIGN_KEYS,
+  type Campaign,
+  type Templates,
+  unfilledKeys,
+} from "../noyau/messages.ts";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -62,7 +66,8 @@ export function loadConfig({ strict = true } = {}): Config {
   for (const path of [base, join(ROOT, "config", "campagne.local.yaml")]) {
     if (!existsSync(path)) continue;
     const f = parse(readFileSync(path, "utf8")) as ConfigFile;
-    for (const [k, v] of Object.entries(f.campagne ?? {})) campaign[k] = String(v);
+    for (const [k, v] of Object.entries(f.campagne ?? {}))
+      campaign[k] = String(v);
     if (typeof f.app?.taille_lot === "number") batchSize = f.app.taille_lot;
   }
   for (const k of CAMPAIGN_KEYS) {
@@ -72,7 +77,8 @@ export function loadConfig({ strict = true } = {}): Config {
   const batch = (process.env.PARAPHE_BATCH_SIZE ?? "").trim();
   if (batch) {
     const n = Number(batch);
-    if (!Number.isInteger(n)) throw new Error(`PARAPHE_BATCH_SIZE = ${batch} : entier attendu`);
+    if (!Number.isInteger(n))
+      throw new Error(`PARAPHE_BATCH_SIZE = ${batch} : entier attendu`);
     batchSize = n;
   }
 
@@ -80,28 +86,39 @@ export function loadConfig({ strict = true } = {}): Config {
   if (batchSize < 1) missing.push("taille_lot (entier ≥ 1)");
   if (missing.length) {
     throw new Error(
-      `configuration incomplète (${base} ou variables PARAPHE_*) : `
-      + missing.join(", "));
+      `configuration incomplète (${base} ou variables PARAPHE_*) : ` +
+        missing.join(", "),
+    );
   }
 
   const unfilled = unfilledKeys(campaign);
   if (unfilled.length && strict) {
     throw new Error(
-      "valeurs de gabarit non remplies (elles partiraient telles quelles aux "
-      + `maires) : ${unfilled.join(", ")} — voir config/campagne.yaml ou les `
-      + "variables PARAPHE_*");
+      "valeurs de gabarit non remplies (elles partiraient telles quelles aux " +
+        `maires) : ${unfilled.join(", ")} — voir config/campagne.yaml ou les ` +
+        "variables PARAPHE_*",
+    );
   }
   return { campaign, batchSize, unfilled };
 }
 
-const TEMPLATE_NAMES = ["email", "email_decouverte", "courrier",
-  "courrier_decouverte", "telephone", "telephone_decouverte"];
+const TEMPLATE_NAMES = [
+  "email",
+  "email_decouverte",
+  "courrier",
+  "courrier_decouverte",
+  "telephone",
+  "telephone_decouverte",
+];
 
 /** The repository's templates, editable without touching the code. */
 export function loadTemplates(): Templates {
   const templates: Templates = {};
   for (const name of TEMPLATE_NAMES) {
-    templates[`${name}.txt`] = readFileSync(join(ROOT, "modeles", `${name}.txt`), "utf8");
+    templates[`${name}.txt`] = readFileSync(
+      join(ROOT, "modeles", `${name}.txt`),
+      "utf8",
+    );
   }
   return templates;
 }

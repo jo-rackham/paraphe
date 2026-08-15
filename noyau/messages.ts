@@ -30,20 +30,41 @@ export const RANKS: Record<string, string> = {
 // Keys of config/campagne.yaml — French on purpose: the campaign team
 // edits that file themselves.
 export const CAMPAIGN_KEYS = [
-  "candidat", "candidat_description", "candidat_description_longue",
-  "signataire", "signataire_qualite", "contact_tel", "contact_email",
-  "site", "ville_envoi",
+  "candidat",
+  "candidat_description",
+  "candidat_description_longue",
+  "signataire",
+  "signataire_qualite",
+  "contact_tel",
+  "contact_email",
+  "site",
+  "ville_envoi",
 ];
 
 // Values of the shipped template: letting them through would send
 // "Prénom NOM" to thousands of mayors.
 const TEMPLATE_VALUES = new Set([
-  "prénom nom", "ville", "06 00 00 00 00", "contact@exemple.fr",
+  "prénom nom",
+  "ville",
+  "06 00 00 00 00",
+  "contact@exemple.fr",
   "https://exemple.fr",
 ]);
 
-const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
-  "août", "septembre", "octobre", "novembre", "décembre"];
+const MONTHS = [
+  "janvier",
+  "février",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "août",
+  "septembre",
+  "octobre",
+  "novembre",
+  "décembre",
+];
 
 /** Data missing or unusable FOR THIS MAYOR: skip them, keep going. */
 export class MissingField extends Error {}
@@ -80,7 +101,9 @@ const volunteerText = (v: unknown): string =>
 export function proseName(candidate: unknown): string {
   const lastNames: string[] = [];
   const firstNames: string[] = [];
-  for (const tok of String(candidate ?? "").split(/\s+/).filter(Boolean)) {
+  for (const tok of String(candidate ?? "")
+    .split(/\s+/)
+    .filter(Boolean)) {
     (isUppercase(tok) ? lastNames : firstNames).push(tok);
   }
   return [...firstNames, ...lastNames.map(titleCase)].join(" ");
@@ -108,7 +131,8 @@ export function readableHistory(hist: unknown): string {
 }
 
 export function endorsementsProse(raw: unknown): string {
-  return String(raw ?? "").split(" | ")
+  return String(raw ?? "")
+    .split(" | ")
     .filter((t) => t.includes(": "))
     .map((t) => {
       const sep = t.indexOf(": ");
@@ -143,8 +167,9 @@ export function isWoman(mayor: Mayor): boolean {
   const civ = clean(mayor.title).toUpperCase().replace(/\.$/, "");
   if (civ !== "M" && civ !== "MME") {
     throw new MissingField(
-      `civilité non reconnue : ${JSON.stringify(mayor.title)} `
-      + `(${mayor.first_name} ${mayor.last_name}, ${mayor.commune})`);
+      `civilité non reconnue : ${JSON.stringify(mayor.title)} ` +
+        `(${mayor.first_name} ${mayor.last_name}, ${mayor.commune})`,
+    );
   }
   return civ === "MME";
 }
@@ -164,18 +189,26 @@ export function context(mayor: Mayor): string {
   // office: a deputy mayor may still be in office today
   const wasMayor = clean(mayor.predecessor_mayor) === "oui";
   let lead: string;
-  if (who && wasMayor) lead = `sous la municipalité précédente : ${who} avait présenté `;
-  else if (who) lead = `par le passé : ${who}, élu de votre commune, a présenté `;
+  if (who && wasMayor)
+    lead = `sous la municipalité précédente : ${who} avait présenté `;
+  else if (who)
+    lead = `par le passé : ${who}, élu de votre commune, a présenté `;
   else lead = "par le passé : ";
-  return `\nVotre commune a d'ailleurs déjà usé de cette possibilité ${lead}`
-    + `${cited}. C'est ce précédent qui nous conduit à vous écrire à `
-    + "vous plutôt qu'à d'autres.\n";
+  return (
+    `\nVotre commune a d'ailleurs déjà usé de cette possibilité ${lead}` +
+    `${cited}. C'est ce précédent qui nous conduit à vous écrire à ` +
+    "vous plutôt qu'à d'autres.\n"
+  );
 }
 
 // Fields with no acceptable fallback: better not to write than to write
 // wrong.
 const REQUIRED_FIELDS = ["first_name", "last_name", "commune"];
-const REQUIRED_FIELDS_ENDORSER = [...REQUIRED_FIELDS, "recent_candidate", "recent_year"];
+const REQUIRED_FIELDS_ENDORSER = [
+  ...REQUIRED_FIELDS,
+  "recent_candidate",
+  "recent_year",
+];
 
 export interface Options {
   signer?: string;
@@ -187,14 +220,20 @@ export interface Options {
 // The returned keys are the template placeholders — FRENCH, because the
 // campaign team writes "{prenom}" and "{commune}" in modeles/*.txt. This
 // function is the French-vocabulary ↔ English-columns boundary.
-export function fields(mayor: Mayor, cfg: Campaign, opts: Options = {}): Record<string, string> {
+export function fields(
+  mayor: Mayor,
+  cfg: Campaign,
+  opts: Options = {},
+): Record<string, string> {
   const { signer = "", personalNote = "", today = new Date() } = opts;
-  const required = rank(mayor) === "has_endorsed" ? REQUIRED_FIELDS_ENDORSER : REQUIRED_FIELDS;
+  const required =
+    rank(mayor) === "has_endorsed" ? REQUIRED_FIELDS_ENDORSER : REQUIRED_FIELDS;
   const empty = required.filter((k) => !clean(mayor[k]));
   if (empty.length) {
     throw new MissingField(
-      `champs vides, message non générable : ${empty.join(", ")} `
-      + `(INSEE ${mayor.insee_code}, ${mayor.commune})`);
+      `champs vides, message non générable : ${empty.join(", ")} ` +
+        `(INSEE ${mayor.insee_code}, ${mayor.commune})`,
+    );
   }
   const woman = isWoman(mayor);
   const phoneHistory = readableHistory(clean(mayor.endorsement_history));
@@ -208,19 +247,23 @@ export function fields(mayor: Mayor, cfg: Campaign, opts: Options = {}): Record<
   // Omitted here, the same paste makes render() throw by name.
   const byRank: Record<string, string> = endorser
     ? {
-      candidat_recent: clean(mayor.recent_candidate),
-      annee_recente: clean(mayor.recent_year),
-      parrainages: endorsementsProse(
-        clean(mayor.small_candidate_endorsements || mayor.endorsement_history)),
-    }
+        candidat_recent: clean(mayor.recent_candidate),
+        annee_recente: clean(mayor.recent_year),
+        parrainages: endorsementsProse(
+          clean(
+            mayor.small_candidate_endorsements || mayor.endorsement_history,
+          ),
+        ),
+      }
     : {
-      contexte: context(mayor),
-      // same guard as context(): without it, the phone script dictated
-      // "Sa commune l'a déjà fait sous une précédente municipalité : ."
-      contexte_tel: rank(mayor) === "commune_has_endorsed" && phoneHistory
-        ? ` Sa commune l'a déjà fait sous une précédente municipalité : ${phoneHistory}.`
-        : "",
-    };
+        contexte: context(mayor),
+        // same guard as context(): without it, the phone script dictated
+        // "Sa commune l'a déjà fait sous une précédente municipalité : ."
+        contexte_tel:
+          rank(mayor) === "commune_has_endorsed" && phoneHistory
+            ? ` Sa commune l'a déjà fait sous une précédente municipalité : ${phoneHistory}.`
+            : "",
+      };
   return {
     ...byRank,
     salutation: woman ? "Madame la Maire" : "Monsieur le Maire",
@@ -267,7 +310,11 @@ export function fields(mayor: Mayor, cfg: Campaign, opts: Options = {}): Record<
  * text. `ville_envoi` appears in no template: this is its only use, and both
  * the mass mailing and the on-screen letter must show the same one.
  */
-export function letterHeader(mayor: Mayor, cfg: Campaign, opts: Options = {}): string {
+export function letterHeader(
+  mayor: Mayor,
+  cfg: Campaign,
+  opts: Options = {},
+): string {
   return `${cfg.ville_envoi}, le ${fields(mayor, cfg, opts).date}`;
 }
 
@@ -290,12 +337,16 @@ export function elidedCommune(commune: string): string {
   // Picardie. "de Havange" is right and "d'Havange" is wrong — eliding
   // them cost 44 letters and 44 emails against about five rare misses the
   // other way ("de Hyères").
-  return /^[aeiouyàâäéèêëîïôöùûüœæ]/i.test(commune) ? `d'${commune}` : `de ${commune}`;
+  return /^[aeiouyàâäéèêëîïôöùûüœæ]/i.test(commune)
+    ? `d'${commune}`
+    : `de ${commune}`;
 }
 
 export function postalCity(mayor: Mayor): string {
   const raw = String(mayor.city ?? "");
-  const hasControl = [...raw].some((c) => isControl(c.codePointAt(0) as number));
+  const hasControl = [...raw].some((c) =>
+    isControl(c.codePointAt(0) as number),
+  );
   if (hasControl) return clean(mayor.commune);
   return clean(raw) || clean(mayor.commune);
 }
@@ -319,7 +370,10 @@ const RX_EMAIL = /^[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}$/;
  * ("a@x.fr;b@y.fr"): as is, that is an invalid address for any sending
  * tool.
  */
-export function emailAddresses(mayor: Mayor): { valid: string[]; rejected: string[] } {
+export function emailAddresses(mayor: Mayor): {
+  valid: string[];
+  rejected: string[];
+} {
   const valid: string[] = [];
   const rejected: string[] = [];
   for (const a of clean(mayor.email).split(/[;,]/)) {
@@ -353,18 +407,31 @@ export function unfilledKeys(cfg: Campaign): string[] {
     // it, and Go's guard — the other half of this decision — folds it
     // everywhere. The class is written out so both sides fold the same set;
     // widening one for the non-breaking space is what opened the gap here.
-    const v = String(cfg[k] ?? "").normalize("NFC")
+    const v = String(cfg[k] ?? "")
+      .normalize("NFC")
       .replace(/[\u200b-\u200d\ufeff]/g, "")
-      .replace(/[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/g, " ")
+      .replace(
+        /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/g,
+        " ",
+      )
       .trim();
-    return !v || TEMPLATE_VALUES.has(v.toLowerCase())
+    return (
+      !v ||
+      TEMPLATE_VALUES.has(v.toLowerCase()) ||
       // the template's three placeholder syntaxes: [qui], {candidat}, <quoi>
-      || /\[[^\]]+\]/.test(v) || /\{[^}]+\}/.test(v) || /<[^>]+>/.test(v);
+      /\[[^\]]+\]/.test(v) ||
+      /\{[^}]+\}/.test(v) ||
+      /<[^>]+>/.test(v)
+    );
   });
 }
 
 export interface Engine {
-  email(mayor: Mayor, cfg: Campaign, opts?: Options): { subject: string; body: string };
+  email(
+    mayor: Mayor,
+    cfg: Campaign,
+    opts?: Options,
+  ): { subject: string; body: string };
   letter(mayor: Mayor, cfg: Campaign, opts?: Options): string;
   phoneScript(mayor: Mayor, cfg: Campaign, opts?: Options): string;
 }
@@ -384,7 +451,8 @@ export function createEngine(templates: Templates): Engine {
     const template = templates[name];
     if (template === undefined) {
       throw new InvalidTemplate(
-        `modèle absent : ${name} — connus : ${Object.keys(templates).sort().join(", ")}`);
+        `modèle absent : ${name} — connus : ${Object.keys(templates).sort().join(", ")}`,
+      );
     }
     // `\w` only covers [A-Za-z0-9_]: "{prénom}", "{ commune }" and
     // "{code-postal}" walked through the guard and went out in the clear.
@@ -394,17 +462,21 @@ export function createEngine(templates: Templates): Engine {
       const key = raw.trim();
       if (!Object.hasOwn(ch, key)) {
         throw new InvalidTemplate(
-          `placeholder inconnu dans le modèle ${name} : {${raw}} — champs `
-          + `disponibles : ${Object.keys(ch).sort().join(", ")}`);
+          `placeholder inconnu dans le modèle ${name} : {${raw}} — champs ` +
+            `disponibles : ${Object.keys(ch).sort().join(", ")}`,
+        );
       }
       return ch[key];
     });
     // an empty {argument_personnel} must not leave an orphan paragraph
-    return text
-      .replaceAll("\r\n", "\n").replaceAll("\r", "\n")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim() + "\n";
+    return (
+      text
+        .replaceAll("\r\n", "\n")
+        .replaceAll("\r", "\n")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim() + "\n"
+    );
   }
 
   return {

@@ -1,10 +1,15 @@
-import {
-  Component, useEffect, useRef, useState,
-  type ErrorInfo, type ReactNode, type RefObject,
-} from "react";
 import { marked } from "marked";
-import * as M from "./messages.ts";
+import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import GUIDE from "../../GUIDE.md?raw";
+import * as M from "./messages.ts";
 import type { Campaign, Mayor, Message, Note } from "./types.ts";
 
 // Vocabulary and components shared by both modes. The card above all: it
@@ -92,9 +97,10 @@ export const CAMPAIGN_FIELDS: CampaignField[] = [
     group: "Le candidat ou la candidate",
     label: "Qui c'est, en une ligne",
     example: "médecin de campagne, engagée pour l'accès aux soins",
-    hint: "Se lit à l'intérieur de la phrase : « au nom de Marie Dupont, "
-      + "médecin de campagne…, qui sollicite les présentations pour 2027 ». "
-      + "C'est la seule ligne qui dit au maire de qui il s'agit.",
+    hint:
+      "Se lit à l'intérieur de la phrase : « au nom de Marie Dupont, " +
+      "médecin de campagne…, qui sollicite les présentations pour 2027 ». " +
+      "C'est la seule ligne qui dit au maire de qui il s'agit.",
   },
   {
     key: "candidat_description_longue",
@@ -149,8 +155,13 @@ export const campaignLabel = (key: string): string =>
 export function Hexagone() {
   return (
     <svg width="26" height="29" viewBox="0 0 26 29" aria-hidden="true">
-      <path d="M13 1 24.3 7.5v13L13 27 1.7 20.5v-13z" fill="none"
-        stroke="#ffd400" strokeWidth="2.2" strokeLinejoin="round" />
+      <path
+        d="M13 1 24.3 7.5v13L13 27 1.7 20.5v-13z"
+        fill="none"
+        stroke="#ffd400"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
       <rect x="7" y="12.2" width="4" height="3.6" fill="#000091" />
       <rect x="11" y="12.2" width="4" height="3.6" fill="#ffffff" />
       <rect x="15" y="12.2" width="4" height="3.6" fill="#e1000f" />
@@ -165,7 +176,8 @@ export function Hexagone() {
  * what to do.
  */
 export class RenderGuard extends Component<
-  { children: ReactNode }, { error: Error | null }
+  { children: ReactNode },
+  { error: Error | null }
 > {
   constructor(props: { children: ReactNode }) {
     super(props);
@@ -191,7 +203,11 @@ export class RenderGuard extends Component<
           page ; si l'écran revient, signalez-le à la coordination avec le nom
           de la commune concernée.
         </p>
-        <p><button onClick={() => this.setState({ error: null })}>Continuer</button></p>
+        <p>
+          <button type="button" onClick={() => this.setState({ error: null })}>
+            Continuer
+          </button>
+        </p>
       </main>
     );
   }
@@ -205,17 +221,30 @@ export function Chip({ status }: { status: string }) {
   const known = STATUSES[status];
   if (!known) {
     return (
-      <span className="chip" style={{ background: "#fef08a" }}
-        title="Statut inconnu de cette version de l'application">{status} ⚠</span>
+      <span
+        className="chip"
+        style={{ background: "#fef08a" }}
+        title="Statut inconnu de cette version de l'application"
+      >
+        {status} ⚠
+      </span>
     );
   }
   const [label, colour] = known;
-  return <span className="chip" style={{ background: colour }}>{label}</span>;
+  return (
+    <span className="chip" style={{ background: colour }}>
+      {label}
+    </span>
+  );
 }
 
-export function PiedDePage(
-  { children, sourceUrl }: { children?: ReactNode; sourceUrl?: string },
-) {
+export function PiedDePage({
+  children,
+  sourceUrl,
+}: {
+  children?: ReactNode;
+  sourceUrl?: string;
+}) {
   return (
     <footer>
       <p className="officiel">
@@ -225,20 +254,33 @@ export function PiedDePage(
       </p>
       {children}
       {sourceUrl && (
-        <p><a href={sourceUrl} rel="noreferrer">Code source</a> — logiciel libre.</p>
+        <p>
+          <a href={sourceUrl} rel="noreferrer">
+            Code source
+          </a>{" "}
+          — logiciel libre.
+        </p>
       )}
     </footer>
   );
 }
 
-export function Alerte(
-  { message, onClose }: { message?: Message | null; onClose?: () => void },
-) {
+export function Alerte({
+  message,
+  onClose,
+}: {
+  message?: Message | null;
+  onClose?: () => void;
+}) {
   if (!message) return null;
   return (
     <p className={message.tone === "erreur" ? "alerte erreur" : "alerte"}>
       {message.text}{" "}
-      {onClose && <button className="lien" onClick={onClose}>fermer</button>}
+      {onClose && (
+        <button type="button" className="lien" onClick={onClose}>
+          fermer
+        </button>
+      )}
     </p>
   );
 }
@@ -249,8 +291,15 @@ const GUIDE_HTML = marked.parse(GUIDE) as string;
 
 export function Guide() {
   return (
-    <div className="carte guide"
-      dangerouslySetInnerHTML={{ __html: GUIDE_HTML }} />
+    // GUIDE_HTML is GUIDE.md of this repository, imported with ?raw at BUILD
+    // time and rendered by marked. No request, no user input and no third
+    // party reaches it — the guide has ONE source, shared by the interface
+    // and the mass mailing, and that is the point.
+    <div
+      className="carte guide"
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: repository content, inlined at build time
+      dangerouslySetInnerHTML={{ __html: GUIDE_HTML }}
+    />
   );
 }
 
@@ -315,15 +364,29 @@ export interface CardProps {
   drafts?: RefObject<Record<string, CardDraft>>;
 }
 
-export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
-  notes = [], onBack, onStatus, header, drafts }: CardProps) {
+export function Fiche({
+  mayor,
+  cfg,
+  personalNote,
+  signer,
+  status: initialStatus,
+  notes = [],
+  onBack,
+  onStatus,
+  header,
+  drafts,
+}: CardProps) {
   const [status, setStatus] = useState(initialStatus ?? "to_contact");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   let rendered: {
-    subject: string; body: string; letter: string; phone: string;
-    address: string; letterHead: string;
+    subject: string;
+    body: string;
+    letter: string;
+    phone: string;
+    address: string;
+    letterHead: string;
   } | null = null;
   let error: string | null = null;
   try {
@@ -353,7 +416,10 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   // signer, compared by value: an identity compare threw a kept draft
   // away on every reconnection (a fresh config object with equal values)
   // and would miss a personal touch written after the card is first opened.
-  const pristine = { subject: rendered?.subject ?? "", body: rendered?.body ?? "" };
+  const pristine = {
+    subject: rendered?.subject ?? "",
+    body: rendered?.body ?? "",
+  };
   // The render, PLUS the identity it is addressed to. No email template
   // carries the mayor's name — {salutation} is a gender and {commune_de} a
   // place — so two successors at the same INSEE render identically, and
@@ -366,7 +432,9 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   // personal touch would throw away a call note taken minutes earlier.
   const freshEmail = () => {
     const k = kept();
-    return k && k.basis === basis ? { subject: k.subject, body: k.body } : pristine;
+    return k && k.basis === basis
+      ? { subject: k.subject, body: k.body }
+      : pristine;
   };
   const freshNote = () => {
     const k = kept();
@@ -399,7 +467,11 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   useEffect(() => {
     if (drafts) {
       drafts.current[mayor.insee_code as string] = {
-        subject, body, note, basis, who,
+        subject,
+        body,
+        note,
+        basis,
+        who,
         touched: subject !== pristine.subject || body !== pristine.body,
       };
     }
@@ -420,119 +492,200 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
 
   return (
     <>
-      <p><button className="lien" onClick={onBack}>← retour à la liste</button></p>
-      <h1>{mayor.title} {mayor.first_name} {mayor.last_name}</h1>
-      <p><strong>{mayor.commune}</strong> ({mayor.department})</p>
+      <p>
+        <button type="button" className="lien" onClick={onBack}>
+          ← retour à la liste
+        </button>
+      </p>
+      <h1>
+        {mayor.title} {mayor.first_name} {mayor.last_name}
+      </h1>
+      <p>
+        <strong>{mayor.commune}</strong> ({mayor.department})
+      </p>
       {header}
 
       <div className="carte">
         <p style={{ margin: ".2rem 0" }}>
           <strong>Pourquoi cette personne :</strong>{" "}
-          {rank === "has_endorsed"
-            ? `a parrainé ${M.readableHistory(mayor.endorsement_history ?? "")
-              || mayor.recent_candidate}`
-            : rank === "commune_has_endorsed"
-              ? <>sa commune l'a fait sous {M.proseName(mayor.predecessor ?? "")} —{" "}
-                <span className="gris">lui/elle n'a rien parrainé : ne le
-                  remerciez de rien</span></>
-              : <span className="gris">aucun historique connu — message de
-                découverte</span>}
+          {rank === "has_endorsed" ? (
+            `a parrainé ${
+              M.readableHistory(mayor.endorsement_history ?? "") ||
+              mayor.recent_candidate
+            }`
+          ) : rank === "commune_has_endorsed" ? (
+            <>
+              sa commune l'a fait sous {M.proseName(mayor.predecessor ?? "")} —{" "}
+              <span className="gris">
+                lui/elle n'a rien parrainé : ne le remerciez de rien
+              </span>
+            </>
+          ) : (
+            <span className="gris">
+              aucun historique connu — message de découverte
+            </span>
+          )}
         </p>
         <p className="grand-tel">☎ {mayor.phone || "non renseigné"}</p>
         <p style={{ margin: ".2rem 0" }}>
-          <strong>Ouverture :</strong> {mayor.town_hall_hours || "non renseigné"}
+          <strong>Ouverture :</strong>{" "}
+          {mayor.town_hall_hours || "non renseigné"}
         </p>
         <p style={{ margin: ".2rem 0" }}>
           <strong>Email :</strong> {mayor.email || "non renseigné"}
         </p>
       </div>
 
-      {error
-        ? <p className="alerte erreur">Message non générable : {error}</p>
-        : (
-          <>
-            <details open>
-              <summary>✉️ Email</summary>
-              <div className="dedans">
-                {regenerated && (
-                  <p className="alerte">
-                    <strong>Message régénéré.</strong> La campagne ou les
-                    informations de ce maire ont changé depuis votre
-                    réécriture : le texte ci-dessous a été reconstruit, et ce
-                    que vous aviez écrit n'a pas été conservé.
-                  </p>
-                )}
-                {valid.length === 0 && (
-                  <p className="alerte">Aucune adresse exploitable — passez par
-                    le courrier ou le téléphone.</p>
-                )}
-                <p><label>Objet
-                  <input type="text" value={subject}
-                    onChange={(e) => { setSubject(e.target.value); setRegenerated(false); }} />
-                </label></p>
-                <p><label>Message
-                  <textarea rows={16} value={body}
-                    onChange={(e) => { setBody(e.target.value); setRegenerated(false); }} />
-                </label></p>
-                <p>
-                  <button onClick={() => {
-                    navigator.clipboard.writeText(`${subject}\n\n${body}`);
-                  }}>📋 Copier</button>{" "}
-                  {valid.length > 0 && (
-                    <a className="bouton secondaire" href={
-                      `mailto:${encodeURIComponent(valid[0])}`
-                      + `?subject=${encodeURIComponent(subject)}`
-                      + `&body=${encodeURIComponent(body)}`
-                    }>✉️ Ouvrir dans ma messagerie</a>
-                  )}
+      {error ? (
+        <p className="alerte erreur">Message non générable : {error}</p>
+      ) : (
+        <>
+          <details open>
+            <summary>✉️ Email</summary>
+            <div className="dedans">
+              {regenerated && (
+                <p className="alerte">
+                  <strong>Message régénéré.</strong> La campagne ou les
+                  informations de ce maire ont changé depuis votre réécriture :
+                  le texte ci-dessous a été reconstruit, et ce que vous aviez
+                  écrit n'a pas été conservé.
                 </p>
-              </div>
-            </details>
+              )}
+              {valid.length === 0 && (
+                <p className="alerte">
+                  Aucune adresse exploitable — passez par le courrier ou le
+                  téléphone.
+                </p>
+              )}
+              <p>
+                <label>
+                  Objet
+                  <input
+                    type="text"
+                    value={subject}
+                    onChange={(e) => {
+                      setSubject(e.target.value);
+                      setRegenerated(false);
+                    }}
+                  />
+                </label>
+              </p>
+              <p>
+                <label>
+                  Message
+                  <textarea
+                    rows={16}
+                    value={body}
+                    onChange={(e) => {
+                      setBody(e.target.value);
+                      setRegenerated(false);
+                    }}
+                  />
+                </label>
+              </p>
+              <p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${subject}\n\n${body}`);
+                  }}
+                >
+                  📋 Copier
+                </button>{" "}
+                {valid.length > 0 && (
+                  <a
+                    className="bouton secondaire"
+                    href={
+                      `mailto:${encodeURIComponent(valid[0])}` +
+                      `?subject=${encodeURIComponent(subject)}` +
+                      `&body=${encodeURIComponent(body)}`
+                    }
+                  >
+                    ✉️ Ouvrir dans ma messagerie
+                  </a>
+                )}
+              </p>
+            </div>
+          </details>
 
-            <details>
-              <summary>📮 Courrier</summary>
-              <div className="dedans">
-                {badAddress && <p className="alerte">Adresse inutilisable : {badAddress}.</p>}
-                <pre className="lettre">{rendered!.address}{"\n\n"}{rendered!.letterHead}{"\n\n"}{rendered!.letter}</pre>
-                <button onClick={() => window.print()}>🖨️ Imprimer</button>
-              </div>
-            </details>
+          <details>
+            <summary>📮 Courrier</summary>
+            <div className="dedans">
+              {badAddress && (
+                <p className="alerte">Adresse inutilisable : {badAddress}.</p>
+              )}
+              <pre className="lettre">
+                {rendered!.address}
+                {"\n\n"}
+                {rendered!.letterHead}
+                {"\n\n"}
+                {rendered!.letter}
+              </pre>
+              <button type="button" onClick={() => window.print()}>
+                🖨️ Imprimer
+              </button>
+            </div>
+          </details>
 
-            <details>
-              <summary>☎️ Téléphone</summary>
-              <div className="dedans"><pre>{rendered!.phone}</pre></div>
-            </details>
-          </>
-        )}
+          <details>
+            <summary>☎️ Téléphone</summary>
+            <div className="dedans">
+              <pre>{rendered!.phone}</pre>
+            </div>
+          </details>
+        </>
+      )}
 
       <div className="carte">
         <h2 style={{ marginTop: 0 }}>Après le contact</h2>
-        <Alerte message={statusError ? { tone: "erreur", text: statusError } : null} />
+        <Alerte
+          message={statusError ? { tone: "erreur", text: statusError } : null}
+        />
         <p>
-          <label>Statut
+          <label>
+            Statut
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
               {Object.entries(STATUSES).map(([k, [l]]) => (
-                <option key={k} value={k}>{l}</option>
+                <option key={k} value={k}>
+                  {l}
+                </option>
               ))}
             </select>
           </label>
         </p>
-        <p><label>Note
-          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
-        </label></p>
-        <button onClick={save} disabled={saving}>
+        <p>
+          <label>
+            Note
+            <textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </label>
+        </p>
+        <button type="button" onClick={save} disabled={saving}>
           {saving ? "Enregistrement…" : "Enregistrer"}
         </button>
         {notes.length > 0 && (
           <>
             <h2>Historique</h2>
+            {/* The history is append-only and rendered whole, in order:
+                nothing is inserted, removed or reordered, which is the case
+                the rule exists for. Two notes can share a timestamp, so the
+                index is the only key here that is actually unique. */}
             {notes.map((n, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: append-only, never reordered
               <div className="note-item" key={i}>
                 <span className="gris">
                   {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
                   {n.volunteer ? ` — ${n.volunteer}` : ""}
                 </span>
-                {n.note && <><br />{n.note}</>}
+                {n.note && (
+                  <>
+                    <br />
+                    {n.note}
+                  </>
+                )}
               </div>
             ))}
           </>

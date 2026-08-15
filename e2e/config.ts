@@ -1,5 +1,5 @@
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Shared addresses and paths for the end-to-end suite.
 //

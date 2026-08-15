@@ -1,11 +1,21 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
 
 import {
-  API_ORIGIN, API_PORT, BASE_DOMAIN, COORDINATION, DB_NAME, DB_PASSWORD,
-  DB_ROLE, FIRST_CAMPAIGN, INSTANCE_ADMIN, ROOT, STATIC_ORIGIN, STATIC_PORT,
+  API_ORIGIN,
+  API_PORT,
+  BASE_DOMAIN,
+  COORDINATION,
+  DB_NAME,
+  DB_PASSWORD,
+  DB_ROLE,
+  FIRST_CAMPAIGN,
+  INSTANCE_ADMIN,
+  ROOT,
+  STATIC_ORIGIN,
+  STATIC_PORT,
   WORK_DIR,
 } from "./config.ts";
 
@@ -18,12 +28,15 @@ const adminDsn = (process.env.PARAPHE_TEST_DATABASE_URL ?? "").trim();
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv = {}) {
   const result = spawnSync(command, args, {
-    cwd: ROOT, encoding: "utf8", env: { ...process.env, ...env },
+    cwd: ROOT,
+    encoding: "utf8",
+    env: { ...process.env, ...env },
   });
   if (result.status !== 0) {
     throw new Error(
-      `${command} ${args.join(" ")} failed (${result.status}):\n`
-      + `${result.stdout ?? ""}${result.stderr ?? ""}`);
+      `${command} ${args.join(" ")} failed (${result.status}):\n` +
+        `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    );
   }
   return result.stdout ?? "";
 }
@@ -40,7 +53,8 @@ async function prepareDatabase() {
            CREATE ROLE ${DB_ROLE} LOGIN PASSWORD '${DB_PASSWORD}'
              NOSUPERUSER NOBYPASSRLS;
          END IF;
-       END $$`);
+       END $$`,
+    );
     await admin.query(`CREATE DATABASE ${DB_NAME} OWNER ${DB_ROLE}`);
   } finally {
     await admin.end();
@@ -74,7 +88,8 @@ async function waitFor(url: string, what: string) {
     } catch {
       // not up yet
     }
-    if (Date.now() > deadline) throw new Error(`${what} never answered on ${url}`);
+    if (Date.now() > deadline)
+      throw new Error(`${what} never answered on ${url}`);
     await new Promise((r) => setTimeout(r, 250));
   }
 }
@@ -90,8 +105,9 @@ function record(children: Record<string, ChildProcess>) {
 export default async function globalSetup() {
   if (!adminDsn) {
     throw new Error(
-      "PARAPHE_TEST_DATABASE_URL is required: the end-to-end suite needs a "
-      + "throwaway PostgreSQL it may drop databases on. Locally: `task db`.");
+      "PARAPHE_TEST_DATABASE_URL is required: the end-to-end suite needs a " +
+        "throwaway PostgreSQL it may drop databases on. Locally: `task db`.",
+    );
   }
   rmSync(WORK_DIR, { recursive: true, force: true });
   mkdirSync(WORK_DIR, { recursive: true });
@@ -147,8 +163,10 @@ export default async function globalSetup() {
   cpSync(join(ROOT, "web", "dist"), staticDir, { recursive: true });
   cpSync(dataDir, join(staticDir, "donnees"), { recursive: true });
   const statics = spawn(
-    "node", [join(ROOT, "e2e", "static-server.mjs"), staticDir, String(STATIC_PORT)],
-    { stdio: ["ignore", "pipe", "pipe"] });
+    "node",
+    [join(ROOT, "e2e", "static-server.mjs"), staticDir, String(STATIC_PORT)],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
 
   record({ api, statics });
   await waitFor(`${API_ORIGIN}/health/db`, "the API");

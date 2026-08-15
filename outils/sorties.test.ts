@@ -12,8 +12,12 @@ import { describe, expect, it } from "vitest";
 import { parseRecords } from "../noyau/csv.ts";
 import { norm } from "../noyau/texte.ts";
 import {
-  checkCivilities, checkHeader, compareIdentity, ENDORSEMENT_COLUMNS,
-  loadEndorsements, RNE_COLUMNS,
+  checkCivilities,
+  checkHeader,
+  compareIdentity,
+  ENDORSEMENT_COLUMNS,
+  loadEndorsements,
+  RNE_COLUMNS,
 } from "./build.ts";
 import { ROOT } from "./config.ts";
 
@@ -25,8 +29,8 @@ const whenBuilt = built ? describe : describe.skip;
 // runs anyway, and the file crashed on a machine without the outputs
 // instead of standing aside. Hence the lazy reads below.
 const targetRows = () => parseRecords(readFileSync(TARGETS, "utf8"));
-const fullBase = () => parseRecords(
-  readFileSync(join(ROOT, "out", "04_base_complete.csv"), "utf8"));
+const fullBase = () =>
+  parseRecords(readFileSync(join(ROOT, "out", "04_base_complete.csv"), "utf8"));
 
 // And a suite that stands aside proves nothing. Locally that is fine — the
 // outputs come from `task build`, not from the repository. Where they were
@@ -41,9 +45,11 @@ const fullBase = () => parseRecords(
 describe("the invariants on the real outputs", () => {
   it("run wherever they were promised", () => {
     if (!process.env.PARAPHE_EXPECTED_OUTPUTS) return;
-    expect(built, `${TARGETS} is missing: this job must cross the open `
-      + "sources before running this suite, otherwise it certifies nothing")
-      .toBe(true);
+    expect(
+      built,
+      `${TARGETS} is missing: this job must cross the open ` +
+        "sources before running this suite, otherwise it certifies nothing",
+    ).toBe(true);
   });
 });
 
@@ -57,22 +63,31 @@ whenBuilt("the mass-mailing file", () => {
   // official serves sent 36 letters to the wrong town hall — mergers and
   // commune changes.
   it("names the commune where the mayor serves, not the one they signed in", () => {
-    const wrong = targetRows().filter((r) => norm(r.commune) !== norm(r.commune_2026));
-    expect(wrong.map((r) => `${r.insee_code} ${r.commune}≠${r.commune_2026}`)).toEqual([]);
+    const wrong = targetRows().filter(
+      (r) => norm(r.commune) !== norm(r.commune_2026),
+    );
+    expect(
+      wrong.map((r) => `${r.insee_code} ${r.commune}≠${r.commune_2026}`),
+    ).toEqual([]);
   });
 
   // The "found by name" fallback only holds when the signed commune said
   // nothing. When it is in the RNE with another mayor, a departmental
   // namesake wins: 12 mayors thanked for an endorsement that is not
   // theirs.
-  it("only invokes \"renamed/merged commune\" when it truly is", () => {
-    const rne = parseRecords(readFileSync(join(ROOT, "data", "raw", "rne_maires.csv"), "utf8"));
+  it('only invokes "renamed/merged commune" when it truly is', () => {
+    const rne = parseRecords(
+      readFileSync(join(ROOT, "data", "raw", "rne_maires.csv"), "utf8"),
+    );
     const byDept = new Map<string, Map<string, string>>();
     for (const r of rne) {
       const values = Object.values(r);
       const dept = norm(values[1] || values[3]);
       let communes = byDept.get(dept);
-      if (!communes) { communes = new Map(); byDept.set(dept, communes); }
+      if (!communes) {
+        communes = new Map();
+        byDept.set(dept, communes);
+      }
       communes.set(norm(values[5]), values[4]);
     }
     const suspicious = targetRows()
@@ -102,7 +117,9 @@ whenBuilt("the mass-mailing file", () => {
     // spell the name differently ("THOMAS CHINOUILH" at the Conseil
     // constitutionnel, "THOMAS" at the RNE). A join on the exact string
     // matches nothing and the test certifies nothing.
-    const endorsements = loadEndorsements().filter((e) => e.office.startsWith("Maire"));
+    const endorsements = loadEndorsements().filter((e) =>
+      e.office.startsWith("Maire"),
+    );
     const byDepartment = new Map<string, typeof endorsements>();
     for (const e of endorsements) {
       const dpt = norm(e.dept);
@@ -110,11 +127,13 @@ whenBuilt("the mass-mailing file", () => {
     }
 
     const directory = parseRecords(
-      readFileSync(join(ROOT, "data", "raw", "annuaire_mairies.csv"), "utf8"));
+      readFileSync(join(ROOT, "data", "raw", "annuaire_mairies.csv"), "utf8"),
+    );
     // Same index as the crossing: several communes share a label across
     // departments ("Montignac" exists in more than one), so the code is
     // only conclusive within the department.
-    const dept = (insee: string) => (/^9[78]/.test(insee) ? insee.slice(0, 3) : insee.slice(0, 2));
+    const dept = (insee: string) =>
+      /^9[78]/.test(insee) ? insee.slice(0, 3) : insee.slice(0, 2);
     const ownInsee = new Map<string, string[]>();
     for (const card of directory) {
       if (/délégu|annexe/i.test(card.nom ?? "")) continue;
@@ -127,19 +146,25 @@ whenBuilt("the mass-mailing file", () => {
     for (const r of targetRows()) {
       if (!r.matching_confidence.startsWith("retrouvé par nom")) continue;
       const official = {
-        lastName: r.last_name, firstName: r.first_name,
+        lastName: r.last_name,
+        firstName: r.first_name,
         sex: r.title === "Mme" ? "F" : "M",
-        commune: r.commune, insee: r.insee_code, dept: r.department,
+        commune: r.commune,
+        insee: r.insee_code,
+        dept: r.department,
       };
       const signed = (byDepartment.get(norm(r.department)) ?? [])
         .filter((e) => compareIdentity(e, official) === "ok")
         .map((e) => norm(e.commune));
       for (const signedCommune of new Set(signed)) {
-        const own = (ownInsee.get(signedCommune) ?? [])
-          .find((insee) => dept(insee) === dept(r.insee_code));
+        const own = (ownInsee.get(signedCommune) ?? []).find(
+          (insee) => dept(insee) === dept(r.insee_code),
+        );
         if (own !== undefined && own !== r.insee_code) {
-          contradicted.push(`${r.insee_code} ${r.first_name} ${r.last_name} `
-            + `(${r.commune_2026}) ← signé à ${signedCommune}, qui possède ${own}`);
+          contradicted.push(
+            `${r.insee_code} ${r.first_name} ${r.last_name} ` +
+              `(${r.commune_2026}) ← signé à ${signedCommune}, qui possède ${own}`,
+          );
         }
       }
     }
@@ -147,21 +172,26 @@ whenBuilt("the mass-mailing file", () => {
   });
 
   it("leaves no endorsement claim without a candidate and a year", () => {
-    const empty = targetRows().filter((r) => !r.recent_candidate || !r.recent_year);
+    const empty = targetRows().filter(
+      (r) => !r.recent_candidate || !r.recent_year,
+    );
     expect(empty.map((r) => r.insee_code)).toEqual([]);
   });
 });
 
 describe("the civility domain", () => {
   it("accepts the two spellings actually present in the sources", () => {
-    expect(() => checkCivilities([{ civ: "M" }, { civ: "M." }, { civ: "Mme" }]))
-      .not.toThrow();
+    expect(() =>
+      checkCivilities([{ civ: "M" }, { civ: "M." }, { civ: "Mme" }]),
+    ).not.toThrow();
   });
 
   // The day a file writes "Mr", the sex discriminant would silently switch
   // off and Christine would inherit Christian's endorsement.
   it("refuses an unknown spelling rather than disarming", () => {
-    expect(() => checkCivilities([{ civ: "Mr" }])).toThrow(/outside the domain/);
+    expect(() => checkCivilities([{ civ: "Mr" }])).toThrow(
+      /outside the domain/,
+    );
     expect(() => checkCivilities([{ civ: "" }])).toThrow(/outside the domain/);
   });
 });
@@ -173,35 +203,61 @@ describe("the civility domain", () => {
 // Measured before this guard existed: one inserted column produced file 01
 // with its header alone, file 04 with 34 826 rows of garbage, and exit 0.
 describe("the sources read by position", () => {
-  const RNE = ["Code du département", "Libellé du département",
+  const RNE = [
+    "Code du département",
+    "Libellé du département",
     "Code de la collectivité à statut particulier",
-    "Libellé de la collectivité à statut particulier", "Code de la commune",
-    "Libellé de la commune", "Nom de l'élu", "Prénom de l'élu", "Code sexe"];
+    "Libellé de la collectivité à statut particulier",
+    "Code de la commune",
+    "Libellé de la commune",
+    "Nom de l'élu",
+    "Prénom de l'élu",
+    "Code sexe",
+  ];
 
   it("accepts the header as the sources actually publish it", () => {
     expect(() => checkHeader("rne_maires.csv", RNE, RNE_COLUMNS)).not.toThrow();
   });
 
   it("halts when a column is inserted upstream", () => {
-    expect(() => checkHeader("rne_maires.csv", ["Nouvelle", ...RNE], RNE_COLUMNS))
-      .toThrow(/columns have moved/);
+    expect(() =>
+      checkHeader("rne_maires.csv", ["Nouvelle", ...RNE], RNE_COLUMNS),
+    ).toThrow(/columns have moved/);
   });
 
   // The two years do not spell the candidate column the same way. Reading
   // one of them by the other's header is what a naive check would impose.
-  it.each([["Candidat", 2022], ["Candidat-e parrainé-e", 2017]])(
-    "accepts %s, the spelling of %i", (spelling) => {
-      const header = ["Civilité", "Nom", "Prénom", "Mandat", "Circonscription",
-        "Département", String(spelling)];
-      expect(() => checkHeader("parrainages.csv", header, ENDORSEMENT_COLUMNS))
-        .not.toThrow();
-    });
+  it.each([
+    ["Candidat", 2022],
+    ["Candidat-e parrainé-e", 2017],
+  ])("accepts %s, the spelling of %i", (spelling) => {
+    const header = [
+      "Civilité",
+      "Nom",
+      "Prénom",
+      "Mandat",
+      "Circonscription",
+      "Département",
+      String(spelling),
+    ];
+    expect(() =>
+      checkHeader("parrainages.csv", header, ENDORSEMENT_COLUMNS),
+    ).not.toThrow();
+  });
 
   it("refuses a spelling nobody has seen", () => {
-    const header = ["Civilité", "Nom", "Prénom", "Mandat", "Circonscription",
-      "Département", "Personne parrainée"];
-    expect(() => checkHeader("parrainages.csv", header, ENDORSEMENT_COLUMNS))
-      .toThrow(/columns have moved/);
+    const header = [
+      "Civilité",
+      "Nom",
+      "Prénom",
+      "Mandat",
+      "Circonscription",
+      "Département",
+      "Personne parrainée",
+    ];
+    expect(() =>
+      checkHeader("parrainages.csv", header, ENDORSEMENT_COLUMNS),
+    ).toThrow(/columns have moved/);
   });
 });
 
@@ -214,20 +270,29 @@ describe("the sources read by position", () => {
 whenBuilt("the communal precedent, on the real base", () => {
   it("never claims the previous term for an endorsement older than it", () => {
     const base = fullBase();
-    const wrong = base.filter((r) => r.predecessor_mayor === "oui"
-      && !r.endorsement_history.includes("2022"));
-    expect(wrong.map((r) => `${r.insee_code} ${r.commune} — ${r.endorsement_history}`))
-      .toEqual([]);
+    const wrong = base.filter(
+      (r) =>
+        r.predecessor_mayor === "oui" &&
+        !r.endorsement_history.includes("2022"),
+    );
+    expect(
+      wrong.map(
+        (r) => `${r.insee_code} ${r.commune} — ${r.endorsement_history}`,
+      ),
+    ).toEqual([]);
   });
 
   // The whole history is cited in that sentence — "avait présenté X en
   // 2017 et 2022" — so a history spanning both years puts half the claim
   // two municipal elections back.
   it("never claims it for a history that reaches beyond the previous term", () => {
-    const spanning = fullBase().filter((r) => r.predecessor_mayor === "oui"
-      && r.endorsement_history.includes("2017"));
-    expect(spanning.map((r) => `${r.insee_code} ${r.endorsement_history}`))
-      .toEqual([]);
+    const spanning = fullBase().filter(
+      (r) =>
+        r.predecessor_mayor === "oui" && r.endorsement_history.includes("2017"),
+    );
+    expect(
+      spanning.map((r) => `${r.insee_code} ${r.endorsement_history}`),
+    ).toEqual([]);
   });
 
   // and the ones that DO qualify keep saying it: the fix must not silence

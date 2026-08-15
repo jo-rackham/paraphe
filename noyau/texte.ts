@@ -10,7 +10,10 @@
 export function norm(s: string | null | undefined): string {
   let t = (s ?? "").normalize("NFD").replace(/\p{Mn}/gu, "");
   t = t.toUpperCase().replaceAll("Œ", "OE").replaceAll("Æ", "AE");
-  t = t.replace(/[-'’/().]/g, " ").replace(/\s+/g, " ").trim();
+  t = t
+    .replace(/[-'’/().]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return t.replace(/\bSTE\b/g, "SAINTE").replace(/\bST\b/g, "SAINT");
 }
 
@@ -24,10 +27,33 @@ export const collapse = (s: string | null | undefined): string =>
 // "L'Haÿ-les-Roses" came out "L'Ha-les-Roses" — the same defect as Œting,
 // one code point further. Ÿ is present in the RNE.
 export const CP1252: Record<number, string> = {
-  0x80: "€", 0x82: "‚", 0x83: "ƒ", 0x84: "„", 0x85: "…", 0x86: "†", 0x87: "‡",
-  0x88: "ˆ", 0x89: "‰", 0x8a: "Š", 0x8b: "‹", 0x8c: "Œ", 0x8e: "Ž",
-  0x91: "‘", 0x92: "’", 0x93: "“", 0x94: "”", 0x95: "•", 0x96: "–", 0x97: "—",
-  0x98: "˜", 0x99: "™", 0x9a: "š", 0x9b: "›", 0x9c: "œ", 0x9e: "ž", 0x9f: "Ÿ",
+  128: "€",
+  130: "‚",
+  131: "ƒ",
+  132: "„",
+  133: "…",
+  134: "†",
+  135: "‡",
+  136: "ˆ",
+  137: "‰",
+  138: "Š",
+  139: "‹",
+  140: "Œ",
+  142: "Ž",
+  145: "‘",
+  146: "’",
+  147: "“",
+  148: "”",
+  149: "•",
+  150: "–",
+  151: "—",
+  152: "˜",
+  153: "™",
+  154: "š",
+  155: "›",
+  156: "œ",
+  158: "ž",
+  159: "Ÿ",
 };
 
 /** Unicode category Cc: C0 and C1 controls. */
@@ -107,8 +133,12 @@ function indexOfB(b: string[]): Map<string, number[]> {
 }
 
 function longestMatch(
-  a: string[], b2j: Map<string, number[]>,
-  alo: number, ahi: number, blo: number, bhi: number,
+  a: string[],
+  b2j: Map<string, number[]>,
+  alo: number,
+  ahi: number,
+  blo: number,
+  bhi: number,
 ): [number, number, number] {
   let besti = alo;
   let bestj = blo;
@@ -135,9 +165,16 @@ function longestMatch(
 /** Total number of matched characters, in the difflib sense. */
 function matched(a: string[], b: string[], b2j: Map<string, number[]>): number {
   let total = 0;
-  const stack: [number, number, number, number][] = [[0, a.length, 0, b.length]];
+  const stack: [number, number, number, number][] = [
+    [0, a.length, 0, b.length],
+  ];
   while (stack.length) {
-    const [alo, ahi, blo, bhi] = stack.pop() as [number, number, number, number];
+    const [alo, ahi, blo, bhi] = stack.pop() as [
+      number,
+      number,
+      number,
+      number,
+    ];
     const [i, j, k] = longestMatch(a, b2j, alo, ahi, blo, bhi);
     if (!k) continue;
     total += k;
@@ -153,10 +190,11 @@ export function ratio(stringA: string, stringB: string): number {
   const b = [...stringB];
   if (b.length >= AUTOJUNK_THRESHOLD) {
     throw new Error(
-      `ratio() received a string of ${b.length} characters: beyond `
-      + `${AUTOJUNK_THRESHOLD}, Python enables the "autojunk" heuristic that `
-      + "this port does not reproduce, and the two implementations would "
-      + "diverge.");
+      `ratio() received a string of ${b.length} characters: beyond ` +
+        `${AUTOJUNK_THRESHOLD}, Python enables the "autojunk" heuristic that ` +
+        "this port does not reproduce, and the two implementations would " +
+        "diverge.",
+    );
   }
   const total = a.length + b.length;
   if (!total) return 1;
@@ -184,7 +222,9 @@ function quickRatio(a: string[], b: string[]): number {
  * string) pair, so at equal score the greater string wins.
  */
 export function closestMatch(
-  word: string, possibilities: Iterable<string>, cutoff: number,
+  word: string,
+  possibilities: Iterable<string>,
+  cutoff: number,
 ): string | null {
   const b = [...word];
   const b2j = indexOfB(b);
@@ -197,8 +237,7 @@ export function closestMatch(
     if (quickRatio(a, b) < cutoff) continue;
     const r = total ? (2 * matched(a, b, b2j)) / total : 1;
     if (r < cutoff) continue;
-    if (best === null || r > bestScore
-        || (r === bestScore && x > best)) {
+    if (best === null || r > bestScore || (r === bestScore && x > best)) {
       best = x;
       bestScore = r;
     }

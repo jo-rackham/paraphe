@@ -24,9 +24,23 @@ const engine = createEngine({
 
 export const { email, letter, phoneScript } = engine;
 
-export {
-  CAMPAIGN_KEYS, clean, context, emailAddresses, fields, incompleteAddress,
-  isWoman, letterHeader, MissingField, endorsementsProse, postalCity, proseName,
-  RANKS, rank, readableHistory, recipientAddress, unfilledKeys,
-} from "../../noyau/messages.ts";
 export type { Campaign, Mayor, Options } from "../../noyau/messages.ts";
+export {
+  CAMPAIGN_KEYS,
+  clean,
+  context,
+  emailAddresses,
+  endorsementsProse,
+  fields,
+  incompleteAddress,
+  isWoman,
+  letterHeader,
+  MissingField,
+  postalCity,
+  proseName,
+  RANKS,
+  rank,
+  readableHistory,
+  recipientAddress,
+  unfilledKeys,
+} from "../../noyau/messages.ts";

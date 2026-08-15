@@ -45,8 +45,15 @@ export interface Me {
   may_manage: boolean;
 }
 
-export interface Status { key: string; label: string; colour: string }
-export interface Rank { key: string; label: string }
+export interface Status {
+  key: string;
+  label: string;
+  colour: string;
+}
+export interface Rank {
+  key: string;
+  label: string;
+}
 
 export interface ServerConfig {
   mode: "team";
@@ -107,9 +114,15 @@ export interface ModerationQueue {
   base_domain: string;
 }
 
-export interface Message { tone: "ok" | "erreur"; text: string }
+export interface Message {
+  tone: "ok" | "erreur";
+  text: string;
+}
 
-export interface Counter { key: string; n: number }
+export interface Counter {
+  key: string;
+  n: number;
+}
 
 export interface Dashboard {
   stats: Record<string, number>;

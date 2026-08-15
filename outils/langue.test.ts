@@ -15,15 +15,39 @@ import { ROOT } from "./config.ts";
 
 /** Vocabulary of the data model: legitimate in code, never inside a sentence. */
 const ENGLISH = [
-  "mayor", "mayors", "volunteer", "team", "teams", "account", "accounts",
-  "campaign", "department", "status", "rank", "batch", "assignment",
-  "has_endorsed", "commune_has_endorsed", "no_signal", "to_contact",
-  "email_sent", "letter_sent", "to_call_back", "promised",
-  "promised_elsewhere", "do_not_contact", "insee_code", "first_name",
-  "last_name", "updated_at", "team_id", "password_hash",
+  "mayor",
+  "mayors",
+  "volunteer",
+  "team",
+  "teams",
+  "account",
+  "accounts",
+  "campaign",
+  "department",
+  "status",
+  "rank",
+  "batch",
+  "assignment",
+  "has_endorsed",
+  "commune_has_endorsed",
+  "no_signal",
+  "to_contact",
+  "email_sent",
+  "letter_sent",
+  "to_call_back",
+  "promised",
+  "promised_elsewhere",
+  "do_not_contact",
+  "insee_code",
+  "first_name",
+  "last_name",
+  "updated_at",
+  "team_id",
+  "password_hash",
 ];
 
-const SQL = /\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|VALUES|SET|CREATE|ALTER|GRANT)\b/;
+const SQL =
+  /\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|VALUES|SET|CREATE|ALTER|GRANT)\b/;
 // French either by its accents or by its most ordinary words
 const FRENCH =
   /[àâçéèêëîïôùûüœ]|\b(le|la|les|un|une|des|du|de|vous|votre|pour|dans|avec|est|sont|ne|pas|ce|cette)\b/i;
@@ -72,15 +96,23 @@ function jsxText(line: string): string {
   // Quoted literals go first: they are scanned on their own below, and a
   // label table ("to_contact: [\"À contacter\"]") would otherwise read as a
   // French sentence containing a column name.
-  return line.replace(STRING, " ").replace(/<[^>]*>/g, " ")
-    // `${…}` first: a template literal spanning the line leaves its
-    // expressions behind, and they are code
-    .replace(/\$\{[^}]*/g, " ").replace(/\{[^}]*\}/g, " ");
+  return (
+    line
+      .replace(STRING, " ")
+      .replace(/<[^>]*>/g, " ")
+      // `${…}` first: a template literal spanning the line leaves its
+      // expressions behind, and they are code
+      .replace(/\$\{[^}]*/g, " ")
+      .replace(/\{[^}]*\}/g, " ")
+  );
 }
 
 /** A sentence, not an identifier: three words or it is code. */
 const looksLikeProse = (text: string) =>
-  text.trim().split(/\s+/).filter((w) => w.length > 1).length >= 3;
+  text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 1).length >= 3;
 
 function contaminated(rel: string): string[] {
   const found: string[] = [];
@@ -88,8 +120,13 @@ function contaminated(rel: string): string[] {
     if (isComment(line)) continue;
     if (rel.endsWith(".tsx")) {
       const text = jsxText(line);
-      if (text.length >= 12 && FRENCH.test(text) && !SQL.test(text)
-        && looksLikeProse(text) && !DELIBERATE.some((d) => text.includes(d))) {
+      if (
+        text.length >= 12 &&
+        FRENCH.test(text) &&
+        !SQL.test(text) &&
+        looksLikeProse(text) &&
+        !DELIBERATE.some((d) => text.includes(d))
+      ) {
         const word = ENGLISH.find((w) => new RegExp(`\\b${w}\\b`).test(text));
         if (word) found.push(`${text.trim().slice(0, 90)} [${word}]`);
       }
@@ -118,7 +155,10 @@ describe("the French shown and the English written", () => {
       const found = contaminated(rel);
       if (found.length) offenders[rel] = found;
     }
-    expect(offenders, "an English value ended up inside a French sentence: "
-      + "a rename crossed the boundary").toEqual({});
+    expect(
+      offenders,
+      "an English value ended up inside a French sentence: " +
+        "a rename crossed the boundary",
+    ).toEqual({});
   });
 });

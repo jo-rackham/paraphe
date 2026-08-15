@@ -6,8 +6,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CAMPAIGN_ENV, loadConfig, loadTemplates, ROOT } from "./config.ts";
 import { CAMPAIGN_KEYS, createEngine } from "../noyau/messages.ts";
+import { CAMPAIGN_ENV, loadConfig, loadTemplates, ROOT } from "./config.ts";
 
 const ENV_KEYS = [
   ...CAMPAIGN_KEYS.map((k) => CAMPAIGN_ENV[k]),
@@ -62,8 +62,12 @@ describe("the repository templates", () => {
   it("provide the six expected texts", () => {
     const templates = loadTemplates();
     expect(Object.keys(templates).sort()).toEqual([
-      "courrier.txt", "courrier_decouverte.txt", "email.txt",
-      "email_decouverte.txt", "telephone.txt", "telephone_decouverte.txt",
+      "courrier.txt",
+      "courrier_decouverte.txt",
+      "email.txt",
+      "email_decouverte.txt",
+      "telephone.txt",
+      "telephone_decouverte.txt",
     ]);
   });
 
@@ -72,14 +76,22 @@ describe("the repository templates", () => {
     const { campaign } = loadConfig({ strict: true });
     const engine = createEngine(loadTemplates());
     const mayor = {
-      rank: "has_endorsed", title: "Mme", first_name: "Camille",
-      last_name: "MARTIN", commune: "Sainte-Fiction", department: "Aveyron",
+      rank: "has_endorsed",
+      title: "Mme",
+      first_name: "Camille",
+      last_name: "MARTIN",
+      commune: "Sainte-Fiction",
+      department: "Aveyron",
       insee_code: "90001",
-      recent_candidate: "Alex Exemple", recent_year: "2022",
+      recent_candidate: "Alex Exemple",
+      recent_year: "2022",
       endorsement_history: "2022: EXEMPLE Alex (A)",
     };
-    for (const text of [engine.email(mayor, campaign).body,
-      engine.letter(mayor, campaign), engine.phoneScript(mayor, campaign)]) {
+    for (const text of [
+      engine.email(mayor, campaign).body,
+      engine.letter(mayor, campaign),
+      engine.phoneScript(mayor, campaign),
+    ]) {
       expect(text).not.toMatch(/\{[a-z_]+\}/);
     }
   });
@@ -90,11 +102,13 @@ describe("the repository templates", () => {
 // referee, and api/config_test.go checks its map against the same file.
 describe("the campaign variables", () => {
   const shared: Record<string, string> = JSON.parse(
-    readFileSync(join(ROOT, "noyau", "campaign-env.json"), "utf8"));
+    readFileSync(join(ROOT, "noyau", "campaign-env.json"), "utf8"),
+  );
 
   it("match the table both languages are checked against", () => {
     const expected = Object.fromEntries(
-      Object.entries(shared).filter(([k]) => !k.startsWith("_")));
+      Object.entries(shared).filter(([k]) => !k.startsWith("_")),
+    );
     expect(CAMPAIGN_ENV).toEqual(expected);
   });
 
@@ -103,7 +117,8 @@ describe("the campaign variables", () => {
   });
 
   it("are all English, none left in French", () => {
-    const french = /MOTDEPASSE|CANDIDAT_|SIGNATAIRE|VILLE|TAILLE|SORTIES|DOMAINE|ESSAI|_NOM\b|_TEL\b/;
+    const french =
+      /MOTDEPASSE|CANDIDAT_|SIGNATAIRE|VILLE|TAILLE|SORTIES|DOMAINE|ESSAI|_NOM\b|_TEL\b/;
     for (const v of Object.values(CAMPAIGN_ENV)) {
       expect(v, `${v} still reads as French`).not.toMatch(french);
     }

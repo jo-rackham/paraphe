@@ -22,12 +22,24 @@ export function parseRows(text: string, separator = ";"): string[][] {
     const c = source[i];
     if (inQuotes) {
       if (c === '"') {
-        if (source[i + 1] === '"') { current += '"'; i++; } else inQuotes = false;
+        if (source[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else inQuotes = false;
       } else current += c;
       continue;
     }
-    if (c === '"' && current === "") { inQuotes = true; started = true; continue; }
-    if (c === separator) { fields.push(current); current = ""; started = true; continue; }
+    if (c === '"' && current === "") {
+      inQuotes = true;
+      started = true;
+      continue;
+    }
+    if (c === separator) {
+      fields.push(current);
+      current = "";
+      started = true;
+      continue;
+    }
     if (c === "\r" || c === "\n") {
       if (c === "\r" && source[i + 1] === "\n") i++;
       if (started || current !== "" || fields.length) {
@@ -58,7 +70,9 @@ export function parseRecords(text: string, separator = ";"): Row[] {
   const header = rows[0];
   return rows.slice(1).map((fields) => {
     const o: Row = {};
-    header.forEach((name, i) => { o[name] = fields[i] ?? ""; });
+    header.forEach((name, i) => {
+      o[name] = fields[i] ?? "";
+    });
     return o;
   });
 }
@@ -66,7 +80,12 @@ export function parseRecords(text: string, separator = ";"): Row[] {
 function escapeField(value: unknown, separator: string): string {
   const s = value === null || value === undefined ? "" : String(value);
   // Python's QUOTE_MINIMAL: separator, quote or line ending
-  if (s.includes(separator) || s.includes('"') || s.includes("\r") || s.includes("\n")) {
+  if (
+    s.includes(separator) ||
+    s.includes('"') ||
+    s.includes("\r") ||
+    s.includes("\n")
+  ) {
     return `"${s.replaceAll('"', '""')}"`;
   }
   return s;
@@ -77,7 +96,9 @@ function escapeField(value: unknown, separator: string): string {
  * the first record would make the output depend on key insertion order.
  */
 export function writeCsv(
-  columns: string[], rows: Record<string, unknown>[], separator = ";",
+  columns: string[],
+  rows: Record<string, unknown>[],
+  separator = ";",
 ): string {
   const out = [columns.map((c) => escapeField(c, separator)).join(separator)];
   for (const r of rows) {

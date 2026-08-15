@@ -60,12 +60,17 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
   const url = `https://${slug}.${instanceDomain()}/api/campaign/public`;
   // `redirect: "error"`: the default follows, and CORS is then evaluated on
   // the FINAL response — a redirect would take the answer off the baked host.
-  const response = await fetch(url,
-    { credentials: "omit", mode: "cors", redirect: "error" });
+  const response = await fetch(url, {
+    credentials: "omit",
+    mode: "cors",
+    redirect: "error",
+  });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new Error(detail?.error
-      ?? `La campagne « ${slug} » n'a pas répondu (HTTP ${response.status}).`);
+    throw new Error(
+      detail?.error ??
+        `La campagne « ${slug} » n'a pas répondu (HTTP ${response.status}).`,
+    );
   }
   const body = await response.json();
   // Answered, but with what? A captive portal returns 200 and HTML, and a
@@ -73,12 +78,17 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
   // campaign, or a value that is not a string, which replaced the whole
   // screen with the error boundary.
   const campaign = body?.campaign;
-  const complete = campaign && typeof campaign === "object"
-    && CAMPAIGN_KEYS.every((k) => typeof campaign[k] === "string" && campaign[k].trim());
+  const complete =
+    campaign &&
+    typeof campaign === "object" &&
+    CAMPAIGN_KEYS.every(
+      (k) => typeof campaign[k] === "string" && campaign[k].trim(),
+    );
   if (!complete) {
     throw new Error(
-      "La réponse ne ressemble pas à une campagne complète. Un intermédiaire "
-      + "s'est peut-être intercalé — ne l'utilisez pas.");
+      "La réponse ne ressemble pas à une campagne complète. Un intermédiaire " +
+        "s'est peut-être intercalé — ne l'utilisez pas.",
+    );
   }
   return { slug, name: String(body.name ?? slug), campaign };
 }

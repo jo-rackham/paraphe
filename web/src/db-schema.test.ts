@@ -21,16 +21,22 @@ import { CURRENT_STORES, VERSION } from "./db.ts";
  * longer exist.
  */
 function atCurrentVersion(stores: [string, string][]): Promise<void> {
-  return reset().then(() => new Promise<void>((resolve, reject) => {
-    const req = indexedDB.open("paraphe", VERSION);
-    req.onupgradeneeded = () => {
-      for (const [name, keyPath] of stores) {
-        req.result.createObjectStore(name, { keyPath });
-      }
-    };
-    req.onsuccess = () => { req.result.close(); resolve(); };
-    req.onerror = () => reject(req.error);
-  }));
+  return reset().then(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open("paraphe", VERSION);
+        req.onupgradeneeded = () => {
+          for (const [name, keyPath] of stores) {
+            req.result.createObjectStore(name, { keyPath });
+          }
+        };
+        req.onsuccess = () => {
+          req.result.close();
+          resolve();
+        };
+        req.onerror = () => reject(req.error);
+      }),
+  );
 }
 
 /** Each fixture starts from nothing: vitest isolates files, not tests. */
@@ -45,16 +51,22 @@ function reset(): Promise<void> {
 
 /** The shape the stores had before the English rename. */
 function stale(): Promise<void> {
-  return reset().then(() => new Promise<void>((resolve, reject) => {
-    const req = indexedDB.open("paraphe", 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore("maires", { keyPath: "code_insee" });
-      req.result.createObjectStore("suivi", { keyPath: "code_insee" });
-      req.result.createObjectStore("reglages", { keyPath: "cle" });
-    };
-    req.onsuccess = () => { req.result.close(); resolve(); };
-    req.onerror = () => reject(req.error);
-  }));
+  return reset().then(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open("paraphe", 1);
+        req.onupgradeneeded = () => {
+          req.result.createObjectStore("maires", { keyPath: "code_insee" });
+          req.result.createObjectStore("suivi", { keyPath: "code_insee" });
+          req.result.createObjectStore("reglages", { keyPath: "cle" });
+        };
+        req.onsuccess = () => {
+          req.result.close();
+          resolve();
+        };
+        req.onerror = () => reject(req.error);
+      }),
+  );
 }
 
 // The one case the version-1 fixture cannot see: a browser ALREADY at the
@@ -68,9 +80,14 @@ describe("a browser already at the current version", () => {
   // work. Renaming a store now fails here until the same commit bumps
   // VERSION, which is the invariant CURRENT_STORES only asked for.
   it("pins the schema to its version", () => {
-    expect([VERSION, CURRENT_STORES]).toEqual([2, [
-      ["mayors", "insee_code"], ["tracking", "insee_code"], ["settings", "key"],
-    ]]);
+    expect([VERSION, CURRENT_STORES]).toEqual([
+      2,
+      [
+        ["mayors", "insee_code"],
+        ["tracking", "insee_code"],
+        ["settings", "key"],
+      ],
+    ]);
   });
 
   it("still reads the stores this build expects", async () => {
@@ -78,7 +95,9 @@ describe("a browser already at the current version", () => {
     await expect(DB.loadMayors()).resolves.toEqual([]);
     await expect(DB.loadTracking()).resolves.toEqual({});
     await expect(DB.readSetting("campagne", null)).resolves.toBeNull();
-    await expect(DB.exportAll()).resolves.toMatchObject({ format: "paraphe/1" });
+    await expect(DB.exportAll()).resolves.toMatchObject({
+      format: "paraphe/1",
+    });
   });
 });
 
@@ -90,7 +109,9 @@ describe("a database left in an earlier shape", () => {
     await expect(DB.loadMayors()).resolves.toEqual([]);
     await expect(DB.loadTracking()).resolves.toEqual({});
     await expect(DB.readSetting("campagne", null)).resolves.toBeNull();
-    await expect(DB.exportAll()).resolves.toMatchObject({ format: "paraphe/1" });
+    await expect(DB.exportAll()).resolves.toMatchObject({
+      format: "paraphe/1",
+    });
 
     // and it is writable, not merely readable
     await DB.replaceMayors([{ insee_code: "01022", commune: "Artemare" }]);
@@ -109,22 +130,25 @@ describe("the published CSV", () => {
   const header = "insee_code;first_name;last_name;commune;department";
 
   it("loads when it carries the columns the code reads", () => {
-    expect(DB.parseCsv(`${header}\n01001;Camille;MARTIN;Artemare;Ain`))
-      .toHaveLength(1);
+    expect(
+      DB.parseCsv(`${header}\n01001;Camille;MARTIN;Artemare;Ain`),
+    ).toHaveLength(1);
   });
 
   it("accepts the priority list, which carries no rank column", () => {
     // it contains endorsers only — that is what rank()'s absent-column
     // fallback exists for, and requiring the column would refuse the very
     // list the application loads by default
-    expect(DB.parseCsv(`${header}\n01001;Camille;MARTIN;Artemare;Ain`))
-      .toHaveLength(1);
+    expect(
+      DB.parseCsv(`${header}\n01001;Camille;MARTIN;Artemare;Ain`),
+    ).toHaveLength(1);
   });
 
   it("is refused, by name, when a column has been renamed", () => {
     const french = "code_insee;prenom;nom;commune;departement";
-    expect(() => DB.parseCsv(`${french}\n01001;Camille;MARTIN;Artemare;Ain`))
-      .toThrow(/insee_code, first_name/);
+    expect(() =>
+      DB.parseCsv(`${french}\n01001;Camille;MARTIN;Artemare;Ain`),
+    ).toThrow(/insee_code, first_name/);
   });
 });
 
@@ -141,7 +165,9 @@ describe("a database the browser refuses to open", () => {
       queueMicrotask(() => {
         (req.onerror as (() => void) | undefined)?.();
       });
-      Object.defineProperty(req, "error", { value: new Error("SecurityError") });
+      Object.defineProperty(req, "error", {
+        value: new Error("SecurityError"),
+      });
       return req;
     };
     try {

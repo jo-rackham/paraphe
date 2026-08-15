@@ -14,7 +14,10 @@ import type { Mayor } from "./types.ts";
 
 export type ListKey = "light" | "complete";
 
-export const LISTS: Record<ListKey, { file: string; name: string; detail: string }> = {
+export const LISTS: Record<
+  ListKey,
+  { file: string; name: string; detail: string }
+> = {
   light: {
     file: "01_maires_cibles_prioritaires.csv",
     name: "liste prioritaire",
@@ -37,16 +40,21 @@ const url = (key: ListKey) =>
  * is 0 when the server sends no Content-Length (common behind on-the-fly
  * compression).
  */
-export interface Progress { received: number; total: number }
+export interface Progress {
+  received: number;
+  total: number;
+}
 
 export async function loadList(
-  key: ListKey, onProgress: (p: Progress) => void = () => {},
+  key: ListKey,
+  onProgress: (p: Progress) => void = () => {},
 ): Promise<Mayor[]> {
   const response = await fetch(url(key), { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
-      `liste « ${LISTS[key].name} » indisponible (HTTP ${response.status}). `
-      + "Sur une installation locale, lancez `task web-donnees`.");
+      `liste « ${LISTS[key].name} » indisponible (HTTP ${response.status}). ` +
+        "Sur une installation locale, lancez `task web-donnees`.",
+    );
   }
   const total = Number(response.headers.get("content-length")) || 0;
   const reader = response.body?.getReader();
@@ -69,7 +77,10 @@ export async function loadList(
   }
   const bytes = new Uint8Array(received);
   let pos = 0;
-  for (const c of chunks) { bytes.set(c, pos); pos += c.length; }
+  for (const c of chunks) {
+    bytes.set(c, pos);
+    pos += c.length;
+  }
   return parseCsv(new TextDecoder("utf-8").decode(bytes));
 }
 

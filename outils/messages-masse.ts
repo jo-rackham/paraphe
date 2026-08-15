@@ -20,14 +20,24 @@ import { fileURLToPath } from "node:url";
 
 import { parseRecords, parseRows, writeCsv } from "../noyau/csv.ts";
 import {
-  emailAddresses, incompleteAddress, letterHeader, MissingField, createEngine,
-  recipientAddress, type Mayor,
+  createEngine,
+  emailAddresses,
+  incompleteAddress,
+  letterHeader,
+  type Mayor,
+  MissingField,
+  recipientAddress,
 } from "../noyau/messages.ts";
 import { loadConfig, loadTemplates, ROOT } from "./config.ts";
 
 const OUT = join(ROOT, "out", "messages");
 
-const PAGE = (sender: string, address: string, placeDate: string, body: string) =>
+const PAGE = (
+  sender: string,
+  address: string,
+  placeDate: string,
+  body: string,
+) =>
   `<div class="lettre">
 <div class="expediteur">${sender}</div>
 <div class="adresse">${address}</div>
@@ -51,15 +61,39 @@ body { font: 12pt/1.5 Georgia, serif; margin: 0; }
 `;
 
 const escapeHtml = (s: string): string =>
-  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;").replaceAll("'", "&#x27;");
+  s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#x27;");
 
-const SET_ASIDE_COLS = ["channel", "reason", "insee_code", "commune",
-  "department", "first_name", "last_name", "email", "phone", "postal_address",
-  "postal_code", "city"];
+const SET_ASIDE_COLS = [
+  "channel",
+  "reason",
+  "insee_code",
+  "commune",
+  "department",
+  "first_name",
+  "last_name",
+  "email",
+  "phone",
+  "postal_address",
+  "postal_code",
+  "city",
+];
 
-const EMAIL_COLS = ["email", "subject", "body", "commune", "department",
-  "last_name", "first_name", "priority", "other_addresses"];
+const EMAIL_COLS = [
+  "email",
+  "subject",
+  "body",
+  "commune",
+  "department",
+  "last_name",
+  "first_name",
+  "priority",
+  "other_addresses",
+];
 
 export function main(): void {
   mkdirSync(OUT, { recursive: true });
@@ -78,10 +112,17 @@ export function main(): void {
 
   const putAside = (m: Mayor, channel: string, reason: string) => {
     setAside.push({
-      channel, reason, insee_code: m.insee_code ?? "", commune: m.commune ?? "",
-      department: m.department ?? "", first_name: m.first_name ?? "",
-      last_name: m.last_name ?? "", email: m.email ?? "", phone: m.phone ?? "",
-      postal_address: m.postal_address ?? "", postal_code: m.postal_code ?? "",
+      channel,
+      reason,
+      insee_code: m.insee_code ?? "",
+      commune: m.commune ?? "",
+      department: m.department ?? "",
+      first_name: m.first_name ?? "",
+      last_name: m.last_name ?? "",
+      email: m.email ?? "",
+      phone: m.phone ?? "",
+      postal_address: m.postal_address ?? "",
+      postal_code: m.postal_code ?? "",
       city: m.city ?? "",
     });
   };
@@ -116,53 +157,86 @@ export function main(): void {
       // one row per mayor: sending twice to the same small town hall looks
       // like mass mailing, which is precisely what we avoid
       withEmail.push({
-        email: valid[0], subject, body,
-        commune: m.commune ?? "", department: m.department ?? "",
-        last_name: m.last_name ?? "", first_name: m.first_name ?? "",
+        email: valid[0],
+        subject,
+        body,
+        commune: m.commune ?? "",
+        department: m.department ?? "",
+        last_name: m.last_name ?? "",
+        first_name: m.first_name ?? "",
         priority: m.priority ?? "",
         other_addresses: valid.slice(1).join(" "),
       });
     } else if (!badAddress) {
       withoutEmail.push(m);
     } else {
-      putAside(m, "aucun", "ni adresse email exploitable, ni courrier "
-        + `distribuable (${badAddress})`);
+      putAside(
+        m,
+        "aucun",
+        "ni adresse email exploitable, ni courrier " +
+          `distribuable (${badAddress})`,
+      );
     }
     if (rejected.length) {
       // listed as they are: this file is read by volunteers, not by a
       // program
-      putAside(m, "email", `adresse(s) non conforme(s) : ${rejected.join(", ")}`);
+      putAside(
+        m,
+        "email",
+        `adresse(s) non conforme(s) : ${rejected.join(", ")}`,
+      );
     }
 
     if (badAddress) {
       if (valid.length) putAside(m, "courrier", badAddress);
     } else {
-      pages.push(PAGE(
-        escapeHtml(sender), escapeHtml(address),
-        escapeHtml(letterHeader(m, c)),
-        escapeHtml(letter)));
+      pages.push(
+        PAGE(
+          escapeHtml(sender),
+          escapeHtml(address),
+          escapeHtml(letterHeader(m, c)),
+          escapeHtml(letter),
+        ),
+      );
     }
   }
 
-  writeFileSync(join(OUT, "emails.csv"), writeCsv(EMAIL_COLS, withEmail), "utf8");
+  writeFileSync(
+    join(OUT, "emails.csv"),
+    writeCsv(EMAIL_COLS, withEmail),
+    "utf8",
+  );
   writeFileSync(join(OUT, "courriers.html"), STYLE + pages.join("\n"), "utf8");
-  writeFileSync(join(OUT, "sans_email.csv"),
-    writeCsv(sourceCols, withoutEmail as Record<string, unknown>[]), "utf8");
-  writeFileSync(join(OUT, "a_verifier.csv"), writeCsv(SET_ASIDE_COLS, setAside), "utf8");
+  writeFileSync(
+    join(OUT, "sans_email.csv"),
+    writeCsv(sourceCols, withoutEmail as Record<string, unknown>[]),
+    "utf8",
+  );
+  writeFileSync(
+    join(OUT, "a_verifier.csv"),
+    writeCsv(SET_ASIDE_COLS, setAside),
+    "utf8",
+  );
 
-  console.log(`emails.csv: ${withEmail.length} | courriers.html: ${pages.length} `
-    + `letters | sans_email.csv: ${withoutEmail.length} | `
-    + `a_verifier.csv: ${setAside.length} set aside`);
+  console.log(
+    `emails.csv: ${withEmail.length} | courriers.html: ${pages.length} ` +
+      `letters | sans_email.csv: ${withoutEmail.length} | ` +
+      `a_verifier.csv: ${setAside.length} set aside`,
+  );
   for (const e of setAside) {
-    console.log(`  set aside [${e.channel}] ${e.commune} (${e.insee_code}): ${e.reason}`);
+    console.log(
+      `  set aside [${e.channel}] ${e.commune} (${e.insee_code}): ${e.reason}`,
+    );
   }
   // An empty output is a failure, not a result: without this exit code,
   // `task messages` succeeded while having replaced the previous mailing
   // with four empty files.
   if (!withEmail.length && !pages.length) {
-    console.error("no message produced: the four files of out/messages/ have "
-      + "been replaced with empty ones. Check the templates and the "
-      + "configuration before rerunning.");
+    console.error(
+      "no message produced: the four files of out/messages/ have " +
+        "been replaced with empty ones. Check the templates and the " +
+        "configuration before rerunning.",
+    );
     process.exitCode = 1;
   }
 }

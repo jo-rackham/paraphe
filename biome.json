@@ -34,7 +34,8 @@
       "preset": "recommended",
       "style": {
         "useConst": "error",
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "useTemplate": "off"
       }
     }
   }

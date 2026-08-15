@@ -5,14 +5,18 @@
 // that a mayor is only ever thanked for an endorsement they made, and
 // that the files open correctly in the spreadsheet volunteers use.
 
-import { describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 
 import { BOM, writeCsv } from "../noyau/csv.ts";
 import {
-  confidenceRank, dedupeByInsee, keyAmong, personKey, readStrict,
+  confidenceRank,
+  dedupeByInsee,
+  keyAmong,
+  personKey,
+  readStrict,
   type Target,
 } from "./build.ts";
 
@@ -27,10 +31,12 @@ describe("the identity of an endorser", () => {
     // share a first TOKEN, which is why the plain key is not enough.
     const jeanLouis = { ...commune, firstName: "Jean-Louis" };
     const jeanMarc = { ...commune, firstName: "Jean-Marc" };
-    expect(keyAmong(jeanMarc, seenAs("Jean-Louis")))
-      .not.toBe(keyAmong(jeanLouis, new Map()));
-    expect(personKey({ ...commune, firstName: "Mélina" }))
-      .not.toBe(personKey({ ...commune, firstName: "Gilles" }));
+    expect(keyAmong(jeanMarc, seenAs("Jean-Louis"))).not.toBe(
+      keyAmong(jeanLouis, new Map()),
+    );
+    expect(personKey({ ...commune, firstName: "Mélina" })).not.toBe(
+      personKey({ ...commune, firstName: "Gilles" }),
+    );
   });
 
   it("keeps ONE person written two ways together", () => {
@@ -39,36 +45,52 @@ describe("the identity of an endorser", () => {
     // the record that he signed in both years.
     const short = { ...commune, firstName: "Jean-Claude" };
     const long = { ...commune, firstName: "Jean-Claude Raymond" };
-    expect(keyAmong(long, seenAs("Jean-Claude")))
-      .toBe(keyAmong(short, new Map()));
+    expect(keyAmong(long, seenAs("Jean-Claude"))).toBe(
+      keyAmong(short, new Map()),
+    );
   });
 
   it("still recognises one person across spelling and case", () => {
-    expect(personKey({ ...commune, firstName: "JEAN-LOUIS" }))
-      .toBe(personKey({ ...commune, firstName: "Jean-Louis" }));
-    expect(personKey({ ...commune, commune: "ROBECOURT", firstName: "Jean" }))
-      .toBe(personKey({ ...commune, firstName: "Jean" }));
+    expect(personKey({ ...commune, firstName: "JEAN-LOUIS" })).toBe(
+      personKey({ ...commune, firstName: "Jean-Louis" }),
+    );
+    expect(
+      personKey({ ...commune, commune: "ROBECOURT", firstName: "Jean" }),
+    ).toBe(personKey({ ...commune, firstName: "Jean" }));
   });
 });
 
 describe("one row per INSEE", () => {
-  const target = (insee: string, firstName: string): Target => ({
-    civ: "M.", lastName: "MARTIN", firstName, commune: "Robécourt",
-    dept: "Vosges", office: "Maire", small: [], others: [],
-    years: new Set([2022]), score: 0, deptN: "vosges", communeN: "robecourt",
-    rne: { insee } as Target["rne"], contact: undefined,
-  } as unknown as Target);
+  const target = (insee: string, firstName: string): Target =>
+    ({
+      civ: "M.",
+      lastName: "MARTIN",
+      firstName,
+      commune: "Robécourt",
+      dept: "Vosges",
+      office: "Maire",
+      small: [],
+      others: [],
+      years: new Set([2022]),
+      score: 0,
+      deptN: "vosges",
+      communeN: "robecourt",
+      rne: { insee } as Target["rne"],
+      contact: undefined,
+    }) as unknown as Target;
 
   it("refuses two DIFFERENT people at the same code", () => {
     // an INSEE names a commune: two people under one is a matching bug,
     // and shipping it thanks a mayor for a stranger's endorsement
-    expect(() => dedupeByInsee([target("88362", "Régine"), target("88362", "Paul")]))
-      .toThrow(/two different people/);
+    expect(() =>
+      dedupeByInsee([target("88362", "Régine"), target("88362", "Paul")]),
+    ).toThrow(/two different people/);
   });
 
   it("merges one person written two ways", () => {
     const { kept, mergedSpellings } = dedupeByInsee([
-      target("88362", "Jean-Louis"), target("88362", "Louis"),
+      target("88362", "Jean-Louis"),
+      target("88362", "Louis"),
     ]);
     expect(kept).toHaveLength(1);
     expect(mergedSpellings).toBe(1);
@@ -81,11 +103,15 @@ describe("one row per INSEE", () => {
     // volunteer depend on the order the source files are listed in.
     const weak = { ...target("88362", "Jean-Louis"), conf: "retrouvé par nom" };
     const strong = { ...target("88362", "Jean-Louis"), conf: "exact" };
-    for (const order of [[weak, strong], [strong, weak]]) {
+    for (const order of [
+      [weak, strong],
+      [strong, weak],
+    ]) {
       expect(dedupeByInsee(order).kept[0].conf).toBe("exact");
     }
-    expect(confidenceRank("exact"))
-      .toBeLessThan(confidenceRank("retrouvé par nom"));
+    expect(confidenceRank("exact")).toBeLessThan(
+      confidenceRank("retrouvé par nom"),
+    );
     // an unknown label is the least established, not the most
     expect(confidenceRank("exact")).toBeLessThan(confidenceRank("inconnu"));
   });

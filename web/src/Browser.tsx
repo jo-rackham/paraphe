@@ -1,17 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Campaign, Mayor, Message, Tracking } from "./types.ts";
-import * as DB from "./db.ts";
-import * as M from "./messages.ts";
-import { DEMO_SET } from "./demo.ts";
-import { LISTS, formatBytes, loadList, type ListKey, type Progress }
-  from "./data.ts";
 import {
-  Alerte, CAMPAIGN_FIELDS, campaignLabel, Chip, EMPTY_CFG, Fiche, Guide,
-  Hexagone, PiedDePage, RenderGuard, type CardDraft,
+  Alerte,
+  CAMPAIGN_FIELDS,
+  type CardDraft,
+  Chip,
+  campaignLabel,
+  EMPTY_CFG,
+  Fiche,
+  Guide,
+  Hexagone,
+  PiedDePage,
+  RenderGuard,
 } from "./common.tsx";
 import {
-  fetchCampaign, instanceDomain, requestedSlug, untouchedCampaign, type Offer,
+  formatBytes,
+  LISTS,
+  type ListKey,
+  loadList,
+  type Progress,
+} from "./data.ts";
+import * as DB from "./db.ts";
+import { DEMO_SET } from "./demo.ts";
+import * as M from "./messages.ts";
+import {
+  fetchCampaign,
+  instanceDomain,
+  type Offer,
+  requestedSlug,
+  untouchedCampaign,
 } from "./prefill.ts";
+import type { Campaign, Mayor, Message, Tracking } from "./types.ts";
 
 // Browser mode: no data leaves the computer. The only network request is
 // downloading the list published next to the application.
@@ -29,7 +47,9 @@ export default function Browser() {
   const [message, setMessage] = useState<Message | null>(null);
   const [ready, setReady] = useState(false);
   const [download, setDownload] = useState<DownloadState | null>(null);
-  const [loadedList, setLoadedList] = useState<ListKey | "personnel" | "demo" | null>(null);
+  const [loadedList, setLoadedList] = useState<
+    ListKey | "personnel" | "demo" | null
+  >(null);
   // ?org=<slug>: an OFFER, never applied on its own. Adopting a campaign
   // decides what thousands of mayors will read, so it is a decision the
   // volunteer takes with the candidate's name in front of them.
@@ -56,18 +76,24 @@ export default function Browser() {
     inFlight.current = key;
     setDownload({ key, received: 0, total: 0 });
     try {
-      const rows = await loadList(key, (p: Progress) => setDownload({ key, ...p }));
+      const rows = await loadList(key, (p: Progress) =>
+        setDownload({ key, ...p }),
+      );
       await DB.replaceMayors(rows);
       await DB.writeSetting("liste", key);
       setMayors(await DB.loadMayors());
       setLoadedList(key);
       setMessage({
         tone: "ok",
-        text: `${rows.length.toLocaleString("fr")} maires chargés — `
-          + `${LISTS[key].name}. Tout reste dans ce navigateur.`,
+        text:
+          `${rows.length.toLocaleString("fr")} maires chargés — ` +
+          `${LISTS[key].name}. Tout reste dans ce navigateur.`,
       });
     } catch (e) {
-      setMessage({ tone: "erreur", text: e instanceof Error ? e.message : String(e) });
+      setMessage({
+        tone: "erreur",
+        text: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       inFlight.current = null;
       setDownload(null);
@@ -77,14 +103,20 @@ export default function Browser() {
   useEffect(() => {
     (async () => {
       const [m, s, c, a, l] = await Promise.all([
-        DB.loadMayors(), DB.loadTracking(),
+        DB.loadMayors(),
+        DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
       ]);
-      setMayors(m); setTracking(s); setCfg(c); setPersonalNote(a);
-      setDraft(c); setNoteDraft(a);
-      setLoadedList(l); setReady(true);
+      setMayors(m);
+      setTracking(s);
+      setCfg(c);
+      setPersonalNote(a);
+      setDraft(c);
+      setNoteDraft(a);
+      setLoadedList(l);
+      setReady(true);
       // first launch: the priority list loads by default — it is light and
       // covers the bulk of the work. The full base waits to be asked for.
       if (m.length === 0) fetchList("light");
@@ -110,7 +142,10 @@ export default function Browser() {
       // good, and the export that would rescue the work is behind it.
       // Reached by a stale tab blocking the upgrade, and by a browser
       // that refuses storage altogether (private window).
-      setMessage({ tone: "erreur", text: e instanceof Error ? e.message : String(e) });
+      setMessage({
+        tone: "erreur",
+        text: e instanceof Error ? e.message : String(e),
+      });
       setReady(true);
     });
   }, [fetchList]);
@@ -121,13 +156,18 @@ export default function Browser() {
   // Without it, a keystroke landing during a save stayed on screen under a
   // green « Campagne enregistrée » banner while the base held the older
   // value — indistinguishable from saved work until the next reload.
-  const dirty = JSON.stringify(draft) !== JSON.stringify(cfg)
-    || noteDraft !== personalNote;
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(cfg) || noteDraft !== personalNote;
 
   // nine fields filled and the tab closed without « Enregistrer » is a
   // silent total loss — and a rewritten card email or a half-typed call
   // note is dearer still. The browser's own dialog is the only word we
   // get. The card store is a ref: read at event time, not render time.
+  // `cfg` and `personalNote` are what `dirty` is computed from, so they
+  // re-register the listener at the same moments `dirty` already does.
+  // Redundant, and kept: this listener is the only warning before work is
+  // lost, and re-registering it too often is the safe direction.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: redundant on purpose
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
       // Every touched entry, whatever campaign it is taken under. A
@@ -136,8 +176,9 @@ export default function Browser() {
       // campaign let a still-intact rewrite be closed without a word. The
       // parent cannot re-render another card to know; over-warning is the
       // only acceptable bias.
-      const worth = Object.values(cardDrafts.current)
-        .some((d) => d.touched || d.note !== "");
+      const worth = Object.values(cardDrafts.current).some(
+        (d) => d.touched || d.note !== "",
+      );
       if (dirty || worth) e.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
@@ -151,7 +192,8 @@ export default function Browser() {
       if (deptFilter && m.department !== deptFilter) return false;
       if (!t) return true;
       return `${m.commune} ${m.last_name} ${m.first_name} ${m.department}`
-        .toLowerCase().includes(t);
+        .toLowerCase()
+        .includes(t);
     });
   }, [mayors, q, rankFilter, deptFilter]);
 
@@ -197,9 +239,15 @@ export default function Browser() {
       await DB.writeSetting("liste", "personnel");
       setLoadedList("personnel");
       setMayors(await DB.loadMayors());
-      setMessage({ tone: "ok", text: `${stored} maires chargés depuis votre disque.` });
+      setMessage({
+        tone: "ok",
+        text: `${stored} maires chargés depuis votre disque.`,
+      });
     } catch (e) {
-      setMessage({ tone: "erreur", text: `Chargement impossible : ${(e as Error).message}` });
+      setMessage({
+        tone: "erreur",
+        text: `Chargement impossible : ${(e as Error).message}`,
+      });
     }
   }, []);
 
@@ -210,15 +258,17 @@ export default function Browser() {
     setMayors(await DB.loadMayors());
     setMessage({
       tone: "ok",
-      text: `${DEMO_SET.length} maires FICTIFS chargés — pour découvrir l'outil. `
-        + "Chargez votre propre fichier avant toute campagne réelle.",
+      text:
+        `${DEMO_SET.length} maires FICTIFS chargés — pour découvrir l'outil. ` +
+        "Chargez votre propre fichier avant toute campagne réelle.",
     });
   }, []);
 
   const exportAll = useCallback(async () => {
     const data = await DB.exportAll();
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
+      new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }),
+    );
     const a = document.createElement("a");
     a.href = url;
     a.download = `paraphe-suivi-${new Date().toISOString().slice(0, 10)}.json`;
@@ -228,9 +278,12 @@ export default function Browser() {
 
   const importAll = useCallback(async (file: File, merge: boolean) => {
     try {
-      const report = await DB.importAll(JSON.parse(await file.text()), { merge });
+      const report = await DB.importAll(JSON.parse(await file.text()), {
+        merge,
+      });
       const [m, s, c, a, l] = await Promise.all([
-        DB.loadMayors(), DB.loadTracking(),
+        DB.loadMayors(),
+        DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
         // the backup carries `liste` too, and not reading it back left the
@@ -238,177 +291,254 @@ export default function Browser() {
         // list just imported
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
       ]);
-      setMayors(m); setTracking(s); setCfg(c); setPersonalNote(a);
-      setDraft(c); setNoteDraft(a);
+      setMayors(m);
+      setTracking(s);
+      setCfg(c);
+      setPersonalNote(a);
+      setDraft(c);
+      setNoteDraft(a);
       setLoadedList(l);
       setMessage({
         tone: "ok",
-        text: `Import : ${report.mayors} maires, ${report.tracking} suivis repris`
-          + (report.skipped ? `, ${report.skipped} ignorés (plus anciens ou illisibles)` : "")
-          + (report.settings ? `, ${report.settings} réglages remplacés` : "")
-          + (report.keptSettings
-            ? `. La campagne du fichier (${report.keptSettings} réglages) n'a `
-              + "PAS été reprise : « fusionner » garde la vôtre. Décochez-le "
-              + "pour prendre celle du fichier."
+        text:
+          `Import : ${report.mayors} maires, ${report.tracking} suivis repris` +
+          (report.skipped
+            ? `, ${report.skipped} ignorés (plus anciens ou illisibles)`
+            : "") +
+          (report.settings ? `, ${report.settings} réglages remplacés` : "") +
+          (report.keptSettings
+            ? `. La campagne du fichier (${report.keptSettings} réglages) n'a ` +
+              "PAS été reprise : « fusionner » garde la vôtre. Décochez-le " +
+              "pour prendre celle du fichier."
             : ""),
       });
     } catch (e) {
-      setMessage({ tone: "erreur", text: `Import impossible : ${(e as Error).message}` });
+      setMessage({
+        tone: "erreur",
+        text: `Import impossible : ${(e as Error).message}`,
+      });
     }
   }, []);
 
-  if (!ready) return <main><p>Chargement…</p></main>;
+  if (!ready)
+    return (
+      <main>
+        <p>Chargement…</p>
+      </main>
+    );
 
   return (
     <>
-      <div className="tricolore"><i /><i /><i /></div>
+      <div className="tricolore">
+        <i />
+        <i />
+        <i />
+      </div>
       <header>
         <span className="marque">
           <Hexagone />
-          <span>paraphe<br /><span className="sous">version navigateur</span></span>
+          <span>
+            paraphe
+            <br />
+            <span className="sous">version navigateur</span>
+          </span>
         </span>
-        <button className="lien" onClick={() => setTab("liste")}>Les maires</button>
-        <button className="lien" onClick={() => setTab("guide")}>Guide</button>
-        <button className="lien" onClick={() => setTab("donnees")}>Mes données</button>
-        <button className="lien" onClick={() => setTab("campagne")}>Ma campagne</button>
+        <button type="button" className="lien" onClick={() => setTab("liste")}>
+          Les maires
+        </button>
+        <button type="button" className="lien" onClick={() => setTab("guide")}>
+          Guide
+        </button>
+        <button
+          type="button"
+          className="lien"
+          onClick={() => setTab("donnees")}
+        >
+          Mes données
+        </button>
+        <button
+          type="button"
+          className="lien"
+          onClick={() => setTab("campagne")}
+        >
+          Ma campagne
+        </button>
         <span className="qui">aucune donnée ne quitte ce navigateur</span>
       </header>
       <div className="rayures" />
       <RenderGuard>
-      <main>
-        <Alerte message={message} onClose={() => setMessage(null)} />
-        {offerError && (
-          <p className="alerte erreur">
-            Ce lien ne propose aucune campagne : {offerError}{" "}
-            <button className="lien" onClick={() => setOfferError(null)}>
-              fermer
-            </button>
-          </p>
-        )}
-        {/* the draft, not cfg: the draft covers everything the volunteer
+        <main>
+          <Alerte message={message} onClose={() => setMessage(null)} />
+          {offerError && (
+            <p className="alerte erreur">
+              Ce lien ne propose aucune campagne : {offerError}{" "}
+              <button
+                type="button"
+                className="lien"
+                onClick={() => setOfferError(null)}
+              >
+                fermer
+              </button>
+            </p>
+          )}
+          {/* the draft, not cfg: the draft covers everything the volunteer
             has — saved (it starts from cfg and follows every writer) or
             still being typed under this very banner */}
-        {offer && untouchedCampaign(draft) && (
-          <Proposition
-            offer={offer}
-            onRefuse={() => {
-              setOffer(null);
-              // and it must STAY refused: left in the address bar, ?org=
-              // brought the offer back at every reload
-              const url = new URL(window.location.href);
-              url.searchParams.delete("org");
-              window.history.replaceState({}, "", url);
-            }}
-            onAccept={async () => {
-              // a rejected write (quota, private window, blocked base) must
-              // be SAID: without the catch the button silently did nothing
-              try {
-                await DB.writeSetting("campagne", offer.campaign);
-                setCfg(offer.campaign);
-                setDraft(offer.campaign);
+          {offer && untouchedCampaign(draft) && (
+            <Proposition
+              offer={offer}
+              onRefuse={() => {
                 setOffer(null);
-                setMessage({
-                  tone: "ok",
-                  text: `Campagne « ${offer.name} » reprise. Elle reste dans ce `
-                    + "navigateur, et vous pouvez la modifier dans « Ma campagne ».",
-                });
-              } catch (e) {
-                setMessage({
-                  tone: "erreur",
-                  text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
-                });
-              }
-            }}
-          />
-        )}
-        {unfilled.length > 0 && (
-          <p className="alerte">
-            <strong>Campagne non configurée.</strong> Les messages contiennent
-            encore des valeurs d'exemple ({unfilled.map(campaignLabel)
-              .join(", ")}) :{" "}
-            <strong>n'envoyez rien</strong> avant d'avoir rempli l'onglet
-            « Ma campagne ».
-          </p>
-        )}
+                // and it must STAY refused: left in the address bar, ?org=
+                // brought the offer back at every reload
+                const url = new URL(window.location.href);
+                url.searchParams.delete("org");
+                window.history.replaceState({}, "", url);
+              }}
+              onAccept={async () => {
+                // a rejected write (quota, private window, blocked base) must
+                // be SAID: without the catch the button silently did nothing
+                try {
+                  await DB.writeSetting("campagne", offer.campaign);
+                  setCfg(offer.campaign);
+                  setDraft(offer.campaign);
+                  setOffer(null);
+                  setMessage({
+                    tone: "ok",
+                    text:
+                      `Campagne « ${offer.name} » reprise. Elle reste dans ce ` +
+                      "navigateur, et vous pouvez la modifier dans « Ma campagne ».",
+                  });
+                } catch (e) {
+                  setMessage({
+                    tone: "erreur",
+                    text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
+                  });
+                }
+              }}
+            />
+          )}
+          {unfilled.length > 0 && (
+            <p className="alerte">
+              <strong>Campagne non configurée.</strong> Les messages contiennent
+              encore des valeurs d'exemple (
+              {unfilled.map(campaignLabel).join(", ")}) :{" "}
+              <strong>n'envoyez rien</strong> avant d'avoir rempli l'onglet « Ma
+              campagne ».
+            </p>
+          )}
 
-        {download && <Progression state={download} />}
+          {download && <Progression state={download} />}
 
-        {tab === "liste" && (
-          mayors.length === 0
-            ? <Accueil onCsv={loadCsv} onDemo={loadDemo}
-              onDownload={fetchList} download={download} />
-            : (
+          {tab === "liste" &&
+            (mayors.length === 0 ? (
+              <Accueil
+                onCsv={loadCsv}
+                onDemo={loadDemo}
+                onDownload={fetchList}
+                download={download}
+              />
+            ) : (
               <Liste
-                mayors={filtered} tracking={tracking} counts={counts}
-                q={q} setQ={setQ} rankFilter={rankFilter} setRankFilter={setRankFilter}
+                mayors={filtered}
+                tracking={tracking}
+                counts={counts}
+                q={q}
+                setQ={setQ}
+                rankFilter={rankFilter}
+                setRankFilter={setRankFilter}
                 departments={departments}
-                deptFilter={deptFilter} setDeptFilter={setDeptFilter}
-                onChoose={(m) => { setChosen(m); setTab("fiche"); }}
+                deptFilter={deptFilter}
+                setDeptFilter={setDeptFilter}
+                onChoose={(m) => {
+                  setChosen(m);
+                  setTab("fiche");
+                }}
                 loadedList={loadedList}
                 onComplete={() => fetchList("complete")}
                 download={download}
               />
-            )
-        )}
+            ))}
 
-        {tab === "guide" && <Guide />}
+          {tab === "guide" && <Guide />}
 
-        {tab === "fiche" && chosen && (
-          <Fiche
-            mayor={chosen} cfg={cfg} personalNote={personalNote}
-            drafts={cardDrafts}
-            status={tracking[chosen.insee_code as string]?.status}
-            notes={(tracking[chosen.insee_code as string]?.notes ?? [])
-              .map((n) => ({ ...n, volunteer: null }))}
-            onBack={() => setTab("liste")}
-            onStatus={async (status, note) => {
-              const insee = chosen.insee_code as string;
-              const e = await DB.saveTracking(insee, status, note);
-              setTracking((s) => ({ ...s, [insee]: e }));
-            }}
-          />
-        )}
+          {tab === "fiche" && chosen && (
+            <Fiche
+              mayor={chosen}
+              cfg={cfg}
+              personalNote={personalNote}
+              drafts={cardDrafts}
+              status={tracking[chosen.insee_code as string]?.status}
+              notes={(tracking[chosen.insee_code as string]?.notes ?? []).map(
+                (n) => ({ ...n, volunteer: null }),
+              )}
+              onBack={() => setTab("liste")}
+              onStatus={async (status, note) => {
+                const insee = chosen.insee_code as string;
+                const e = await DB.saveTracking(insee, status, note);
+                setTracking((s) => ({ ...s, [insee]: e }));
+              }}
+            />
+          )}
 
-        {tab === "donnees" && (
-          <Donnees
-            counts={counts} onExport={exportAll} onImport={importAll}
-            onCsv={loadCsv} onDemo={loadDemo}
-            onDownload={fetchList} loadedList={loadedList}
-            onErase={async () => {
-              await DB.eraseAll();
-              setMayors([]); setTracking({}); setCfg(EMPTY_CFG); setPersonalNote("");
-              setDraft(EMPTY_CFG); setNoteDraft("");
-              // the drafts carry notes about named mayors: erased means erased
-              cardDrafts.current = {};
-              setLoadedList(null);
-              setMessage({ tone: "ok", text: "Tout a été effacé de ce navigateur." });
-            }}
-          />
-        )}
-
-        {tab === "campagne" && (
-          <CampaignTab
-            draft={draft} note={noteDraft} dirty={dirty}
-            onEdit={setDraft} onNote={setNoteDraft}
-            onSave={async (next, note) => {
-              try {
-                await DB.writeSetting("campagne", next);
-                await DB.writeSetting("argument", note);
-                // cfg only: the draft may already carry keystrokes typed
-                // while these writes are in flight, and they must stay —
-                // the `dirty` marker then reappears on its own
-                setCfg(next); setPersonalNote(note);
-                setMessage({ tone: "ok", text: "Campagne enregistrée dans ce navigateur." });
-              } catch (e) {
+          {tab === "donnees" && (
+            <Donnees
+              counts={counts}
+              onExport={exportAll}
+              onImport={importAll}
+              onCsv={loadCsv}
+              onDemo={loadDemo}
+              onDownload={fetchList}
+              loadedList={loadedList}
+              onErase={async () => {
+                await DB.eraseAll();
+                setMayors([]);
+                setTracking({});
+                setCfg(EMPTY_CFG);
+                setPersonalNote("");
+                setDraft(EMPTY_CFG);
+                setNoteDraft("");
+                // the drafts carry notes about named mayors: erased means erased
+                cardDrafts.current = {};
+                setLoadedList(null);
                 setMessage({
-                  tone: "erreur",
-                  text: `Enregistrement impossible : ${e instanceof Error ? e.message : String(e)}`,
+                  tone: "ok",
+                  text: "Tout a été effacé de ce navigateur.",
                 });
-              }
-            }}
-          />
-        )}
-      </main>
+              }}
+            />
+          )}
+
+          {tab === "campagne" && (
+            <CampaignTab
+              draft={draft}
+              note={noteDraft}
+              dirty={dirty}
+              onEdit={setDraft}
+              onNote={setNoteDraft}
+              onSave={async (next, note) => {
+                try {
+                  await DB.writeSetting("campagne", next);
+                  await DB.writeSetting("argument", note);
+                  // cfg only: the draft may already carry keystrokes typed
+                  // while these writes are in flight, and they must stay —
+                  // the `dirty` marker then reappears on its own
+                  setCfg(next);
+                  setPersonalNote(note);
+                  setMessage({
+                    tone: "ok",
+                    text: "Campagne enregistrée dans ce navigateur.",
+                  });
+                } catch (e) {
+                  setMessage({
+                    tone: "erreur",
+                    text: `Enregistrement impossible : ${e instanceof Error ? e.message : String(e)}`,
+                  });
+                }
+              }}
+            />
+          )}
+        </main>
       </RenderGuard>
       <PiedDePage>
         <p>
@@ -430,19 +560,26 @@ export default function Browser() {
  * they will answer to. A volunteer who did not expect this screen is
  * exactly the person who must see it.
  */
-function Proposition(
-  { offer, onAccept, onRefuse }:
-  { offer: Offer; onAccept: () => void; onRefuse: () => void },
-) {
+function Proposition({
+  offer,
+  onAccept,
+  onRefuse,
+}: {
+  offer: Offer;
+  onAccept: () => void;
+  onRefuse: () => void;
+}) {
   return (
     <div className="carte alerte">
       <h2 style={{ marginTop: 0 }}>Reprendre la campagne « {offer.name} » ?</h2>
       <p className="gris">
-        Ce lien propose de remplir votre campagne avec les valeurs
-        ci-dessous, publiées par l'instance{" "}
-        <code>{offer.slug}.{instanceDomain()}</code>. Elles rempliront tous
-        vos messages aux maires. Rien n'est enregistré tant que vous n'avez
-        pas accepté.
+        Ce lien propose de remplir votre campagne avec les valeurs ci-dessous,
+        publiées par l'instance{" "}
+        <code>
+          {offer.slug}.{instanceDomain()}
+        </code>
+        . Elles rempliront tous vos messages aux maires. Rien n'est enregistré
+        tant que vous n'avez pas accepté.
       </p>
       <table>
         <tbody>
@@ -455,8 +592,10 @@ function Proposition(
         </tbody>
       </table>
       <p>
-        <button onClick={onAccept}>Reprendre cette campagne</button>{" "}
-        <button className="secondaire" onClick={onRefuse}>
+        <button type="button" onClick={onAccept}>
+          Reprendre cette campagne
+        </button>{" "}
+        <button type="button" className="secondaire" onClick={onRefuse}>
           Non, je remplis moi-même
         </button>
       </p>
@@ -464,7 +603,9 @@ function Proposition(
   );
 }
 
-interface DownloadState extends Progress { key: ListKey }
+interface DownloadState extends Progress {
+  key: ListKey;
+}
 
 function Progression({ state }: { state: DownloadState }) {
   const { key, received, total } = state;
@@ -474,16 +615,19 @@ function Progression({ state }: { state: DownloadState }) {
       <p style={{ margin: 0 }}>
         <strong>Téléchargement de la {LISTS[key].name}…</strong>{" "}
         <span className="gris">
-          {formatBytes(received)}{total ? ` sur ${formatBytes(total)}` : ""}
+          {formatBytes(received)}
+          {total ? ` sur ${formatBytes(total)}` : ""}
         </span>
       </p>
       <div className="jauge">
-        <div className={pct === null ? "barre indeterminee" : "barre"}
-          style={pct === null ? undefined : { width: `${pct}%` }} />
+        <div
+          className={pct === null ? "barre indeterminee" : "barre"}
+          style={pct === null ? undefined : { width: `${pct}%` }}
+        />
       </div>
       <p className="gris" style={{ margin: ".3rem 0 0" }}>
-        {LISTS[key].detail} — une fois chargée, elle reste dans ce navigateur
-        et ne sera plus retéléchargée.
+        {LISTS[key].detail} — une fois chargée, elle reste dans ce navigateur et
+        ne sera plus retéléchargée.
       </p>
     </div>
   );
@@ -503,28 +647,54 @@ function Accueil({ onCsv, onDemo, onDownload, download }: AccueilProps) {
       <h1>Aucune liste chargée</h1>
       <div className="carte">
         <p>
-          Cette version fonctionne <strong>entièrement dans votre
-          navigateur</strong>. La seule requête réseau qu'elle fasse est le
-          téléchargement de la liste ci-dessous : aucune de vos notes, aucun
-          nom de candidat, aucune action n'est jamais transmise.
+          Cette version fonctionne{" "}
+          <strong>entièrement dans votre navigateur</strong>. La seule requête
+          réseau qu'elle fasse est le téléchargement de la liste ci-dessous :
+          aucune de vos notes, aucun nom de candidat, aucune action n'est jamais
+          transmise.
         </p>
         <p>
-          <button disabled={!!download} onClick={() => onDownload("light")}>
+          <button
+            type="button"
+            disabled={!!download}
+            onClick={() => onDownload("light")}
+          >
             ⬇ Charger la liste prioritaire
           </button>{" "}
-          <button className="secondaire" disabled={!!download}
-            onClick={() => onDownload("complete")}>
+          <button
+            type="button"
+            className="secondaire"
+            disabled={!!download}
+            onClick={() => onDownload("complete")}
+          >
             ⬇ Charger tous les maires de France
           </button>
         </p>
         <p className="gris">
-          Ou bien : <button className="lien" onClick={() => field.current?.click()}>
-            charger mon propre fichier</button> (CSV produit par
-          <code> task build</code>) · <button className="lien" onClick={onDemo}>
-            essayer avec des données fictives</button>
+          Ou bien :{" "}
+          <button
+            type="button"
+            className="lien"
+            onClick={() => field.current?.click()}
+          >
+            charger mon propre fichier
+          </button>{" "}
+          (CSV produit par
+          <code> task build</code>) ·{" "}
+          <button type="button" className="lien" onClick={onDemo}>
+            essayer avec des données fictives
+          </button>
         </p>
-        <input ref={field} type="file" accept=".csv,text/csv" hidden
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) onCsv(f); }} />
+        <input
+          ref={field}
+          type="file"
+          accept=".csv,text/csv"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onCsv(f);
+          }}
+        />
       </div>
     </>
   );
@@ -547,37 +717,72 @@ interface ListeProps {
   download: DownloadState | null;
 }
 
-function Liste({ mayors, tracking, counts, q, setQ, rankFilter, setRankFilter,
-  departments, deptFilter, setDeptFilter,
-  onChoose, loadedList, onComplete, download }: ListeProps) {
+function Liste({
+  mayors,
+  tracking,
+  counts,
+  q,
+  setQ,
+  rankFilter,
+  setRankFilter,
+  departments,
+  deptFilter,
+  setDeptFilter,
+  onChoose,
+  loadedList,
+  onComplete,
+  download,
+}: ListeProps) {
   const [shown, setShown] = useState(50);
   // the filter changes: back to the top, otherwise a 300-row window stays
   // open on a list that only has 12 left
+  // the three filters are TRIGGERS — the effect reads none of them, it only
+  // has to run when one changes. That is the whole behaviour.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: triggers, read by nothing
   useEffect(() => setShown(50), [q, rankFilter, deptFilter]);
   return (
     <>
       <h1>Les maires</h1>
       <form className="enligne carte" onSubmit={(e) => e.preventDefault()}>
         <div>
-          <label>Recherche (commune, nom)
-            <input type="text" value={q} onChange={(e) => setQ(e.target.value)} />
+          <label>
+            Recherche (commune, nom)
+            <input
+              type="text"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
           </label>
         </div>
         <div>
-          <label>Qui afficher
-            <select value={rankFilter} onChange={(e) => setRankFilter(e.target.value)}>
+          <label>
+            Qui afficher
+            <select
+              value={rankFilter}
+              onChange={(e) => setRankFilter(e.target.value)}
+            >
               {Object.entries(M.RANKS).map(([k, v]) => (
-                <option key={k} value={k}>{v} ({counts[k] ?? 0})</option>
+                <option key={k} value={k}>
+                  {v} ({counts[k] ?? 0})
+                </option>
               ))}
               <option value="all">Tous ({counts.total})</option>
             </select>
           </label>
         </div>
         <div>
-          <label>Département
-            <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
+          <label>
+            Département
+            <select
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+            >
               <option value="">— tous ({departments.length}) —</option>
-              {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+              {departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -590,30 +795,49 @@ function Liste({ mayors, tracking, counts, q, setQ, rankFilter, setRankFilter,
       )}
       {loadedList === "light" && (
         <p className="alerte">
-          Vous travaillez sur la <strong>liste prioritaire</strong> ({counts.total}
-          {" "}maires). Les 500 signatures ne sortiront pas d'eux seuls : quand
-          vous les aurez épuisés,{" "}
-          <button className="lien" disabled={!!download} onClick={onComplete}>
+          Vous travaillez sur la <strong>liste prioritaire</strong> (
+          {counts.total} maires). Les 500 signatures ne sortiront pas d'eux
+          seuls : quand vous les aurez épuisés,{" "}
+          <button
+            type="button"
+            className="lien"
+            disabled={!!download}
+            onClick={onComplete}
+          >
             chargez les 34 826 maires de France
           </button>{" "}
           <span className="gris">(2 Mo, une seule fois)</span>. Votre suivi est
           conservé.
         </p>
       )}
-      <p className="gris">{Math.min(shown, mayors.length)} affiché(s) sur {mayors.length}.</p>
+      <p className="gris">
+        {Math.min(shown, mayors.length)} affiché(s) sur {mayors.length}.
+      </p>
       <div className="carte">
         <table>
           <thead>
-            <tr><th>Commune</th><th>Département</th><th>Signal</th><th>Statut</th></tr>
+            <tr>
+              <th>Commune</th>
+              <th>Département</th>
+              <th>Signal</th>
+              <th>Statut</th>
+            </tr>
           </thead>
           <tbody>
             {mayors.slice(0, shown).map((m) => (
               <tr key={m.insee_code as string}>
                 <td>
-                  <button className="lien" onClick={() => onChoose(m)}>
+                  <button
+                    type="button"
+                    className="lien"
+                    onClick={() => onChoose(m)}
+                  >
                     <strong>{m.commune}</strong>
                   </button>
-                  <br /><span className="gris">{m.title} {m.first_name} {m.last_name}</span>
+                  <br />
+                  <span className="gris">
+                    {m.title} {m.first_name} {m.last_name}
+                  </span>
                 </td>
                 <td>{m.department}</td>
                 <td className="gris">
@@ -621,7 +845,13 @@ function Liste({ mayors, tracking, counts, q, setQ, rankFilter, setRankFilter,
                     ? `${m.recent_candidate} (${m.recent_year})`
                     : M.RANKS[M.rank(m)]}
                 </td>
-                <td><Chip status={tracking[m.insee_code as string]?.status ?? "to_contact"} /></td>
+                <td>
+                  <Chip
+                    status={
+                      tracking[m.insee_code as string]?.status ?? "to_contact"
+                    }
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -631,7 +861,11 @@ function Liste({ mayors, tracking, counts, q, setQ, rankFilter, setRankFilter,
         )}
         {shown < mayors.length && (
           <p style={{ textAlign: "center" }}>
-            <button className="secondaire" onClick={() => setShown((c) => c + 50)}>
+            <button
+              type="button"
+              className="secondaire"
+              onClick={() => setShown((c) => c + 50)}
+            >
               Afficher la suite
             </button>
           </p>
@@ -652,8 +886,16 @@ interface DonneesProps {
   loadedList: ListKey | "personnel" | "demo" | null;
 }
 
-function Donnees({ counts, onExport, onImport, onCsv, onDemo, onErase,
-  onDownload, loadedList }: DonneesProps) {
+function Donnees({
+  counts,
+  onExport,
+  onImport,
+  onCsv,
+  onDemo,
+  onErase,
+  onDownload,
+  loadedList,
+}: DonneesProps) {
   const importField = useRef<HTMLInputElement>(null);
   const csvField = useRef<HTMLInputElement>(null);
   const [merge, setMerge] = useState(true);
@@ -663,20 +905,30 @@ function Donnees({ counts, onExport, onImport, onCsv, onDemo, onErase,
       <div className="carte">
         <p>
           Tout est dans ce navigateur, dans une base locale. Rien n'est envoyé,
-          rien n'est sauvegardé ailleurs — <strong>vider les données du site
-          les supprime définitivement</strong>. Exportez régulièrement.
+          rien n'est sauvegardé ailleurs —{" "}
+          <strong>vider les données du site les supprime définitivement</strong>
+          . Exportez régulièrement.
         </p>
         <p className="gris">{counts.total} maires chargés.</p>
         <p>
-          <button onClick={onExport}>⬇ Exporter (JSON)</button>{" "}
-          <button className="secondaire" onClick={() => importField.current?.click()}>
+          <button type="button" onClick={onExport}>
+            ⬇ Exporter (JSON)
+          </button>{" "}
+          <button
+            type="button"
+            className="secondaire"
+            onClick={() => importField.current?.click()}
+          >
             ⬆ Importer une sauvegarde
           </button>
         </p>
         <p>
           <label>
-            <input type="checkbox" checked={merge}
-              onChange={(e) => setMerge(e.target.checked)} />{" "}
+            <input
+              type="checkbox"
+              checked={merge}
+              onChange={(e) => setMerge(e.target.checked)}
+            />{" "}
             Fusionner plutôt qu'écraser
           </label>
           <br />
@@ -686,35 +938,64 @@ function Donnees({ counts, onExport, onImport, onCsv, onDemo, onErase,
             fichiers.
           </span>
         </p>
-        <input ref={importField} type="file" accept=".json,application/json" hidden
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) onImport(f, merge); }} />
+        <input
+          ref={importField}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onImport(f, merge);
+          }}
+        />
       </div>
 
       <div className="carte">
         <h2 style={{ marginTop: 0 }}>Changer de liste</h2>
         <p className="gris">
-          Chargée actuellement : {loadedList
-            ? (loadedList === "demo"
+          Chargée actuellement :{" "}
+          {loadedList
+            ? loadedList === "demo"
               ? "un jeu de données FICTIVES"
               : loadedList === "personnel"
                 ? "votre propre fichier"
-                // read from a backup the user supplies: an unknown key
-                // must not throw where the screen says something
-                : LISTS[loadedList]?.name ?? "une liste inconnue")
-            : "aucune"}. Changer de liste ne touche pas à
-          votre suivi : il est indexé par code INSEE.
+                : // read from a backup the user supplies: an unknown key
+                  // must not throw where the screen says something
+                  (LISTS[loadedList]?.name ?? "une liste inconnue")
+            : "aucune"}
+          . Changer de liste ne touche pas à votre suivi : il est indexé par
+          code INSEE.
         </p>
         <p>
-          <button onClick={() => onDownload("light")}>⬇ Liste prioritaire</button>{" "}
-          <button onClick={() => onDownload("complete")}>⬇ Base complète</button>
+          <button type="button" onClick={() => onDownload("light")}>
+            ⬇ Liste prioritaire
+          </button>{" "}
+          <button type="button" onClick={() => onDownload("complete")}>
+            ⬇ Base complète
+          </button>
         </p>
         <p>
-          <button className="secondaire" onClick={() => csvField.current?.click()}>
-            📂 Charger un CSV</button>{" "}
-          <button className="secondaire" onClick={onDemo}>Données fictives</button>
+          <button
+            type="button"
+            className="secondaire"
+            onClick={() => csvField.current?.click()}
+          >
+            📂 Charger un CSV
+          </button>{" "}
+          <button type="button" className="secondaire" onClick={onDemo}>
+            Données fictives
+          </button>
         </p>
-        <input ref={csvField} type="file" accept=".csv,text/csv" hidden
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) onCsv(f); }} />
+        <input
+          ref={csvField}
+          type="file"
+          accept=".csv,text/csv"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onCsv(f);
+          }}
+        />
       </div>
 
       <div className="carte">
@@ -723,9 +1004,20 @@ function Donnees({ counts, onExport, onImport, onCsv, onDemo, onErase,
           À faire en fin de campagne : les notes portent sur des personnes
           nommées.
         </p>
-        <button className="secondaire" onClick={() => {
-          if (confirm("Effacer définitivement la liste, le suivi et la configuration ?")) onErase();
-        }}>Effacer ce navigateur</button>
+        <button
+          type="button"
+          className="secondaire"
+          onClick={() => {
+            if (
+              confirm(
+                "Effacer définitivement la liste, le suivi et la configuration ?",
+              )
+            )
+              onErase();
+          }}
+        >
+          Effacer ce navigateur
+        </button>
       </div>
     </>
   );
@@ -742,13 +1034,21 @@ interface CampaignTabProps {
   onSave: (cfg: Campaign, personalNote: string) => void;
 }
 
-function CampaignTab({ draft, note, dirty, onEdit, onNote, onSave }: CampaignTabProps) {
+function CampaignTab({
+  draft,
+  note,
+  dirty,
+  onEdit,
+  onNote,
+  onSave,
+}: CampaignTabProps) {
   return (
     <>
       <h1>Ma campagne</h1>
       <div className="carte">
         <p className="gris">
-          Ces valeurs remplissent les messages. Elles restent dans ce navigateur.
+          Ces valeurs remplissent les messages. Elles restent dans ce
+          navigateur.
         </p>
         {CAMPAIGN_FIELDS.map((f, i) => (
           <div key={f.key}>
@@ -759,23 +1059,44 @@ function CampaignTab({ draft, note, dirty, onEdit, onNote, onSave }: CampaignTab
               {/* associated by id, not nested: a textarea nested in its
                   label makes its own CONTENT part of the label's text */}
               <label htmlFor={`champ-${f.key}`}>{f.label}</label>
-              {f.long
-                ? <textarea id={`champ-${f.key}`} rows={3} placeholder={f.example}
+              {f.long ? (
+                <textarea
+                  id={`champ-${f.key}`}
+                  rows={3}
+                  placeholder={f.example}
                   value={draft[f.key]}
-                  onChange={(e) => onEdit({ ...draft, [f.key]: e.target.value })} />
-                : <input id={`champ-${f.key}`} type="text" placeholder={f.example}
+                  onChange={(e) =>
+                    onEdit({ ...draft, [f.key]: e.target.value })
+                  }
+                />
+              ) : (
+                <input
+                  id={`champ-${f.key}`}
+                  type="text"
+                  placeholder={f.example}
                   value={draft[f.key]}
-                  onChange={(e) => onEdit({ ...draft, [f.key]: e.target.value })} />}
+                  onChange={(e) =>
+                    onEdit({ ...draft, [f.key]: e.target.value })
+                  }
+                />
+              )}
               {f.hint && <span className="gris aide">{f.hint}</span>}
             </p>
           </div>
         ))}
         <p>
-          <label>Votre touche personnelle (insérée dans vos emails)
-            <textarea rows={3} value={note} onChange={(e) => onNote(e.target.value)} />
+          <label>
+            Votre touche personnelle (insérée dans vos emails)
+            <textarea
+              rows={3}
+              value={note}
+              onChange={(e) => onNote(e.target.value)}
+            />
           </label>
         </p>
-        <button onClick={() => onSave(draft, note)}>Enregistrer</button>
+        <button type="button" onClick={() => onSave(draft, note)}>
+          Enregistrer
+        </button>
         {dirty && (
           <span className="gris" style={{ marginLeft: ".6rem" }}>
             modifications non enregistrées

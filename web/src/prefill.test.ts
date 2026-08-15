@@ -11,12 +11,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
 import { EMPTY_CFG } from "./common.tsx";
 import {
-  fetchCampaign, requestedSlug, untouchedCampaign, validSlug,
+  fetchCampaign,
+  requestedSlug,
+  untouchedCampaign,
+  validSlug,
 } from "./prefill.ts";
 
 /** A campaign the app may adopt: every key filled, or it is refused. */
-const whole = () => Object.fromEntries(
-  CAMPAIGN_KEYS.map((k) => [k, `valeur de ${k}`])) as Record<string, string>;
+const whole = () =>
+  Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, `valeur de ${k}`])) as Record<
+    string,
+    string
+  >;
 
 const withDomain = (domain: string) => {
   vi.stubEnv("PARAPHE_INSTANCE_DOMAIN", domain);
@@ -29,15 +35,25 @@ afterEach(() => {
 
 describe("the slug a link may name", () => {
   it.each(["campagne", "ma-campagne", "c2027", "ab"])(
-    "accepts %s, a DNS label", (slug) => {
+    "accepts %s, a DNS label",
+    (slug) => {
       expect(validSlug(slug)).toBe(true);
-    });
+    },
+  );
 
   // Everything below would build a request somewhere else, or nowhere
   it.each([
-    "évidemment", "MaCampagne", "a", "-campagne", "campagne-",
-    "campagne.autre-domaine.fr", "campagne/../../etc", "campagne:8080",
-    "campagne?x=1", "..", "a".repeat(64),
+    "évidemment",
+    "MaCampagne",
+    "a",
+    "-campagne",
+    "campagne-",
+    "campagne.autre-domaine.fr",
+    "campagne/../../etc",
+    "campagne:8080",
+    "campagne?x=1",
+    "..",
+    "a".repeat(64),
   ])("refuses %s", (slug) => {
     expect(validSlug(slug)).toBe(false);
   });
@@ -62,10 +78,12 @@ describe("fetching the proposed campaign", () => {
       seen.push(url);
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({
-          slug: "campagne", name: "Camille Réel",
-          campaign: { ...whole(), candidat: "Camille Réel" },
-        }),
+        json: () =>
+          Promise.resolve({
+            slug: "campagne",
+            name: "Camille Réel",
+            campaign: { ...whole(), candidat: "Camille Réel" },
+          }),
       });
     });
     const offer = await fetchCampaign("campagne");
@@ -77,19 +95,27 @@ describe("fetching the proposed campaign", () => {
   // every message with nothing at all
   it("refuses an answer that is not a campaign", async () => {
     withDomain("paraphe.fr");
-    vi.stubGlobal("fetch", () => Promise.resolve({
-      ok: true, json: () => Promise.resolve({ hello: "world" }),
-    }));
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ hello: "world" }),
+      }),
+    );
     await expect(fetchCampaign("campagne")).rejects.toThrow(/ne ressemble pas/);
   });
 
   it("carries the server's own refusal through", async () => {
     withDomain("paraphe.fr");
-    vi.stubGlobal("fetch", () => Promise.resolve({
-      ok: false, status: 409,
-      json: () => Promise.resolve({ error: "pas encore configurée" }),
-    }));
-    await expect(fetchCampaign("campagne")).rejects.toThrow(/pas encore configurée/);
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({ error: "pas encore configurée" }),
+      }),
+    );
+    await expect(fetchCampaign("campagne")).rejects.toThrow(
+      /pas encore configurée/,
+    );
   });
 });
 
@@ -104,10 +130,15 @@ describe("what counts as a campaign", () => {
     ["an empty value", { ...whole(), contact_email: "   " }],
   ])("refuses %s", async (_case, campaign) => {
     withDomain("paraphe.fr");
-    vi.stubGlobal("fetch", () => Promise.resolve({
-      ok: true, json: () => Promise.resolve({ campaign }),
-    }));
-    await expect(fetchCampaign("campagne")).rejects.toThrow(/campagne complète/);
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ campaign }),
+      }),
+    );
+    await expect(fetchCampaign("campagne")).rejects.toThrow(
+      /campagne complète/,
+    );
   });
 });
 
@@ -125,12 +156,16 @@ describe("when the offer may appear at all", () => {
   });
 
   it.each(["signataire", "contact_email", "candidat"])(
-    "does NOT appear once %s is the volunteer's own", (key) => {
+    "does NOT appear once %s is the volunteer's own",
+    (key) => {
       const cfg = { ...EMPTY_CFG, [key]: "Jeanne Bénévole" };
       // still incomplete — and that is exactly the state that must not be
       // offered a link replacing all nine fields
       expect(unfilledKeys(cfg).length).toBeGreaterThan(0);
-      expect(untouchedCampaign(cfg),
-        "an incomplete campaign is not an untouched one").toBe(false);
-    });
+      expect(
+        untouchedCampaign(cfg),
+        "an incomplete campaign is not an untouched one",
+      ).toBe(false);
+    },
+  );
 });

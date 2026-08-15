@@ -41,10 +41,13 @@ describe("the synthetic dataset", () => {
   it("provides every column the API imports", () => {
     const dest = build();
     const header = new Set(
-      parseRows(readFileSync(join(dest, "04_base_complete.csv"), "utf8"))[0]);
+      parseRows(readFileSync(join(dest, "04_base_complete.csv"), "utf8"))[0],
+    );
     const missing = expectedColumns().filter((c) => !header.has(c));
-    expect(missing, "the image would start in error while the tests "
-      + "stayed green").toEqual([]);
+    expect(
+      missing,
+      "the image would start in error while the tests " + "stayed green",
+    ).toEqual([]);
   });
 
   // A fixture too short builds an image the API refuses to start (the
@@ -53,7 +56,9 @@ describe("the synthetic dataset", () => {
   // `docker run`.
   it("clears the API's import threshold", () => {
     const dest = build();
-    const rows = parseRecords(readFileSync(join(dest, "04_base_complete.csv"), "utf8"));
+    const rows = parseRecords(
+      readFileSync(join(dest, "04_base_complete.csv"), "utf8"),
+    );
     expect(rows.length).toBeGreaterThanOrEqual(importThreshold());
   });
 
@@ -62,37 +67,62 @@ describe("the synthetic dataset", () => {
   // overseas INSEE, the elision and the ordering are never crossed.
   it("carries the shapes the real base carries", () => {
     const dest = build();
-    const rows = parseRecords(readFileSync(join(dest, "04_base_complete.csv"), "utf8"));
+    const rows = parseRecords(
+      readFileSync(join(dest, "04_base_complete.csv"), "utf8"),
+    );
     const departments = new Set(rows.map((r) => r.department));
-    expect(departments.size, "two departments cannot exercise a perimeter")
-      .toBeGreaterThan(5);
+    expect(
+      departments.size,
+      "two departments cannot exercise a perimeter",
+    ).toBeGreaterThan(5);
     // the RNE's empty department label for overseas is a source-side trap,
     // covered by outils/sorties.test.ts on the real files; what this
     // fixture must carry is the three-digit INSEE prefix
     const overseas = rows.filter((r) => r.insee_code.startsWith("97"));
     expect(overseas.length, "no overseas row at all").toBeGreaterThan(0);
-    expect(overseas.every((r) => r.insee_code.length === 5),
-      "an INSEE code is five characters").toBe(true);
-    expect(rows.some((r) => !r.email), "every email filled").toBe(true);
-    expect(rows.some((r) => r.email.includes(";")),
-      "no concatenated address, which the directory produces 318 times").toBe(true);
-    expect(rows.some((r) => !r.town_hall_hours), "every opening hour filled").toBe(true);
-    expect(rows.some((r) => /^[AEÉIOUÀÂÎÔÛŒ]/.test(r.commune)),
-      "no commune the closing line has to elide").toBe(true);
-    expect(rows.some((r) => /^(Le|La|Les|L')/.test(r.commune)),
-      "no commune carrying its article").toBe(true);
-    const scores = new Set(rows.filter((r) => r.rank === "has_endorsed")
-      .map((r) => r.score));
-    expect(scores.size, "a single score cannot exercise an ordering")
-      .toBeGreaterThan(1);
+    expect(
+      overseas.every((r) => r.insee_code.length === 5),
+      "an INSEE code is five characters",
+    ).toBe(true);
+    expect(
+      rows.some((r) => !r.email),
+      "every email filled",
+    ).toBe(true);
+    expect(
+      rows.some((r) => r.email.includes(";")),
+      "no concatenated address, which the directory produces 318 times",
+    ).toBe(true);
+    expect(
+      rows.some((r) => !r.town_hall_hours),
+      "every opening hour filled",
+    ).toBe(true);
+    expect(
+      rows.some((r) => /^[AEÉIOUÀÂÎÔÛŒ]/.test(r.commune)),
+      "no commune the closing line has to elide",
+    ).toBe(true);
+    expect(
+      rows.some((r) => /^(Le|La|Les|L')/.test(r.commune)),
+      "no commune carrying its article",
+    ).toBe(true);
+    const scores = new Set(
+      rows.filter((r) => r.rank === "has_endorsed").map((r) => r.score),
+    );
+    expect(
+      scores.size,
+      "a single score cannot exercise an ordering",
+    ).toBeGreaterThan(1);
   });
 
   it("covers all three ranks", () => {
     // without them, the message invariant tests would pass while checking
     // nothing
     const dest = build();
-    const rows = parseRecords(readFileSync(join(dest, "04_base_complete.csv"), "utf8"));
-    expect(new Set(rows.map((r) => r.rank))).toEqual(new Set(Object.keys(RANKS)));
+    const rows = parseRecords(
+      readFileSync(join(dest, "04_base_complete.csv"), "utf8"),
+    );
+    expect(new Set(rows.map((r) => r.rank))).toEqual(
+      new Set(Object.keys(RANKS)),
+    );
   });
 });
 
@@ -106,13 +136,17 @@ describe("the deployment files", () => {
   // Globbed, not listed: a workflow added later would be invisible to a
   // hardcoded list, and one unpinned reference is enough.
   it("reference third-party actions by commit, never by tag", () => {
-    const workflows = readdirSync(join(ROOT, ".github", "workflows"))
-      .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+    const workflows = readdirSync(join(ROOT, ".github", "workflows")).filter(
+      (f) => f.endsWith(".yml") || f.endsWith(".yaml"),
+    );
     expect(workflows.length, "no workflow found to check").toBeGreaterThan(0);
     const floating: string[] = [];
     let pinned = 0;
     for (const name of workflows) {
-      const text = readFileSync(join(ROOT, ".github", "workflows", name), "utf8");
+      const text = readFileSync(
+        join(ROOT, ".github", "workflows", name),
+        "utf8",
+      );
       for (const line of text.split("\n")) {
         const m = line.match(/^\s*(?:-\s*)?uses:\s*(\S+)/);
         if (!m) continue;
@@ -124,9 +158,13 @@ describe("the deployment files", () => {
         else floating.push(`${name}: ${ref}`);
       }
     }
-    expect(floating, "these actions are referenced by a movable tag").toEqual([]);
-    expect(pinned, "no pinned action found: the check read nothing")
-      .toBeGreaterThan(10);
+    expect(floating, "these actions are referenced by a movable tag").toEqual(
+      [],
+    );
+    expect(
+      pinned,
+      "no pinned action found: the check read nothing",
+    ).toBeGreaterThan(10);
   });
 
   // The API sets these on what it answers; nginx serves the PAGES, and a
@@ -142,31 +180,54 @@ describe("the deployment files", () => {
     const conf = readFileSync(join(ROOT, "web", "nginx.conf.template"), "utf8");
     // the policy as Go concatenates it, quotes and comments removed
     const block = /const policy = ([\s\S]*?)\n\treturn /.exec(go);
-    expect(block, "the policy is no longer where this test reads it").toBeTruthy();
-    const policy = [...block![1].matchAll(/"([^"]*)"/g)].map((m) => m[1]).join("");
-    expect(policy.length, "an empty policy would match an empty config")
-      .toBeGreaterThan(80);
-    expect(conf, "nginx serves the pages with a different policy than the API")
-      .toContain(policy);
-    for (const header of ["X-Content-Type-Options", "Referrer-Policy",
-      "Cross-Origin-Opener-Policy"]) {
+    expect(
+      block,
+      "the policy is no longer where this test reads it",
+    ).toBeTruthy();
+    const policy = [...block![1].matchAll(/"([^"]*)"/g)]
+      .map((m) => m[1])
+      .join("");
+    expect(
+      policy.length,
+      "an empty policy would match an empty config",
+    ).toBeGreaterThan(80);
+    expect(
+      conf,
+      "nginx serves the pages with a different policy than the API",
+    ).toContain(policy);
+    for (const header of [
+      "X-Content-Type-Options",
+      "Referrer-Policy",
+      "Cross-Origin-Opener-Policy",
+    ]) {
       expect(go, `${header} is no longer set by the API`).toContain(header);
-      expect(conf, `${header} is set by the API but not by nginx, which is `
-        + "what serves the pages").toContain(header);
+      expect(
+        conf,
+        `${header} is set by the API but not by nginx, which is ` +
+          "what serves the pages",
+      ).toContain(header);
     }
     // every location that serves content, not just the first
-    const locations = [...conf.matchAll(/location ([^ ]+) \{([\s\S]*?)\n {4}\}/g)]
-      .filter(([, path]) => !path.startsWith("/api"));
-    expect(locations.length, "no content location found to check")
-      .toBeGreaterThan(1);
+    const locations = [
+      ...conf.matchAll(/location ([^ ]+) \{([\s\S]*?)\n {4}\}/g),
+    ].filter(([, path]) => !path.startsWith("/api"));
+    expect(
+      locations.length,
+      "no content location found to check",
+    ).toBeGreaterThan(1);
     for (const [, path, body] of locations) {
       // comments stripped: a commented-out add_header still contains the
       // header's name, and nginx does not read it
-      const live = body.split("\n").filter((l) => !l.trim().startsWith("#"))
+      const live = body
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("#"))
         .join("\n");
-      expect(live, `location ${path} sets no Content-Security-Policy. nginx `
-        + "does NOT inherit add_header into a block that declares one of its "
-        + "own").toMatch(/add_header Content-Security-Policy/);
+      expect(
+        live,
+        `location ${path} sets no Content-Security-Policy. nginx ` +
+          "does NOT inherit add_header into a block that declares one of its " +
+          "own",
+      ).toMatch(/add_header Content-Security-Policy/);
     }
   });
 
@@ -182,14 +243,17 @@ describe("the deployment files", () => {
   it("stamp the mode marker the interface looks for", () => {
     const marker = /<meta name="paraphe-mode" content="team">/;
     for (const file of ["api/main.go", "web/Dockerfile"]) {
-      expect(readFileSync(join(ROOT, file), "utf8"),
-        `${file} no longer carries the marker the interface reads`)
-        .toMatch(marker);
+      expect(
+        readFileSync(join(ROOT, file), "utf8"),
+        `${file} no longer carries the marker the interface reads`,
+      ).toMatch(marker);
     }
     // …and the interface still reads that attribute, under that name
     const reader = readFileSync(join(ROOT, "web", "src", "api.ts"), "utf8");
-    expect(reader, "the interface no longer reads the marker the image stamps")
-      .toContain('meta[name="paraphe-mode"]');
+    expect(
+      reader,
+      "the interface no longer reads the marker the image stamps",
+    ).toContain('meta[name="paraphe-mode"]');
   });
 
   // A ":" in an unquoted command makes YAML read the line as a mapping:
@@ -210,9 +274,21 @@ describe("the deployment files", () => {
     // Mappings that legitimately sit where a command could: Task calling
     // another task, GitHub's `defaults: run:` block. Anything else means
     // YAML split a shell line on a colon.
-    const DECLARED = new Set(["task", "cmd", "cmds", "defer", "for", "vars",
-      "silent", "ignore_error", "platforms", "set", "shopt", "shell",
-      "working-directory"]);
+    const DECLARED = new Set([
+      "task",
+      "cmd",
+      "cmds",
+      "defer",
+      "for",
+      "vars",
+      "silent",
+      "ignore_error",
+      "platforms",
+      "set",
+      "shopt",
+      "shell",
+      "working-directory",
+    ]);
     const offenders: Record<string, string[]> = {};
 
     // `underCommand` follows the PATH, not the key name: a Task named
@@ -222,15 +298,20 @@ describe("the deployment files", () => {
       // `.+`, not `[^.]+`: a task name is free to contain a dot
       // ("db.reset"), and requiring one path segment made the canary blind
       // to exactly the mutation it exists for.
-      /^tasks\..+\.cmds(\.\d+)?$/.test(path.join("."))
-      || /^jobs\.[^.]+\.steps\.\d+\.run$/.test(path.join("."))
-      || /^(defaults|jobs\.[^.]+\.defaults)\.run$/.test(path.join("."));
+      /^tasks\..+\.cmds(\.\d+)?$/.test(path.join(".")) ||
+      /^jobs\.[^.]+\.steps\.\d+\.run$/.test(path.join(".")) ||
+      /^(defaults|jobs\.[^.]+\.defaults)\.run$/.test(path.join("."));
 
     const walk = (
-      node: unknown, path: string[], found: string[], commands: string[],
+      node: unknown,
+      path: string[],
+      found: string[],
+      commands: string[],
     ) => {
       if (Array.isArray(node)) {
-        node.forEach((item, i) => walk(item, [...path, String(i)], found, commands));
+        node.forEach((item, i) => {
+          walk(item, [...path, String(i)], found, commands);
+        });
         return;
       }
       if (typeof node === "string") {
@@ -267,13 +348,18 @@ describe("the deployment files", () => {
         // [^\S\n] and not \s: the latter crosses the newline, so a comment
         // block matched its own next line and accused itself.
         const truncated = new RegExp(
-          `^[^\\S\\n]*(?:-[^\\S\\n]+)?(?:[a-z-]+:[^\\S\\n]*)?${escaped}[^\\S\\n]+#`, "m");
+          `^[^\\S\\n]*(?:-[^\\S\\n]+)?(?:[a-z-]+:[^\\S\\n]*)?${escaped}[^\\S\\n]+#`,
+          "m",
+        );
         if (truncated.test(text)) found.push(`tronquée sur # : ${single}`);
       }
       if (found.length) offenders[rel] = found;
     }
-    expect(offenders, "an unquoted \":\" makes YAML read a command as a "
-      + "mapping, and GitHub rejects the whole workflow").toEqual({});
+    expect(
+      offenders,
+      'an unquoted ":" makes YAML read a command as a ' +
+        "mapping, and GitHub rejects the whole workflow",
+    ).toEqual({});
   });
 
   // A PARAPHE_* the operator gives is an EXPLICIT override, reapplied over
@@ -283,14 +369,18 @@ describe("the deployment files", () => {
   // the default install.
   it("ship no campaign value that a restart would reimpose", () => {
     const values = readFileSync(
-      join(ROOT, "chart", "paraphe", "values.yaml"), "utf8");
-    const campaign = /\ncampaign:\n((?:  .*\n|\n)*)/.exec(values);
+      join(ROOT, "chart", "paraphe", "values.yaml"),
+      "utf8",
+    );
+    const campaign = /\ncampaign:\n((?: {2}.*\n|\n)*)/.exec(values);
     expect(campaign, "the campaign block moved or was renamed").toBeTruthy();
-    const filled = [...(campaign as RegExpExecArray)[1].matchAll(/^ {2}(\w+):\s*(.+)$/gm)]
-      .filter(([, , v]) => v.trim() !== '""' && !v.trim().startsWith("#"));
-    expect(filled.map(([, k, v]) => `${k}: ${v}`),
-      "a default install would overwrite the campaign at every restart")
-      .toEqual([]);
+    const filled = [
+      ...(campaign as RegExpExecArray)[1].matchAll(/^ {2}(\w+):\s*(.+)$/gm),
+    ].filter(([, , v]) => v.trim() !== '""' && !v.trim().startsWith("#"));
+    expect(
+      filled.map(([, k, v]) => `${k}: ${v}`),
+      "a default install would overwrite the campaign at every restart",
+    ).toEqual([]);
 
     const env = readFileSync(join(ROOT, ".env.exemple"), "utf8");
     const lot = /^PARAPHE_BATCH_SIZE=(.*)$/m.exec(env);
@@ -301,14 +391,28 @@ describe("the deployment files", () => {
     // the project carried other names before paraphe; a
     // leftover produces a database or an image that does not exist,
     // invisible until deployment
-    const watched = ["docker-compose.yml", ".github/workflows/ci.yml",
-      ".github/workflows/release.yml", "api/Dockerfile",
-      "web/Dockerfile", "web/nginx.conf.template", ".env.exemple",
-      "chart/paraphe/values.yaml", "chart/paraphe/Chart.yaml"];
+    const watched = [
+      "docker-compose.yml",
+      ".github/workflows/ci.yml",
+      ".github/workflows/release.yml",
+      "api/Dockerfile",
+      "web/Dockerfile",
+      "web/nginx.conf.template",
+      ".env.exemple",
+      "chart/paraphe/values.yaml",
+      "chart/paraphe/Chart.yaml",
+    ];
     // "parrainages" stays legitimate as a French word in comments; what is
     // hunted are the identifiers
-    const patterns = ["CITOYEN_", "citoyen-", "/citoyen", ":citoyen",
-      "/parrainages", "-U parrainages", "DB: parrainages"];
+    const patterns = [
+      "CITOYEN_",
+      "citoyen-",
+      "/citoyen",
+      ":citoyen",
+      "/parrainages",
+      "-U parrainages",
+      "DB: parrainages",
+    ];
     const offenders: Record<string, string[]> = {};
     for (const rel of watched) {
       const text = readFileSync(join(ROOT, rel), "utf8");
@@ -333,9 +437,17 @@ describe("the deployment surfaces name real variables", () => {
     "docker-compose.yml",
   ];
   const READ_IN = [
-    "api", "outils", "noyau", "web/src", "web/vite.config.ts",
-    "Taskfile.yml", ".github/workflows", "api/Dockerfile",
-    "web/Dockerfile", "web/nginx.conf.template", "e2e",
+    "api",
+    "outils",
+    "noyau",
+    "web/src",
+    "web/vite.config.ts",
+    "Taskfile.yml",
+    ".github/workflows",
+    "api/Dockerfile",
+    "web/Dockerfile",
+    "web/nginx.conf.template",
+    "e2e",
   ];
 
   const variables = (text: string): string[] =>
@@ -349,18 +461,26 @@ describe("the deployment surfaces name real variables", () => {
       for (const entry of readdirSync(full, { withFileTypes: true })) {
         const child = join(path, entry.name);
         if (entry.isDirectory()) {
-          if (entry.name !== "node_modules" && entry.name !== "dist") walk(child);
-        } else if (/\.(go|ts|tsx|yml|yaml|json)$/.test(entry.name)
+          if (entry.name !== "node_modules" && entry.name !== "dist")
+            walk(child);
+        } else if (
+          /\.(go|ts|tsx|yml|yaml|json)$/.test(entry.name) &&
           // tests excluded, THIS file first: naming the typo in a comment
           // was enough to make it pass for a variable the code reads
-          && !/\.test\.tsx?$|_test\.go$/.test(entry.name)) {
-          variables(readFileSync(join(ROOT, child), "utf8")).forEach((v) => found.add(v));
+          !/\.test\.tsx?$|_test\.go$/.test(entry.name)
+        ) {
+          for (const v of variables(readFileSync(join(ROOT, child), "utf8"))) {
+            found.add(v);
+          }
         }
       }
     };
     for (const path of READ_IN) {
       if (statSync(join(ROOT, path)).isDirectory()) walk(path);
-      else variables(readFileSync(join(ROOT, path), "utf8")).forEach((v) => found.add(v));
+      else
+        for (const v of variables(readFileSync(join(ROOT, path), "utf8"))) {
+          found.add(v);
+        }
     }
     return found;
   };

@@ -56,22 +56,30 @@ export function writeVersion(version: string): string[] {
   };
   for (const path of [ROOT_PACKAGE, WEB_PACKAGE]) {
     replace(path, (src) =>
-      src.replace(/^(\s*"version":\s*")[^"]+(")/m, `$1${version}$2`));
+      src.replace(/^(\s*"version":\s*")[^"]+(")/m, `$1${version}$2`),
+    );
   }
   replace(CHART, (src) =>
-    src.replace(/^version:\s*\S+$/m, `version: ${version}`)
-      .replace(/^appVersion:\s*.*$/m, `appVersion: "${version}"`));
+    src
+      .replace(/^version:\s*\S+$/m, `version: ${version}`)
+      .replace(/^appVersion:\s*.*$/m, `appVersion: "${version}"`),
+  );
   return changed;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()!)) {
+if (
+  process.argv[1] &&
+  import.meta.url.endsWith(process.argv[1].split("/").pop()!)
+) {
   const version = process.argv[2];
   if (!version) {
     console.error("usage: node outils/version.ts <x.y.z>");
     process.exit(2);
   }
   const changed = writeVersion(version);
-  console.log(changed.length
-    ? `${version} écrit dans : ${changed.join(", ")}`
-    : `${version} : déjà à jour partout`);
+  console.log(
+    changed.length
+      ? `${version} écrit dans : ${changed.join(", ")}`
+      : `${version} : déjà à jour partout`,
+  );
 }

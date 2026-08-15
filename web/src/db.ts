@@ -23,7 +23,10 @@ const STORES: { name: Store; keyPath: string }[] = [
   { name: "settings", keyPath: "key" },
 ];
 
-interface Setting { key: string; value: unknown }
+interface Setting {
+  key: string;
+  value: unknown;
+}
 
 export interface Backup {
   format: string;
@@ -55,9 +58,13 @@ function open(): Promise<IDBDatabase> {
     // A blocked upgrade fires NO event: without this the promise never
     // settles, the application stays on "Chargement…" for good, and the
     // export that would rescue the work is behind that same screen.
-    req.onblocked = () => reject(new Error(
-      "Une autre fenêtre de paraphe est ouverte sur une version précédente. "
-      + "Fermez les autres onglets de ce site, puis rechargez cette page."));
+    req.onblocked = () =>
+      reject(
+        new Error(
+          "Une autre fenêtre de paraphe est ouverte sur une version précédente. " +
+            "Fermez les autres onglets de ce site, puis rechargez cette page.",
+        ),
+      );
     req.onsuccess = () => {
       // and this connection steps aside when ANOTHER tab needs to upgrade,
       // rather than blocking it in turn
@@ -69,8 +76,10 @@ function open(): Promise<IDBDatabase> {
 }
 
 function tx<T>(
-  db: IDBDatabase, store: Store, mode: IDBTransactionMode,
-  action: (s: IDBObjectStore) => IDBRequest<T> | void,
+  db: IDBDatabase,
+  store: Store,
+  mode: IDBTransactionMode,
+  action: (s: IDBObjectStore) => IDBRequest<T> | undefined,
 ): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
     const t = db.transaction(store, mode);
@@ -94,7 +103,9 @@ const settle = (t: IDBTransaction): Promise<void> =>
  * both places, in the same commit.
  */
 export const CURRENT_STORES: [string, string][] = [
-  ["mayors", "insee_code"], ["tracking", "insee_code"], ["settings", "key"],
+  ["mayors", "insee_code"],
+  ["tracking", "insee_code"],
+  ["settings", "key"],
 ];
 
 export async function loadMayors(): Promise<Mayor[]> {
@@ -120,7 +131,8 @@ export async function replaceMayors(rows: Mayor[]): Promise<number> {
 
 export async function loadTracking(): Promise<Record<string, Tracking>> {
   const db = await open();
-  const rows = (await tx<Tracking[]>(db, "tracking", "readonly", (s) => s.getAll())) ?? [];
+  const rows =
+    (await tx<Tracking[]>(db, "tracking", "readonly", (s) => s.getAll())) ?? [];
   return Object.fromEntries(rows.map((r) => [r.insee_code, r]));
 }
 
@@ -129,15 +141,21 @@ export async function loadTracking(): Promise<Record<string, Tracking>> {
 function timestamp(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    + ` à ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    ` à ${p(d.getHours())}:${p(d.getMinutes())}`
+  );
 }
 
 export async function saveTracking(
-  insee: string, status: string, note: string,
+  insee: string,
+  status: string,
+  note: string,
 ): Promise<Tracking> {
   const db = await open();
-  const current = await tx<Tracking>(db, "tracking", "readonly", (s) => s.get(insee));
+  const current = await tx<Tracking>(db, "tracking", "readonly", (s) =>
+    s.get(insee),
+  );
   const entry: Tracking = {
     insee_code: insee,
     status,
@@ -170,12 +188,17 @@ export async function exportAll(): Promise<Backup> {
   return {
     format: "paraphe/1",
     exported_at: new Date().toISOString(),
-    mayors: mayors ?? [], tracking: tracking ?? [], settings: settings ?? [],
+    mayors: mayors ?? [],
+    tracking: tracking ?? [],
+    settings: settings ?? [],
   };
 }
 
 export interface ImportReport {
-  mayors: number; tracking: number; skipped: number; settings: number;
+  mayors: number;
+  tracking: number;
+  skipped: number;
+  settings: number;
   /** Settings the file carried and the merge deliberately did not take. */
   keptSettings?: number;
 }
@@ -183,8 +206,13 @@ export interface ImportReport {
 /** A usable tracking entry: without this, the card renders a white screen. */
 function validTracking(e: unknown): e is Tracking {
   const t = e as Tracking;
-  return !!t && typeof t.insee_code === "string" && t.insee_code !== ""
-    && typeof t.status === "string" && Array.isArray(t.notes);
+  return (
+    !!t &&
+    typeof t.insee_code === "string" &&
+    t.insee_code !== "" &&
+    typeof t.status === "string" &&
+    Array.isArray(t.notes)
+  );
 }
 
 /**
@@ -193,22 +221,32 @@ function validTracking(e: unknown): e is Tracking {
  * their files, rather than crushing one's work.
  */
 export async function importAll(
-  data: Backup, { merge = false } = {},
+  data: Backup,
+  { merge = false } = {},
 ): Promise<ImportReport> {
   if (data?.format !== "paraphe/1") {
     throw new Error("Fichier non reconnu : ce n'est pas un export paraphe.");
   }
   const db = await open();
-  const report: ImportReport = { mayors: 0, tracking: 0, skipped: 0, settings: 0 };
+  const report: ImportReport = {
+    mayors: 0,
+    tracking: 0,
+    skipped: 0,
+    settings: 0,
+  };
 
   // Everything is validated BEFORE entering the transaction: a malformed
   // entry making a `put` throw mid-way left the store emptied and the work
   // lost, with a message suggesting nothing had moved.
   const mayors = (data.mayors ?? []).filter(
-    (m) => typeof m?.insee_code === "string" && m.insee_code !== "");
+    (m) => typeof m?.insee_code === "string" && m.insee_code !== "",
+  );
   const trackings = (data.tracking ?? []).filter(validTracking);
-  report.skipped += (data.mayors ?? []).length - mayors.length
-    + (data.tracking ?? []).length - trackings.length;
+  report.skipped +=
+    (data.mayors ?? []).length -
+    mayors.length +
+    (data.tracking ?? []).length -
+    trackings.length;
 
   if (mayors.length) {
     const t = db.transaction("mayors", "readwrite");
@@ -244,7 +282,9 @@ export async function importAll(
   // all-or-nothing guard therefore never fired on the application's own
   // end-of-campaign procedure — erase, reload, restore — and the campaign
   // came back at its template values with the report saying nothing.
-  const current = await tx<Setting[]>(db, "settings", "readonly", (s) => s.getAll());
+  const current = await tx<Setting[]>(db, "settings", "readonly", (s) =>
+    s.getAll(),
+  );
   const held = new Set((current ?? []).map((s) => s.key));
   for (const r of data.settings ?? []) {
     if (!merge || !held.has(r.key)) {
@@ -276,16 +316,22 @@ export async function eraseAll(): Promise<void> {
 // `rank` is NOT among them: the priority list has no rank column — it
 // contains endorsers and nothing else, which is exactly what rank()'s
 // absent-column fallback is for.
-const REQUIRED_COLUMNS = ["insee_code", "first_name", "last_name",
-  "commune", "department"];
+const REQUIRED_COLUMNS = [
+  "insee_code",
+  "first_name",
+  "last_name",
+  "commune",
+  "department",
+];
 
 export function parseCsv(text: string): Mayor[] {
   const rows = parseRecords(text);
   const missing = REQUIRED_COLUMNS.filter((c) => !(c in (rows[0] ?? {})));
   if (missing.length) {
     throw new Error(
-      `colonnes absentes : ${missing.join(", ")} — ce fichier ne vient pas `
-      + "de `task build`, ou son format a changé.");
+      `colonnes absentes : ${missing.join(", ")} — ce fichier ne vient pas ` +
+        "de `task build`, ou son format a changé.",
+    );
   }
   return rows;
 }

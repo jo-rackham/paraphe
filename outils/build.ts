@@ -20,8 +20,14 @@ import { fileURLToPath } from "node:url";
 import { parseRecords, parseRows, writeCsv } from "../noyau/csv.ts";
 import { RANKS } from "../noyau/messages.ts";
 import {
-  closestMatch, collapse, communeLabel, norm, ratio, sexFromTitle,
-  stripControls, titleCase,
+  closestMatch,
+  collapse,
+  communeLabel,
+  norm,
+  ratio,
+  sexFromTitle,
+  stripControls,
+  titleCase,
 } from "../noyau/texte.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,25 +49,56 @@ const OUT = join(ROOT, "out");
 // ---------------------------------------------------------------------------
 const TIER_A: Record<number, Set<string>> = {
   2022: new Set([
-    "ASSELINEAU François", "KAZIB Anasse", "THOUY Hélène", "KOENIG Gaspard",
-    "KUZMANOVIC Georges", "MIGUET Nicolas", "EGGER Clara", "CHICHE Arnaud",
-    "MARTINEZ Antoine", "FORTANÉ Jean-Marc", "SMATI Rafik", "ROCCA Martin",
-    "CAU Marie", "WAECHTER Antoine", "MEURICE Guillaume", "BÉKAERT Corinne",
+    "ASSELINEAU François",
+    "KAZIB Anasse",
+    "THOUY Hélène",
+    "KOENIG Gaspard",
+    "KUZMANOVIC Georges",
+    "MIGUET Nicolas",
+    "EGGER Clara",
+    "CHICHE Arnaud",
+    "MARTINEZ Antoine",
+    "FORTANÉ Jean-Marc",
+    "SMATI Rafik",
+    "ROCCA Martin",
+    "CAU Marie",
+    "WAECHTER Antoine",
+    "MEURICE Guillaume",
+    "BÉKAERT Corinne",
   ]),
   2017: new Set([
-    "JARDIN Alexandre", "MARCHANDISE Charlotte", "TEMARU Oscar",
-    "TAUZIN Didier", "GORGES Jean-Pierre", "TROADEC Christian",
-    "LARROUTUROU Pierre", "FAUDOT Bastien", "MIGUET Nicolas",
-    "MUMBACH Paul", "WAECHTER Antoine", "TONIUTTI Emmanuel",
-    "GUYOT Stéphane", "REGIS Olivier", "NIKONOFF Jacques",
+    "JARDIN Alexandre",
+    "MARCHANDISE Charlotte",
+    "TEMARU Oscar",
+    "TAUZIN Didier",
+    "GORGES Jean-Pierre",
+    "TROADEC Christian",
+    "LARROUTUROU Pierre",
+    "FAUDOT Bastien",
+    "MIGUET Nicolas",
+    "MUMBACH Paul",
+    "WAECHTER Antoine",
+    "TONIUTTI Emmanuel",
+    "GUYOT Stéphane",
+    "REGIS Olivier",
+    "NIKONOFF Jacques",
   ]),
 };
 
 const TIER_B: Record<number, Set<string>> = {
-  2022: new Set(["POUTOU Philippe", "ARTHAUD Nathalie", "LASSALLE Jean",
-    "TAUBIRA Christiane"]),
-  2017: new Set(["ARTHAUD Nathalie", "POUTOU Philippe", "CHEMINADE Jacques",
-    "ASSELINEAU François", "LASSALLE Jean"]),
+  2022: new Set([
+    "POUTOU Philippe",
+    "ARTHAUD Nathalie",
+    "LASSALLE Jean",
+    "TAUBIRA Christiane",
+  ]),
+  2017: new Set([
+    "ARTHAUD Nathalie",
+    "POUTOU Philippe",
+    "CHEMINADE Jacques",
+    "ASSELINEAU François",
+    "LASSALLE Jean",
+  ]),
 };
 
 // Candidates whose campaign explicitly bore on democratic functioning
@@ -70,13 +107,13 @@ const TIER_B: Record<number, Set<string>> = {
 // endorsed that candidacy — not a conviction: we do not presume the
 // official's sincerity, we record what they signed.
 const DEMOCRATIC_THEME = [
-  "MARCHANDISE Charlotte",   // LaPrimaire.org, citizen primary
-  "JARDIN Alexandre",        // citizen movement, hands-on democracy
-  "NIKONOFF Jacques",        // popular sovereignty, constituent assembly
-  "FAUDOT Bastien",          // VIth Republic
-  "EGGER Clara",             // citizens' initiative referendum
-  "KOENIG Gaspard",          // subsidiarity, decentralisation
-  "TROADEC Christian",       // decentralisation, local democracy
+  "MARCHANDISE Charlotte", // LaPrimaire.org, citizen primary
+  "JARDIN Alexandre", // citizen movement, hands-on democracy
+  "NIKONOFF Jacques", // popular sovereignty, constituent assembly
+  "FAUDOT Bastien", // VIth Republic
+  "EGGER Clara", // citizens' initiative referendum
+  "KOENIG Gaspard", // subsidiarity, decentralisation
+  "TROADEC Christian", // decentralisation, local democracy
 ];
 
 const YEARS = [2022, 2017];
@@ -86,30 +123,61 @@ const ENDORSEMENT_FILES: Record<number, string> = {
 };
 
 export interface Endorsement {
-  year: number; civ: string; lastName: string; firstName: string; office: string;
-  commune: string; dept: string; candidate: string;
+  year: number;
+  civ: string;
+  lastName: string;
+  firstName: string;
+  office: string;
+  commune: string;
+  dept: string;
+  candidate: string;
 }
 
 interface Official {
-  dept: string; insee: string; commune: string; lastName: string;
-  firstName: string; sex: string;
+  dept: string;
+  insee: string;
+  commune: string;
+  lastName: string;
+  firstName: string;
+  sex: string;
 }
 
 interface Contact {
-  cardName: string; email: string; phone: string; street: string; zip: string;
-  city: string; website: string; contactForm: string; hours: string;
+  cardName: string;
+  email: string;
+  phone: string;
+  street: string;
+  zip: string;
+  city: string;
+  website: string;
+  contactForm: string;
+  hours: string;
 }
 
 interface Person {
-  civ: string; lastName: string; firstName: string; commune: string;
-  dept: string; office: string; small: string[]; others: string[];
-  years: Set<number>; score: number; status?: string; communeInsee?: string;
+  civ: string;
+  lastName: string;
+  firstName: string;
+  commune: string;
+  dept: string;
+  office: string;
+  small: string[];
+  others: string[];
+  years: Set<number>;
+  score: number;
+  status?: string;
+  communeInsee?: string;
   // normalised forms of the aggregation key: recomputing them from a
   // concatenated key would be wrong, department and commune contain spaces
-  deptN: string; communeN: string;
+  deptN: string;
+  communeN: string;
 }
 
-export interface Target extends Person { rne: Official; contact: Contact | undefined; conf: string }
+export interface Target extends Person {
+  rne: Official;
+  contact: Contact | undefined;
+  conf: string;
+}
 
 // STRICT decoding: `readFileSync(…, "utf8")` replaces an invalid byte with
 // U+FFFD without a word, and the corrupted commune name goes into the
@@ -144,8 +212,13 @@ export function loadEndorsements(): Endorsement[] {
     for (const r of lines.slice(1)) {
       if (r.length < 8) continue;
       rows.push({
-        year, civ: r[0].trim(), lastName: collapse(r[1]), firstName: collapse(r[2]),
-        office: collapse(r[3]), commune: collapse(r[4]), dept: collapse(r[5]),
+        year,
+        civ: r[0].trim(),
+        lastName: collapse(r[1]),
+        firstName: collapse(r[2]),
+        office: collapse(r[3]),
+        commune: collapse(r[4]),
+        dept: collapse(r[5]),
         candidate: collapse(r[6]),
       });
     }
@@ -154,8 +227,9 @@ export function loadEndorsements(): Endorsement[] {
   // ~14,000 endorsements per year, all offices taken together
   if (rows.length < 20000) {
     throw new Error(
-      `only ${rows.length} endorsement(s) read across ${YEARS.length} years, `
-      + "while ~27,700 are expected. Truncated source or changed format.");
+      `only ${rows.length} endorsement(s) read across ${YEARS.length} years, ` +
+        "while ~27,700 are expected. Truncated source or changed format.",
+    );
   }
   return rows;
 }
@@ -177,10 +251,11 @@ export function checkCivilities(rows: { civ: string }[]): void {
   if (!unknown.size) return;
   const list = [...unknown].map(([v, n]) => `${JSON.stringify(v)} (${n})`);
   throw new Error(
-    "civility outside the domain in the endorsement files: "
-    + `${list.join(", ")}. The sex code is the discriminant that tells two `
-    + "namesakes apart; accepting it would silently disable it. Add the form "
-    + "to sexFromTitle() after checking.");
+    "civility outside the domain in the endorsement files: " +
+      `${list.join(", ")}. The sex code is the discriminant that tells two ` +
+      "namesakes apart; accepting it would silently disable it. Add the form " +
+      "to sexFromTitle() after checking.",
+  );
 }
 
 function loadRne(): {
@@ -197,12 +272,19 @@ function loadRne(): {
     // collectivity" column
     const dept = collapse(r[1]) || collapse(r[3]);
     const official: Official = {
-      dept, insee: r[4], commune: r[5], lastName: collapse(r[6]),
-      firstName: collapse(r[7]), sex: collapse(r[8]).toUpperCase(),
+      dept,
+      insee: r[4],
+      commune: r[5],
+      lastName: collapse(r[6]),
+      firstName: collapse(r[7]),
+      sex: collapse(r[8]).toUpperCase(),
     };
     const d = norm(dept);
     let communes = byCommune.get(d);
-    if (!communes) { communes = new Map(); byCommune.set(d, communes); }
+    if (!communes) {
+      communes = new Map();
+      byCommune.set(d, communes);
+    }
     communes.set(norm(official.commune), official);
     const people = byPerson.get(d);
     if (people) people.push(official);
@@ -212,14 +294,16 @@ function loadRne(): {
   // floor, the crossing carries on and writes 34,826 rows of garbage.
   if (byPerson.size < 90) {
     throw new Error(
-      `rne_maires.csv yielded only ${byPerson.size} department(s), while ~104 `
-      + "are expected. Truncated source or changed format.");
+      `rne_maires.csv yielded only ${byPerson.size} department(s), while ~104 ` +
+        "are expected. Truncated source or changed format.",
+    );
   }
   return { byCommune, byPerson };
 }
 
 interface OpeningRange {
-  nom_jour_debut?: string; nom_jour_fin?: string;
+  nom_jour_debut?: string;
+  nom_jour_fin?: string;
   [k: string]: string | undefined;
 }
 
@@ -230,7 +314,8 @@ export function compactHours(raw: string): string {
   for (const p of ranges) {
     const d1 = p.nom_jour_debut ?? "";
     const d2 = p.nom_jour_fin ?? "";
-    const days = !d2 || d1 === d2 ? d1.slice(0, 3) : `${d1.slice(0, 3)}-${d2.slice(0, 3)}`;
+    const days =
+      !d2 || d1 === d2 ? d1.slice(0, 3) : `${d1.slice(0, 3)}-${d2.slice(0, 3)}`;
     const hours: string[] = [];
     for (const i of [1, 2]) {
       const from = (p[`valeur_heure_debut_${i}`] ?? "").slice(0, 5);
@@ -242,10 +327,15 @@ export function compactHours(raw: string): string {
   return parts.join(" ; ");
 }
 
-interface Value { valeur?: string }
+interface Value {
+  valeur?: string;
+}
 interface Address {
-  type_adresse?: string; complement1?: string; numero_voie?: string;
-  code_postal?: string; nom_commune?: string;
+  type_adresse?: string;
+  complement1?: string;
+  numero_voie?: string;
+  code_postal?: string;
+  nom_commune?: string;
 }
 
 // The RNE and the endorsement files are read BY POSITION: r[4] is the
@@ -268,27 +358,49 @@ export const RNE_COLUMNS: [number, string[]][] = [
 // in 2022, "Candidat-e parrainé-e" in 2017): several spellings are
 // accepted, an unknown one is not.
 export const ENDORSEMENT_COLUMNS: [number, string[]][] = [
-  [0, ["Civilité"]], [1, ["Nom"]], [2, ["Prénom"]], [3, ["Mandat"]],
-  [4, ["Circonscription"]], [5, ["Département"]],
+  [0, ["Civilité"]],
+  [1, ["Nom"]],
+  [2, ["Prénom"]],
+  [3, ["Mandat"]],
+  [4, ["Circonscription"]],
+  [5, ["Département"]],
   [6, ["Candidat", "Candidat-e parrainé-e"]],
 ];
 
-export function checkHeader(file: string, header: string[], expected: [number, string[]][]): void {
+export function checkHeader(
+  file: string,
+  header: string[],
+  expected: [number, string[]][],
+): void {
   const wrong = expected
-    .filter(([i, names]) => !names.some((n) => norm(header[i] ?? "") === norm(n)))
-    .map(([i, names]) => `${i}: attendu ${names.map((n) => JSON.stringify(n)).join(" ou ")}, `
-      + `trouvé ${JSON.stringify(header[i] ?? "")}`);
+    .filter(
+      ([i, names]) => !names.some((n) => norm(header[i] ?? "") === norm(n)),
+    )
+    .map(
+      ([i, names]) =>
+        `${i}: attendu ${names.map((n) => JSON.stringify(n)).join(" ou ")}, ` +
+        `trouvé ${JSON.stringify(header[i] ?? "")}`,
+    );
   if (wrong.length) {
     throw new Error(
-      `${file}: the columns have moved — ${wrong.join(" ; ")}. The file is `
-      + "read by position: one column inserted upstream shifts the identity "
-      + "of every mayor.");
+      `${file}: the columns have moved — ${wrong.join(" ; ")}. The file is ` +
+        "read by position: one column inserted upstream shifts the identity " +
+        "of every mayor.",
+    );
   }
 }
 
-const DIRECTORY_COLUMNS = ["pivot", "code_insee_commune", "nom",
-  "adresse_courriel", "telephone", "site_internet", "adresse",
-  "formulaire_contact", "plage_ouverture"];
+const DIRECTORY_COLUMNS = [
+  "pivot",
+  "code_insee_commune",
+  "nom",
+  "adresse_courriel",
+  "telephone",
+  "site_internet",
+  "adresse",
+  "formulaire_contact",
+  "plage_ouverture",
+];
 
 function loadDirectory(): Map<string, Contact> {
   const contacts = new Map<string, Contact>();
@@ -300,9 +412,10 @@ function loadDirectory(): Map<string, Contact> {
   const missing = DIRECTORY_COLUMNS.filter((c) => !header.has(c));
   if (missing.length) {
     throw new Error(
-      `columns missing from annuaire_mairies.csv: ${missing.join(", ")} — `
-      + "the directory format changed, the crossing would produce cards "
-      + "without contact details.");
+      `columns missing from annuaire_mairies.csv: ${missing.join(", ")} — ` +
+        "the directory format changed, the crossing would produce cards " +
+        "without contact details.",
+    );
   }
   // one card per commune: the main town hall first — "Mairie déléguée -
   // Pruillé" is shorter than "Mairie - Longuenée-en-Anjou" but it is not
@@ -315,24 +428,32 @@ function loadDirectory(): Map<string, Contact> {
     a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
 
   for (const r of parseRecords(raw)) {
-    const pivots = jsonOrDefault<{ type_service_local?: string }[]>(r.pivot, null as never);
+    const pivots = jsonOrDefault<{ type_service_local?: string }[]>(
+      r.pivot,
+      null as never,
+    );
     if (pivots === null) continue;
     const types = new Set(pivots.map((p) => p.type_service_local));
     if (!types.has("mairie") && !types.has("mairie_com")) continue; // annexes, mobile town halls
     const insee = (r.code_insee_commune ?? "").trim();
     if (!insee) continue;
     const existing = contacts.get(insee);
-    if (existing && beforeOrEqual(rankCard(existing.cardName), rankCard(r.nom))) continue;
+    if (existing && beforeOrEqual(rankCard(existing.cardName), rankCard(r.nom)))
+      continue;
 
     const phones = jsonOrDefault<Value[]>(r.telephone, []);
     const sites = jsonOrDefault<Value[]>(r.site_internet, []);
     const addresses = jsonOrDefault<Address[]>(r.adresse, []);
-    const addr = addresses.find((a) => a.type_adresse === "Adresse") ?? addresses[0] ?? {};
+    const addr =
+      addresses.find((a) => a.type_adresse === "Adresse") ?? addresses[0] ?? {};
     contacts.set(insee, {
       cardName: r.nom,
       email: (r.adresse_courriel ?? "").trim(),
       phone: phones[0]?.valeur ?? "",
-      street: [addr.complement1 ?? "", addr.numero_voie ?? ""].filter(Boolean).join(" ").trim(),
+      street: [addr.complement1 ?? "", addr.numero_voie ?? ""]
+        .filter(Boolean)
+        .join(" ")
+        .trim(),
       zip: addr.code_postal ?? "",
       city: addr.nom_commune ?? "",
       website: sites[0]?.valeur ?? "",
@@ -344,9 +465,10 @@ function loadDirectory(): Map<string, Contact> {
   // a halt.
   if (contacts.size < 30000) {
     throw new Error(
-      `annuaire_mairies.csv produced only ${contacts.size} contact card(s), `
-      + "while ~34,800 are expected. Truncated source or changed format — "
-      + "without contacts the produced list is unusable.");
+      `annuaire_mairies.csv produced only ${contacts.size} contact card(s), ` +
+        "while ~34,800 are expected. Truncated source or changed format — " +
+        "without contacts the produced list is unusable.",
+    );
   }
   return contacts;
 }
@@ -365,7 +487,8 @@ export function compareFirstNames(a: string, b: string): string {
   if (!ta.length || !tb.length) return "unsure";
   const sa = new Set(ta);
   const sb = new Set(tb);
-  const subset = (x: Set<string>, y: Set<string>) => [...x].every((v) => y.has(v));
+  const subset = (x: Set<string>, y: Set<string>) =>
+    [...x].every((v) => y.has(v));
   if (subset(sa, sb) || subset(sb, sa)) return "ok";
   // only common positions are compared: "Jean-Louis" and "Louis" do not
   // have the same number of tokens
@@ -373,8 +496,8 @@ export function compareFirstNames(a: string, b: string): string {
   for (let i = 0; i < Math.min(ta.length, tb.length); i++) {
     worst = Math.min(worst, ratio(ta[i], tb[i]));
   }
-  if (worst >= 0.80) return "ok";        // Henry/Henri, Magali/Magalli
-  if (worst >= 0.60) return "unsure";    // Jacky/Jacquy: plausible, to check
+  if (worst >= 0.8) return "ok"; // Henry/Henri, Magali/Magalli
+  if (worst >= 0.6) return "unsure"; // Jacky/Jacquy: plausible, to check
   return "different";
 }
 
@@ -406,14 +529,21 @@ export function personKey(
   p: { dept: string; commune: string; lastName: string; firstName: string },
   discriminator = "",
 ): string {
-  return JSON.stringify([norm(p.dept), norm(p.commune), norm(p.lastName),
-    norm(p.firstName).split(" ").filter(Boolean)[0] ?? "", discriminator]);
+  return JSON.stringify([
+    norm(p.dept),
+    norm(p.commune),
+    norm(p.lastName),
+    norm(p.firstName).split(" ").filter(Boolean)[0] ?? "",
+    discriminator,
+  ]);
 }
 
 /** How well a match is established; 0 is the best. */
 export function confidenceRank(conf: string): number {
-  return ["exact", "commune approchée", "retrouvé par nom"].indexOf(conf) + 1
-    || Number.MAX_SAFE_INTEGER;
+  return (
+    ["exact", "commune approchée", "retrouvé par nom"].indexOf(conf) + 1 ||
+    Number.MAX_SAFE_INTEGER
+  );
 }
 
 /**
@@ -423,19 +553,24 @@ export function confidenceRank(conf: string): number {
  * throws: a duplicated INSEE in the output is a mayor thanked for a
  * stranger's endorsement.
  */
-export function dedupeByInsee(
-  rows: Target[],
-): { kept: Target[]; mergedSpellings: number } {
+export function dedupeByInsee(rows: Target[]): {
+  kept: Target[];
+  mergedSpellings: number;
+} {
   const byInsee = new Map<string, Target>();
   let mergedSpellings = 0;
   for (const r of rows) {
     const k = r.rne.insee;
     const target = byInsee.get(k);
-    if (!target) { byInsee.set(k, r); continue; }
+    if (!target) {
+      byInsee.set(k, r);
+      continue;
+    }
     if (compareFirstNames(target.firstName, r.firstName) === "different") {
       throw new Error(
-        `two different people matched onto INSEE ${k}: `
-        + `${target.firstName} ${target.lastName} / ${r.firstName} ${r.lastName}`);
+        `two different people matched onto INSEE ${k}: ` +
+          `${target.firstName} ${target.lastName} / ${r.firstName} ${r.lastName}`,
+      );
     }
     mergedSpellings++;
     // The survivor keeps the BEST-established match, not the first one
@@ -452,12 +587,15 @@ export function dedupeByInsee(
     target.small = [...new Set([...target.small, ...r.small])].sort(cmp);
     target.others = [...new Set([...target.others, ...r.others])].sort(cmp);
     for (const y of r.years) target.years.add(y);
-    target.score = 2 * target.small.filter((t) => t.includes("(A)")).length
-      + target.small.filter((t) => t.includes("(B)")).length
-      + (target.years.size >= 2 ? 1 : 0);
+    target.score =
+      2 * target.small.filter((t) => t.includes("(A)")).length +
+      target.small.filter((t) => t.includes("(B)")).length +
+      (target.years.size >= 2 ? 1 : 0);
   }
-  const kept = [...byInsee.values()].sort((a, b) =>
-    b.score - a.score || cmp(a.dept, b.dept) || cmp(a.commune, b.commune));
+  const kept = [...byInsee.values()].sort(
+    (a, b) =>
+      b.score - a.score || cmp(a.dept, b.dept) || cmp(a.commune, b.commune),
+  );
   return { kept, mergedSpellings };
 }
 
@@ -477,18 +615,28 @@ export function keyAmong(
 ): string {
   const key = personKey(p);
   const sharing = seen.get(key);
-  if (sharing && compareFirstNames(sharing.firstName, p.firstName) === "different") {
+  if (
+    sharing &&
+    compareFirstNames(sharing.firstName, p.firstName) === "different"
+  ) {
     return personKey(p, norm(p.firstName));
   }
   return key;
 }
 
-export function compareIdentity(rec: { lastName: string; firstName: string; civ: string },
-  row: Official): string {
+export function compareIdentity(
+  rec: { lastName: string; firstName: string; civ: string },
+  row: Official,
+): string {
   const lastP = norm(rec.lastName);
   const lastR = norm(row.lastName);
-  if (!(lastP === lastR || lastR.split(" ").includes(lastP)
-        || lastP.split(" ").includes(lastR))) {
+  if (
+    !(
+      lastP === lastR ||
+      lastR.split(" ").includes(lastP) ||
+      lastP.split(" ").includes(lastR)
+    )
+  ) {
     return "different";
   }
   const verdict = compareFirstNames(rec.firstName, row.firstName);
@@ -498,7 +646,8 @@ export function compareIdentity(rec: { lastName: string; firstName: string; civ:
     // file's civility is what is wrong ("M. Sophie PRADEL"), not two
     // different people. Assert nothing: the doubt goes to 03 "to check",
     // never to 02 "successor in place".
-    if (lastP === lastR && norm(rec.firstName) === norm(row.firstName)) return "unsure";
+    if (lastP === lastR && norm(rec.firstName) === norm(row.firstName))
+      return "unsure";
     return verdict === "ok" ? "unsure" : "different";
   }
   return verdict;
@@ -518,7 +667,10 @@ function candidateProseName(candidate: string): string {
   const lastNames: string[] = [];
   const firstNames: string[] = [];
   for (const tok of candidate.split(" ").filter(Boolean)) {
-    (tok === tok.toUpperCase() && tok !== tok.toLowerCase() ? lastNames : firstNames).push(tok);
+    (tok === tok.toUpperCase() && tok !== tok.toLowerCase()
+      ? lastNames
+      : firstNames
+    ).push(tok);
   }
   return [...firstNames, ...lastNames.map(titleCase)].join(" ");
 }
@@ -532,7 +684,10 @@ function maxBy<T>(items: T[], key: (x: T) => string): T {
   let bestKey = key(items[0]);
   for (const x of items.slice(1)) {
     const k = key(x);
-    if (k > bestKey) { best = x; bestKey = k; }
+    if (k > bestKey) {
+      best = x;
+      bestKey = k;
+    }
   }
   return best;
 }
@@ -578,7 +733,9 @@ export function main(): void {
   }
 
   // totals per candidate (for the report) — first-appearance order
-  const totals = new Map<number, Map<string, number>>(YEARS.map((y) => [y, new Map()]));
+  const totals = new Map<number, Map<string, number>>(
+    YEARS.map((y) => [y, new Map()]),
+  );
   for (const p of endorsements) {
     const t = totals.get(p.year) as Map<string, number>;
     t.set(p.candidate, (t.get(p.candidate) ?? 0) + 1);
@@ -587,7 +744,9 @@ export function main(): void {
   for (const y of [2017, 2022]) {
     for (const c of [...TIER_A[y], ...TIER_B[y]]) {
       if (!(totals.get(y) as Map<string, number>).has(c)) {
-        throw new Error(`unknown candidate in the ${y} configuration: ${JSON.stringify(c)}`);
+        throw new Error(
+          `unknown candidate in the ${y} configuration: ${JSON.stringify(c)}`,
+        );
       }
     }
   }
@@ -605,9 +764,18 @@ export function main(): void {
     let rec = persons.get(key);
     if (!rec) {
       rec = {
-        civ: p.civ, lastName: p.lastName, firstName: p.firstName,
-        commune: p.commune, dept: p.dept, office: p.office, small: [],
-        others: [], years: new Set(), score: 0, deptN, communeN,
+        civ: p.civ,
+        lastName: p.lastName,
+        firstName: p.firstName,
+        commune: p.commune,
+        dept: p.dept,
+        office: p.office,
+        small: [],
+        others: [],
+        years: new Set(),
+        score: 0,
+        deptN,
+        communeN,
       };
       persons.set(key, rec);
     }
@@ -645,7 +813,10 @@ export function main(): void {
       // high cutoff: at 0.87, "Goncourt" catches "Voncourt" and
       // "Esnes-en-Argonne" catches "Gesnes-en-Argonne"
       const close = closestMatch(communeN, deptCommunes.keys(), 0.93);
-      if (close !== null) { row = deptCommunes.get(close); approx = true; }
+      if (close !== null) {
+        row = deptCommunes.get(close);
+        approx = true;
+      }
     }
 
     const verdict = row !== undefined ? compareIdentity(rec, row) : null;
@@ -672,8 +843,11 @@ export function main(): void {
       // INSEE code of its own, it is neither a rename nor a merger.
       // successor in place: the commune IS in the RNE, under someone else
       const counterProof = verdict === "different" && !approx;
-      const hits = counterProof ? [] : (byPerson.get(deptN) ?? [])
-        .filter((r) => compareIdentity(rec, r) === "ok");
+      const hits = counterProof
+        ? []
+        : (byPerson.get(deptN) ?? []).filter(
+            (r) => compareIdentity(rec, r) === "ok",
+          );
       // A commune absent from the RNE is not thereby a merged commune: it
       // may simply have no mayor row this month — 912 communes have a town
       // hall in the directory and none in the RNE. The signed commune's own
@@ -681,12 +855,16 @@ export function main(): void {
       // namesake leads (Vertus and Blancs-Coteaux are both 51612); a
       // DIFFERENT code means two distinct communes, and the fallback would
       // thank someone 130 km away for an endorsement that is not theirs.
-      const signedInsee = row === undefined
-        ? (communesByLabel.get(communeN) ?? []).find(
-          (insee) => departmentOfInsee(insee) === deptCode.get(deptN))
-        : undefined;
-      const otherCommune = hits.length === 1 && signedInsee !== undefined
-        && signedInsee !== hits[0].insee;
+      const signedInsee =
+        row === undefined
+          ? (communesByLabel.get(communeN) ?? []).find(
+              (insee) => departmentOfInsee(insee) === deptCode.get(deptN),
+            )
+          : undefined;
+      const otherCommune =
+        hits.length === 1 &&
+        signedInsee !== undefined &&
+        signedInsee !== hits[0].insee;
       if (hits.length === 1 && !otherCommune) {
         rneRow = hits[0];
         conf = "retrouvé par nom (commune renommée/fusionnée)";
@@ -702,16 +880,26 @@ export function main(): void {
       } else {
         // assert nothing: neither "still mayor" nor "successor"
         count("à vérifier à la main");
-        rec.status = "à vérifier : "
-          + (otherCommune ? "commune sans maire au RNE, homonyme dans une autre commune"
-            : row === undefined ? "commune introuvable"
-              : "identité proche mais non certaine")
-          + (row === undefined ? "" : ` (RNE : ${row.firstName} ${row.lastName}, ${row.commune})`);
+        rec.status =
+          "à vérifier : " +
+          (otherCommune
+            ? "commune sans maire au RNE, homonyme dans une autre commune"
+            : row === undefined
+              ? "commune introuvable"
+              : "identité proche mais non certaine") +
+          (row === undefined
+            ? ""
+            : ` (RNE : ${row.firstName} ${row.lastName}, ${row.commune})`);
         unmatched.push(rec);
         continue;
       }
     }
-    stillMayor.push({ ...rec, rne: rneRow, contact: contacts.get(rneRow.insee), conf });
+    stillMayor.push({
+      ...rec,
+      rne: rneRow,
+      contact: contacts.get(rneRow.insee),
+      conf,
+    });
   }
 
   // dedup: the same person counted twice when the commune or name spelling
@@ -724,24 +912,49 @@ export function main(): void {
   const priority = (rec: Person): string =>
     rec.small.some((t) => t.includes("(A)")) ? "P1" : "P2";
   const democraticTheme = (rec: Person): string =>
-    [...rec.small, ...rec.others].some((t) => DEMOCRATIC_THEME.some((c) => t.includes(c)))
-      ? "oui" : "";
+    [...rec.small, ...rec.others].some((t) =>
+      DEMOCRATIC_THEME.some((c) => t.includes(c)),
+    )
+      ? "oui"
+      : "";
   const common = (rec: Person): Record<string, string> => ({
     priority: priority(rec),
     score: String(rec.score),
     democratic_theme_endorsement: democraticTheme(rec),
-    title: rec.civ, first_name: rec.firstName, last_name: rec.lastName,
-    commune: rec.commune, department: rec.dept,
+    title: rec.civ,
+    first_name: rec.firstName,
+    last_name: rec.lastName,
+    commune: rec.commune,
+    department: rec.dept,
     small_candidate_endorsements: [...rec.small].sort(cmp).join(" | "),
     other_endorsements: [...rec.others].sort(cmp).join(" | "),
   });
 
-  const cols1 = ["priority", "score", "democratic_theme_endorsement",
-    "title", "first_name", "last_name", "commune", "department", "insee_code",
-    "small_candidate_endorsements", "other_endorsements", "recent_candidate",
-    "recent_year", "email", "phone", "town_hall_hours", "postal_address",
-    "postal_code", "city", "website", "contact_form", "commune_2026",
-    "matching_confidence"];
+  const cols1 = [
+    "priority",
+    "score",
+    "democratic_theme_endorsement",
+    "title",
+    "first_name",
+    "last_name",
+    "commune",
+    "department",
+    "insee_code",
+    "small_candidate_endorsements",
+    "other_endorsements",
+    "recent_candidate",
+    "recent_year",
+    "email",
+    "phone",
+    "town_hall_hours",
+    "postal_address",
+    "postal_code",
+    "city",
+    "website",
+    "contact_form",
+    "commune_2026",
+    "matching_confidence",
+  ];
 
   const rows1 = kept.map((r) => {
     const c = r.contact;
@@ -757,10 +970,16 @@ export function main(): void {
     // directory first, then the endorsement file if it designates the same
     // commune, else the RNE, which writes "Rieux-En-Val".
     const commune = communeLabel(
-      communeLabel(rne.commune, c?.city ?? ""), r.commune);
+      communeLabel(rne.commune, c?.city ?? ""),
+      r.commune,
+    );
     const official: Person = {
-      ...r, lastName: rne.lastName, firstName: rne.firstName, dept: rne.dept,
-      civ, commune,
+      ...r,
+      lastName: rne.lastName,
+      firstName: rne.firstName,
+      dept: rne.dept,
+      civ,
+      commune,
     };
     // most recent "small candidate" endorsement: fields ready for the mass
     // mailing ("en {annee_recente}, vous avez présenté {candidat_recent}")
@@ -782,19 +1001,43 @@ export function main(): void {
       matching_confidence: r.conf,
     };
   });
-  writeFileSync(join(OUT, "01_maires_cibles_prioritaires.csv"),
-    writeCsv(cols1, rows1), "utf8");
+  writeFileSync(
+    join(OUT, "01_maires_cibles_prioritaires.csv"),
+    writeCsv(cols1, rows1),
+    "utf8",
+  );
 
-  const notInScope = new Set(["insee_code", "email", "phone", "town_hall_hours",
-    "postal_address", "postal_code", "city", "website", "contact_form",
-    "commune_2026", "matching_confidence", "recent_candidate", "recent_year"]);
+  const notInScope = new Set([
+    "insee_code",
+    "email",
+    "phone",
+    "town_hall_hours",
+    "postal_address",
+    "postal_code",
+    "city",
+    "website",
+    "contact_form",
+    "commune_2026",
+    "matching_confidence",
+    "recent_candidate",
+    "recent_year",
+  ]);
   const cols2 = [...cols1.filter((c) => !notInScope.has(c)), "status"];
-  for (const [name, rows] of [["02_anciens_parrains.csv", former],
-    ["03_non_apparies.csv", unmatched]] as [string, Person[]][]) {
-    const sorted = [...rows].sort((a, b) => b.score - a.score || cmp(a.dept, b.dept));
-    writeFileSync(join(OUT, name),
-      writeCsv(cols2, sorted.map((r) => ({ ...common(r), status: r.status ?? "" }))),
-      "utf8");
+  for (const [name, rows] of [
+    ["02_anciens_parrains.csv", former],
+    ["03_non_apparies.csv", unmatched],
+  ] as [string, Person[]][]) {
+    const sorted = [...rows].sort(
+      (a, b) => b.score - a.score || cmp(a.dept, b.dept),
+    );
+    writeFileSync(
+      join(OUT, name),
+      writeCsv(
+        cols2,
+        sorted.map((r) => ({ ...common(r), status: r.status ?? "" })),
+      ),
+      "utf8",
+    );
   }
 
   // --- full base: every mayor in France, ordered by signal ------------------
@@ -811,12 +1054,32 @@ export function main(): void {
     if (!held || r.score > held.score) communesThatEndorsed.set(i, r);
   }
 
-  const cols4 = ["rank", "rank_label", "score", "priority",
-    "democratic_theme_endorsement", "title", "first_name", "last_name",
-    "commune", "department", "insee_code", "endorsement_history",
-    "predecessor", "predecessor_mayor", "recent_candidate", "recent_year",
-    "email", "phone", "town_hall_hours", "postal_address", "postal_code",
-    "city", "website", "contact_form"];
+  const cols4 = [
+    "rank",
+    "rank_label",
+    "score",
+    "priority",
+    "democratic_theme_endorsement",
+    "title",
+    "first_name",
+    "last_name",
+    "commune",
+    "department",
+    "insee_code",
+    "endorsement_history",
+    "predecessor",
+    "predecessor_mayor",
+    "recent_candidate",
+    "recent_year",
+    "email",
+    "phone",
+    "town_hall_hours",
+    "postal_address",
+    "postal_code",
+    "city",
+    "website",
+    "contact_form",
+  ];
   const rankOrder = Object.keys(RANKS);
   const baseRows: Record<string, string>[] = [];
   const rankCounts = new Map<string, number>(rankOrder.map((r) => [r, 0]));
@@ -850,8 +1113,12 @@ export function main(): void {
         // présenté X en 2017 et 2022" — and the 2017 half belongs to the
         // 2014-2020 term, two municipal elections back. Those 380 lines
         // fall to "par le passé", which is true of both years.
-        predecessorMayor = past.office === "Maire" && past.years.has(2022)
-          && !past.years.has(2017) ? "oui" : "";
+        predecessorMayor =
+          past.office === "Maire" &&
+          past.years.has(2022) &&
+          !past.years.has(2017)
+            ? "oui"
+            : "";
       } else {
         rankKey = "no_signal";
         hist = "";
@@ -859,31 +1126,47 @@ export function main(): void {
       rankCounts.set(rankKey, (rankCounts.get(rankKey) ?? 0) + 1);
       const recent = target ? maxBy(target.small, tagYear) : null;
       baseRows.push({
-        rank: rankKey, rank_label: RANKS[rankKey],
+        rank: rankKey,
+        rank_label: RANKS[rankKey],
         score: String(target ? target.score : 0),
         priority: target ? priority(target) : "",
         democratic_theme_endorsement: target ? democraticTheme(target) : "",
         title: row.sex === "F" ? "Mme" : "M.",
-        first_name: row.firstName, last_name: row.lastName,
+        first_name: row.firstName,
+        last_name: row.lastName,
         commune: communeLabel(row.commune, c?.city ?? ""),
-        department: row.dept, insee_code: insee,
+        department: row.dept,
+        insee_code: insee,
         endorsement_history: hist,
-        predecessor, predecessor_mayor: predecessorMayor,
-        recent_candidate: recent ? candidateProseName(tagCandidate(recent)) : "",
+        predecessor,
+        predecessor_mayor: predecessorMayor,
+        recent_candidate: recent
+          ? candidateProseName(tagCandidate(recent))
+          : "",
         recent_year: recent ? tagYear(recent) : "",
-        email: c?.email ?? "", phone: c?.phone ?? "",
+        email: c?.email ?? "",
+        phone: c?.phone ?? "",
         town_hall_hours: c?.hours ?? "",
         postal_address: stripControls(c?.street ?? ""),
-        postal_code: c?.zip ?? "", city: stripControls(c?.city ?? ""),
-        website: c?.website ?? "", contact_form: c?.contactForm ?? "",
+        postal_code: c?.zip ?? "",
+        city: stripControls(c?.city ?? ""),
+        website: c?.website ?? "",
+        contact_form: c?.contactForm ?? "",
       });
     }
   }
-  baseRows.sort((a, b) =>
-    rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank)
-    || Number(b.score) - Number(a.score)
-    || cmp(a.department, b.department) || cmp(a.commune, b.commune));
-  writeFileSync(join(OUT, "04_base_complete.csv"), writeCsv(cols4, baseRows), "utf8");
+  baseRows.sort(
+    (a, b) =>
+      rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank) ||
+      Number(b.score) - Number(a.score) ||
+      cmp(a.department, b.department) ||
+      cmp(a.commune, b.commune),
+  );
+  writeFileSync(
+    join(OUT, "04_base_complete.csv"),
+    writeCsv(cols4, baseRows),
+    "utf8",
+  );
 
   // --- report (French: it is a document for the campaign team) -------------
   const nEmail = kept.filter((r) => r.contact?.email).length;
@@ -891,7 +1174,10 @@ export function main(): void {
   const p1 = kept.filter((r) => r.small.some((t) => t.includes("(A)"))).length;
   const both = kept.filter((r) => r.years.size >= 2).length;
   const total = (y: number) =>
-    [...(totals.get(y) as Map<string, number>).values()].reduce((s, n) => s + n, 0);
+    [...(totals.get(y) as Map<string, number>).values()].reduce(
+      (s, n) => s + n,
+      0,
+    );
   const today = new Date();
   const dd = String(today.getDate()).padStart(2, "0");
   const mm = String(today.getMonth() + 1).padStart(2, "0");
@@ -901,35 +1187,48 @@ export function main(): void {
     `- Parrainages chargés : ${endorsements.length} (2022: ${total(2022)}, 2017: ${total(2017)})`,
     `- Maires parrains d'un petit candidat (2017 et/ou 2022) : ${targets.length}`,
     `- **Toujours maires en 2026 : ${kept.length}** (P1 signal fort : ${p1} ; les deux années : ${both})`,
-    `  - avec email mairie : ${nEmail} (${Math.floor(100 * nEmail / Math.max(kept.length, 1))} %) ; avec adresse postale : ${nAddr}`,
-    `- Plus maires en 2026 : ${former.length} ; à vérifier à la main : `
-    + `${unmatched.length}`,
+    `  - avec email mairie : ${nEmail} (${Math.floor((100 * nEmail) / Math.max(kept.length, 1))} %) ; avec adresse postale : ${nAddr}`,
+    `- Plus maires en 2026 : ${former.length} ; à vérifier à la main : ` +
+      `${unmatched.length}`,
     `\n## Matching RNE (${dd}/${mm}/${today.getFullYear()})\n`,
-    ...[...stats.entries()].sort((a, b) => cmp(a[0], b[0])).map(([k, v]) => `- ${k} : ${v}`),
+    ...[...stats.entries()]
+      .sort((a, b) => cmp(a[0], b[0]))
+      .map(([k, v]) => `- ${k} : ${v}`),
     `- fusions de graphies (même INSEE, deux écritures) : ${mergedSpellings}`,
-    `- contrôle : ${kept.length + mergedSpellings} + ${former.length} + `
-    + `${unmatched.length} = ${targets.length} cibles`,
+    `- contrôle : ${kept.length + mergedSpellings} + ${former.length} + ` +
+      `${unmatched.length} = ${targets.length} cibles`,
     "\n## Candidats et classification (ajustable dans outils/build.ts)\n",
   ];
   for (const y of [2022, 2017]) {
-    lines.push(`\n### ${y}\n`, "| Candidat | Parrainages | Classe |", "|---|---|---|");
+    lines.push(
+      `\n### ${y}\n`,
+      "| Candidat | Parrainages | Classe |",
+      "|---|---|---|",
+    );
     const entries = [...(totals.get(y) as Map<string, number>).entries()];
     // stable sort, like Python: at equal count, appearance order
     entries.sort((x, z) => z[1] - x[1]);
     for (const [cand, n] of entries) {
-      const cl = TIER_A[y].has(cand) ? "A (signal fort)"
-        : TIER_B[y].has(cand) ? "B (signal réel)" : "— (non compté)";
+      const cl = TIER_A[y].has(cand)
+        ? "A (signal fort)"
+        : TIER_B[y].has(cand)
+          ? "B (signal réel)"
+          : "— (non compté)";
       lines.push(`| ${cand} | ${n} | ${cl} |`);
     }
   }
-  lines.push("\n## Base complète (04_base_complete.csv)\n",
+  lines.push(
+    "\n## Base complète (04_base_complete.csv)\n",
     `- ${baseRows.length} maires (tous les maires de France)`,
-    ...rankOrder.map((k) => `  - ${RANKS[k]} : ${rankCounts.get(k)}`));
+    ...rankOrder.map((k) => `  - ${RANKS[k]} : ${rankCounts.get(k)}`),
+  );
   writeFileSync(join(OUT, "rapport.md"), lines.join("\n") + "\n", "utf8");
 
-  console.log(`targets=${targets.length} still_mayors=${kept.length} `
-    + `(P1=${p1}, both_years=${both}, email=${nEmail}) `
-    + `former=${former.length} unmatched=${unmatched.length}`);
+  console.log(
+    `targets=${targets.length} still_mayors=${kept.length} ` +
+      `(P1=${p1}, both_years=${both}, email=${nEmail}) ` +
+      `former=${former.length} unmatched=${unmatched.length}`,
+  );
   for (const [k, v] of [...stats.entries()].sort((a, b) => cmp(a[0], b[0]))) {
     console.log(`  ${k}: ${v}`);
   }

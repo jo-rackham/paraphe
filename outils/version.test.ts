@@ -24,8 +24,10 @@ describe("the version", () => {
   it("is the same in every file that carries one", () => {
     const found = versions();
     expect(Object.keys(found).length).toBeGreaterThan(3);
-    expect(new Set(Object.values(found)),
-      `versions disagree: ${JSON.stringify(found)}`).toEqual(new Set([original]));
+    expect(
+      new Set(Object.values(found)),
+      `versions disagree: ${JSON.stringify(found)}`,
+    ).toEqual(new Set([original]));
   });
 
   it("moves everywhere at once, or nowhere", () => {
@@ -35,12 +37,14 @@ describe("the version", () => {
 
   it("leaves the chart's comments in place", () => {
     const before = readFileSync(CHART, "utf8");
-    const comments = (s: string) => s.split("\n").filter((l) => l.startsWith("#"));
+    const comments = (s: string) =>
+      s.split("\n").filter((l) => l.startsWith("#"));
     writeVersion("9.9.9");
     const after = readFileSync(CHART, "utf8");
     expect(comments(after)).toEqual(comments(before));
     // and only the two version lines moved
-    const differing = before.split("\n")
+    const differing = before
+      .split("\n")
       .map((l, i) => [l, after.split("\n")[i]])
       .filter(([a, b]) => a !== b);
     expect(differing.length).toBe(2);
@@ -48,8 +52,9 @@ describe("the version", () => {
 
   it("refuses anything that is not x.y.z", () => {
     for (const bad of ["v1.0.0", "1.0", "latest", "1.0.0.0", ""]) {
-      expect(() => writeVersion(bad), `« ${bad} » was accepted`)
-        .toThrow(/x\.y\.z/);
+      expect(() => writeVersion(bad), `« ${bad} » was accepted`).toThrow(
+        /x\.y\.z/,
+      );
     }
   });
 });
