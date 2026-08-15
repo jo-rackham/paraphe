@@ -460,4 +460,60 @@ describe("the deployment surfaces name real variables", () => {
     }
     expect(unknown).toEqual([]);
   });
+
+  // And the other way round, which nothing checked: a setting declared in
+  // api/settings.go and named in no operator-facing file exists only for
+  // whoever reads Go. PARAPHE_LOG_LEVEL was exactly that — the one knob an
+  // operator paged at 2am reaches for, and the guide never mentioned it.
+  it("names every setting an operator has to know about", () => {
+    const settings = readFileSync(join(ROOT, "api/settings.go"), "utf8");
+    const declared = [
+      ...settings.matchAll(/Env:\s*"(PARAPHE_[A-Z0-9_]+)"/g),
+    ].map((m) => m[1]);
+    expect(declared.length, "the settings table was not read").toBeGreaterThan(
+      15,
+    );
+
+    // Image-embedded paths: the operator overrides them only when running
+    // the binary outside the image, and DEPLOYMENT.md carries that case in
+    // prose rather than as a variable to set.
+    // Paths baked into the image, overridden only when the binary runs
+    // outside it — DEPLOYMENT.md carries that case in prose.
+    const developerOnly = new Set(["PARAPHE_CSV", "PARAPHE_CONFIG_DIR"]);
+    const documented = new Set(
+      NAMED_IN.flatMap((file) =>
+        variables(readFileSync(join(ROOT, file), "utf8")),
+      ),
+    );
+    const silent = declared.filter(
+      (v) => !documented.has(v) && !developerOnly.has(v),
+    );
+    expect(silent).toEqual([]);
+  });
+
+  // The DEFAULT value drifting is the same failure one layer down: the guide
+  // promised `campagne` while the binary answered `campaign`, so an operator
+  // who trusted the doc pointed DNS at a subdomain that 404s.
+  it("agrees with the deployment files on the bootstrap slug", () => {
+    const settings = readFileSync(join(ROOT, "api/settings.go"), "utf8");
+    const slug =
+      /Env:\s*"PARAPHE_ORG_SLUG"[\s\S]{0,200}?Default:\s*"([^"]+)"/.exec(
+        settings,
+      );
+    expect(slug, "the org_slug default was not found").not.toBeNull();
+    const value = slug![1];
+    for (const [file, pattern] of [
+      [".env.exemple", new RegExp(`^PARAPHE_ORG_SLUG=${value}$`, "m")],
+      [
+        "chart/paraphe/values.yaml",
+        new RegExp(`^\\s*orgSlug:\\s*${value}$`, "m"),
+      ],
+      ["DEPLOYMENT.md", new RegExp(`default \`${value}\``)],
+    ] as [string, RegExp][]) {
+      expect(
+        readFileSync(join(ROOT, file), "utf8"),
+        `${file} disagrees with api/settings.go, which defaults PARAPHE_ORG_SLUG to ${value}`,
+      ).toMatch(pattern);
+    }
+  });
 });

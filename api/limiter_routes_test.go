@@ -81,6 +81,126 @@ func TestEveryRouteDeclaresItsCeiling(t *testing.T) {
 	}
 }
 
+// routeLimits declares; this drives. The map above says "write_account"
+// beside nine routes and nothing confronted that word with the middleware
+// actually hung on them — dropping `guard(s.limitAccount(limitWriteAccount))`
+// from any one of them left every test green.
+//
+// Cheap because the class is keyed on the ACCOUNT: all nine share one
+// bucket. Exhaust it once, and each of the others must answer 429 without
+// its handler running. A route whose ceiling was lost answers its handler
+// instead — 200, 400, 404, anything but 429.
+func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
+	s, srv := testServer(t)
+	email := "coord@exemple.fr"
+	password := createAccount(t, s, email, RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn(email, password); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+
+	// exhausted through ONE route, asserted at the crossing so the rest of
+	// the test cannot rest on a bucket that was never full
+	for i := 1; i <= limitWriteAccount.events; i++ {
+		if code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+			map[string]any{"note": "x"}); code == http.StatusTooManyRequests {
+			t.Fatalf("429 at attempt %d, below the ceiling of %d",
+				i, limitWriteAccount.events)
+		}
+	}
+	if code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+		map[string]any{"note": "x"}); code != http.StatusTooManyRequests {
+		t.Fatalf("the bucket did not fill: attempt %d answered %d",
+			limitWriteAccount.events+1, code)
+	}
+
+	// every OTHER route the map declares under the same class, reachable by
+	// a coordination inside its campaign. `{…}` placeholders take harmless
+	// values: a wired route refuses before its handler ever reads them.
+	reachable := map[string]string{
+		"POST /api/mayors/{insee}/status":       "/api/mayors/01001/status",
+		"POST /api/batch":                       "/api/batch",
+		"POST /api/team/group":                  "/api/team/group",
+		"POST /api/team/account":                "/api/team/account",
+		"POST /api/team/account/{email}/active": "/api/team/account/qui@exemple.fr/active",
+		"POST /api/campaign":                    "/api/campaign",
+	}
+	for declared, class := range routeLimits {
+		if class != "write_account" || declared == "POST /api/me/personal_note" {
+			continue
+		}
+		path, covered := reachable[declared]
+		if !covered {
+			// the administration routes: another scope, another test
+			if strings.HasPrefix(declared, "POST /api/admin/") {
+				continue
+			}
+			t.Errorf("%s is declared write_account and no case drives it: a "+
+				"ceiling nothing exercises is a ceiling nothing keeps", declared)
+			continue
+		}
+		if code, _ := c.call(http.MethodPost, path, map[string]any{}); code !=
+			http.StatusTooManyRequests {
+			t.Errorf("%s answered %d with the write_account bucket exhausted: "+
+				"it carries no ceiling any more", declared, code)
+		}
+	}
+}
+
+// The two moderation routes, in the scope that reaches them: the
+// administration signs in on the apex, and `administrationOnly` sits BEFORE
+// the ceiling — so a coordination gets 403 there and proves nothing.
+func TestEveryAdministrationWriteRouteIsUnderItsCeiling(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, "admin@paraphe.test", "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("administration sign-in: %d", code)
+	}
+	for i := 1; i <= limitWriteAccount.events; i++ {
+		if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns",
+			map[string]any{}); code == http.StatusTooManyRequests {
+			t.Fatalf("429 at attempt %d, below the ceiling of %d",
+				i, limitWriteAccount.events)
+		}
+	}
+	if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns",
+		map[string]any{}); code != http.StatusTooManyRequests {
+		t.Fatalf("POST /api/admin/campaigns: the bucket did not fill (%d)", code)
+	}
+	if code, _ := admin.call(http.MethodPost, "/api/admin/requests/1",
+		map[string]any{"decision": RequestRefused}); code != http.StatusTooManyRequests {
+		t.Errorf("POST /api/admin/requests/{id} answered %d with the bucket "+
+			"exhausted: it carries no ceiling any more", code)
+	}
+}
+
+// The anonymous class, same shape: two routes, one bucket per source.
+func TestEveryAnonymousRouteIsUnderItsCeiling(t *testing.T) {
+	_, srv := testServer(t)
+	c := newClient(t, srv)
+	for i := 1; i <= limitAnonIP.events; i++ {
+		if code, _ := c.call(http.MethodGet, "/api/config", nil); code ==
+			http.StatusTooManyRequests {
+			t.Fatalf("429 at attempt %d, below the ceiling of %d",
+				i, limitAnonIP.events)
+		}
+	}
+	if code, _ := c.call(http.MethodGet, "/api/config", nil); code !=
+		http.StatusTooManyRequests {
+		t.Fatalf("the anon bucket did not fill (%d)", code)
+	}
+	if code, _ := c.call(http.MethodGet, "/api/campaign/public", nil); code !=
+		http.StatusTooManyRequests {
+		t.Errorf("GET /api/campaign/public answered %d with the anon_ip "+
+			"bucket exhausted: it carries no ceiling any more", code)
+	}
+}
+
 // The ceilings, exercised end to end — one route per class, driven to the
 // crossing and one step past it. What is asserted is the ANSWER: the 429,
 // its Retry-After, and — where a write was refused — the absence of the row.
