@@ -72,10 +72,73 @@ func normaliseSQL(sql string) string {
 	// spanned two strings — `WHERE a='/*' AND org_id=$1 AND b='*/'` — and ate
 	// the real predicate between them.
 	sql = stripDollarQuoted(sql)
-	sql = sqlStringLit.ReplaceAllString(sql, "''")
-	sql = sqlBlockComment.ReplaceAllString(sql, " ")
+	sql = stripStringLiterals(sql)
+	sql = stripBlockComments(sql)
 	sql = sqlLineComment.ReplaceAllString(sql, " ")
 	return sqlSpaces.ReplaceAllString(strings.ToUpper(sql), " ")
+}
+
+// stripStringLiterals removes single-quoted strings, ESCAPES INCLUDED. The
+// pattern `'[^']*'` closed on the first quote it met, so `E'\'org_id=$1'` —
+// one string as far as PostgreSQL is concerned — left `ORG_ID=$1` standing
+// outside it, and a comparison against a piece of text read as a filter.
+// A doubled `”` escapes a quote in any string; a backslash does too in the
+// E'…' form.
+func stripStringLiterals(sql string) string {
+	var out strings.Builder
+	for i := 0; i < len(sql); {
+		if sql[i] != '\'' {
+			out.WriteByte(sql[i])
+			i++
+			continue
+		}
+		extended := i > 0 && (sql[i-1] == 'E' || sql[i-1] == 'e')
+		i++
+		for i < len(sql) {
+			if extended && sql[i] == '\\' && i+1 < len(sql) {
+				i += 2
+				continue
+			}
+			if sql[i] == '\'' {
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					i += 2 // a doubled quote is one quote, not the end
+					continue
+				}
+				i++
+				break
+			}
+			i++
+		}
+		out.WriteString("''")
+	}
+	return out.String()
+}
+
+// stripBlockComments removes /* … */ COUNTING THE NESTING, which PostgreSQL
+// does and a non-greedy pattern does not. `/* /* */ org_id=$1 */` is entirely
+// a comment to the server; the pattern closed on the first `*/` and handed
+// the canary a predicate the database never sees — the query read as walled
+// and returned every campaign.
+func stripBlockComments(sql string) string {
+	var out strings.Builder
+	depth := 0
+	for i := 0; i < len(sql); {
+		switch {
+		case strings.HasPrefix(sql[i:], "/*"):
+			depth++
+			i += 2
+		case depth > 0 && strings.HasPrefix(sql[i:], "*/"):
+			depth--
+			i += 2
+			out.WriteByte(' ')
+		default:
+			if depth == 0 {
+				out.WriteByte(sql[i])
+			}
+			i++
+		}
+	}
+	return out.String()
 }
 
 // sqlTextMarked is sqlText with a difference that matters: an expression it
@@ -165,6 +228,14 @@ func bounded(level string) bool {
 	if orgIDWord.MatchString(level) {
 		return false
 	}
+	// A SUBQUERY bounds only if the parameter picks the row. Anywhere else —
+	// an OFFSET, a LIMIT, an ORDER BY — it chooses which campaign comes back
+	// without ever being compared to anything, and `= (SELECT id FROM orgs
+	// LIMIT 1 OFFSET $1)` served the caller whichever one they asked for.
+	if selectWord.MatchString(level) {
+		where := subqueryWhere.FindStringSubmatch(level)
+		return where != nil && boundValue.MatchString(where[1])
+	}
 	if boundValue.MatchString(level) {
 		return true
 	}
@@ -187,11 +258,24 @@ var (
 	// column list and in an ON CONFLICT key: the canary read a campaign where
 	// none was written.
 	orgIDWord = regexp.MustCompile(`\bORG_ID\b`)
+	// Statements whose body is code, not text: stripping the dollar quotes
+	// leaves nothing to check, and running them touches everything.
+	// `DO` only where a statement STARTS: as a word it also opens the
+	// `ON CONFLICT … DO UPDATE` of every upsert in the package.
+	procedural = regexp.MustCompile(
+		`^\s*DO\b|\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b`)
 	// A parenthesised group holding a SELECT is a SUBQUERY: its predicates
 	// constrain what IT reads, never the statement around it. Any other group
 	// is an expression belonging to the level that wrote it.
 	selectWord = regexp.MustCompile(`\bSELECT\b`)
 	orWord     = regexp.MustCompile(`\bOR\b`)
+	// A group, and whether a NOT stands in front of it. RE2 has no
+	// look-behind, so the negation is captured with the marker.
+	negatedGroup = regexp.MustCompile(`(\bNOT\s*)?\$SUB(\d+)`)
+	// The parameter of a subquery bounds the statement only when it decides
+	// WHICH ROW comes back. `= (SELECT id FROM orgs LIMIT 1 OFFSET $1)` holds
+	// one and lets the caller walk the campaigns by choosing it.
+	subqueryWhere = regexp.MustCompile(`(?s)\bWHERE\b(.*)$`)
 	// The branches of a set operation are independent statements sharing one
 	// result: each must name the campaign on its own.
 	setOperation = regexp.MustCompile(`\b(?:UNION ALL|UNION|INTERSECT|EXCEPT)\b`)
@@ -231,9 +315,18 @@ func tableRef(table string) *regexp.Regexp {
 // no predicate could ever make them acceptable: naming a walled table at all
 // is the finding.
 func destructiveRef(table string) *regexp.Regexp {
+	const qualified = `(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?`
 	return regexp.MustCompile(
-		`\b(TRUNCATE|LOCK|DROP|ALTER)\s+(?:TABLE\s+)?(?:IF\s+EXISTS\s+)?` +
-			`(?:ONLY\s+)?(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?` + table + `"?\b`)
+		// the table right after the verb…
+		`\b(TRUNCATE|LOCK|DROP|ALTER|COPY)\s+(?:TABLE\s+)?(?:IF\s+EXISTS\s+)?` +
+			`(?:ONLY\s+)?` + qualified + table + `"?\b` +
+			// …or behind an object that governs it. `DROP POLICY p ON
+			// accounts` takes the wall down for good, `CREATE POLICY p ON
+			// accounts USING (true)` adds a permissive one that ORs with it,
+			// and a trigger on a walled table runs on every row of every
+			// campaign.
+			`|\b(CREATE|DROP|ALTER)\s+(?:POLICY|TRIGGER|RULE|INDEX|CONSTRAINT)\b` +
+			`[^;]*?\bON\s+(?:ONLY\s+)?` + qualified + table + `"?\b`)
 }
 
 // Words that follow a table name without being an alias.
@@ -266,6 +359,58 @@ var queryCalls = map[string]bool{
 	"textColumn": true,
 }
 
+// localScope: the string bindings as seen INSIDE one function.
+//
+// stringValues resolves by name across the whole package, and `sql` is a
+// local in one file and a package-level binding in another. A name that
+// leaks across that boundary makes the canary read a query nobody wrote —
+// and read it as compliant. So: a parameter, or ANY name this function
+// assigns, stops meaning what the package said, whether or not the new value
+// can be read here. `sql, _ := build()` puts two names on the left, which the
+// collector below ignores; without the reset, the local went on resolving to
+// another file's compliant INSERT while a bare SELECT ran.
+func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
+	scoped := map[string]string{}
+	for k, v := range values {
+		scoped[k] = v
+	}
+	if fn.Type.Params != nil {
+		for _, field := range fn.Type.Params.List {
+			for _, id := range field.Names {
+				delete(scoped, id.Name)
+			}
+		}
+	}
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if a, ok := n.(*ast.AssignStmt); ok {
+			for _, lhs := range a.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+					delete(scoped, id.Name)
+				}
+			}
+		}
+		return true
+	})
+	// …then learn back the ones this function sets to something readable
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if a, ok := n.(*ast.AssignStmt); ok &&
+			len(a.Lhs) == 1 && len(a.Rhs) == 1 {
+			if id, ok := a.Lhs[0].(*ast.Ident); ok {
+				if txt := sqlTextMarked(a.Rhs[0], values); txt != "" &&
+					txt != "$?" {
+					if a.Tok.String() == "+=" {
+						scoped[id.Name] += txt
+					} else {
+						scoped[id.Name] = txt
+					}
+				}
+			}
+		}
+		return true
+	})
+	return scoped
+}
+
 type statement struct{ File, Func, SQL string }
 
 // sqlStatements walks the package and yields every SQL string reaching a
@@ -288,37 +433,7 @@ func sqlStatements(t *testing.T) []statement {
 			// package, and `filter` is a local in four different functions:
 			// one lent its value to another and produced a query nobody had
 			// written.
-			scoped := map[string]string{}
-			for k, v := range values {
-				scoped[k] = v
-			}
-			// A parameter named like some other function's local is NOT that
-			// local. `sql` is a parameter of rows/column/counters and a local
-			// of routeBatch: without this, every helper was reported carrying
-			// the batch INSERT, which it never sees as text.
-			if fn.Type.Params != nil {
-				for _, field := range fn.Type.Params.List {
-					for _, id := range field.Names {
-						delete(scoped, id.Name)
-					}
-				}
-			}
-			ast.Inspect(fn, func(n ast.Node) bool {
-				if a, ok := n.(*ast.AssignStmt); ok &&
-					len(a.Lhs) == 1 && len(a.Rhs) == 1 {
-					if id, ok := a.Lhs[0].(*ast.Ident); ok {
-						if txt := sqlTextMarked(a.Rhs[0], values); txt != "" &&
-							txt != "$?" {
-							if a.Tok.String() == "+=" {
-								scoped[id.Name] += txt
-							} else {
-								scoped[id.Name] = txt
-							}
-						}
-					}
-				}
-				return true
-			})
+			scoped := localScope(values, fn)
 			ast.Inspect(fn, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -385,11 +500,19 @@ var conflictKey = regexp.MustCompile(`ON CONFLICT\s*\$SUB(\d+)`)
 // in a guard that blocks the build a false positive is what sends the next
 // author around it. An unqualified predicate under TWO walled tables would be
 // ambiguous, which PostgreSQL refuses outright, so nothing rides on it.
-func qualifiers(alias, table string) []string {
+func qualifiers(alias, table string, sole bool) []string {
+	names := []string{table}
 	if alias != "" {
-		return []string{alias, ""}
+		names = []string{alias}
 	}
-	return []string{"", table}
+	// …but only when it can mean ONE table. With two walled tables at the
+	// same level, `FROM accounts a, notes n WHERE org_id=$1` had a single
+	// unqualified predicate vouching for BOTH, and whichever one PostgreSQL
+	// did not resolve it to was scanned unbounded.
+	if sole {
+		names = append(names, "")
+	}
+	return names
 }
 
 // boundEverywhere: EVERY disjunct must bound this reference on its own. A
@@ -465,13 +588,20 @@ func boundAlias(preds, chain [][]string, names []string, seen map[string]bool) b
 // an OR, because flattening it CHANGES THE PRECEDENCE: `org_id=$1 AND (a OR
 // b)` became `org_id=$1 AND a OR b`, which binds nothing on its second
 // disjunct — refusing the card-and-notes query, walled since the first day.
+// A third group stays put: one preceded by NOT. Unwrapped, `WHERE NOT
+// (org_id = $1)` reads as `WHERE NOT ORG_ID = $1`, the predicate matches,
+// and the canary calls walled a query that returns every OTHER campaign.
+// NOT is not in its vocabulary, so the parentheses are what it must keep.
 func inlineGroups(level string, depth int) string {
 	if depth > 8 {
 		return level
 	}
-	return subRef.ReplaceAllStringFunc(level, func(ref string) string {
-		m := subRef.FindStringSubmatch(ref)
-		i, err := strconv.Atoi(m[1])
+	return negatedGroup.ReplaceAllStringFunc(level, func(ref string) string {
+		m := negatedGroup.FindStringSubmatch(ref)
+		if m[1] != "" {
+			return ref // negated: the group says the opposite of what it holds
+		}
+		i, err := strconv.Atoi(m[2])
 		if err != nil || i >= len(currentLevels) ||
 			selectWord.MatchString(currentLevels[i]) ||
 			orWord.MatchString(currentLevels[i]) {
@@ -527,6 +657,18 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 			continue
 		}
 		where := st.File + ":" + st.Func
+		// A body written in dollar quotes is stripped like any literal — but
+		// PostgreSQL EXECUTES this one. `DO $$ BEGIN … END $$` reached every
+		// walled table while the canary saw the four characters `DO ''`.
+		// Nothing here needs procedural SQL, so the shape is refused outright
+		// rather than half-read.
+		if procedural.MatchString(st.SQL) {
+			t.Errorf("%s: this statement carries a body the canary cannot "+
+				"read — a dollar-quoted block is stripped like a literal, and "+
+				"PostgreSQL runs it. Write the SQL where it can be read:"+
+				"\n\t%s", where, st.SQL)
+			continue
+		}
 		// One Exec can carry several statements. Without the split, the
 		// first one's `org_id = $1` counted as the second one's filter.
 		for _, one := range strings.Split(st.SQL, ";") {
@@ -539,7 +681,14 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 			}
 			for i, l := range currentLevels {
 				for _, m := range subRef.FindAllStringSubmatch(l, -1) {
-					if j, err := strconv.Atoi(m[1]); err == nil && j < len(parent) {
+					// `j < i` only: groups are numbered innermost first, so a
+					// level's own marker always has a LOWER number than the
+					// level holding it. Without that, a `$SUB0` written into
+					// the SQL by hand — inside a quoted identifier, which
+					// survives normalisation — made level 0 its own parent and
+					// ancestors() walked it for ever. A hung test hangs the CI
+					// job, and release.yml goes through the CI.
+					if j, err := strconv.Atoi(m[1]); err == nil && j < i {
 						parent[j] = i
 					}
 				}
@@ -587,14 +736,30 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 							orgPredicate.FindAllStringSubmatch(d, -1))
 					}
 					level := branch
+					// How many walled tables share this branch: it decides whether an
+					// unqualified predicate can be meant for one of them.
+					walledHere := 0
+					for _, table := range tables {
+						walledHere += len(refs[table].FindAllStringSubmatch(branch, -1))
+					}
 					for _, table := range tables {
 						for _, m := range destructive[table].FindAllStringSubmatch(level, -1) {
+							// group 1 is the first shape's verb, group 2 the
+							// second's. Reading a group the pattern does not
+							// have PANICS, and a panicking guard examines
+							// nothing after it — it does not even fail loudly
+							// on what it already found.
+							verb := m[1]
+							if verb == "" {
+								verb = m[2]
+							}
 							t.Errorf("%s: %s on %s reaches every campaign at once. "+
 								"Row-level security does not cover it — a policy is "+
-								"never consulted for TRUNCATE, LOCK visits no row, "+
-								"and ALTER can switch the wall off — so no predicate "+
-								"can make it acceptable:\n\t%s",
-								where, strings.TrimSpace(m[1]), table, st.SQL)
+								"never consulted for TRUNCATE, COPY streams whatever "+
+								"it is handed, LOCK visits no row, and CREATE/DROP "+
+								"POLICY is the wall itself — so no predicate can "+
+								"make it acceptable:\n\t%s",
+								where, strings.TrimSpace(verb), table, st.SQL)
 						}
 						for _, m := range refs[table].FindAllStringSubmatch(level, -1) {
 							if neutralised.MatchString(level) {
@@ -629,7 +794,7 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 								continue
 							}
 							if boundEverywhere(perDisjunct, chain,
-								qualifiers(alias, table)) {
+								qualifiers(alias, table, walledHere == 1)) {
 								continue
 							}
 							t.Errorf("%s: this reference to %s is not bounded to "+
@@ -732,11 +897,18 @@ func joinedLiterals(e ast.Expr) string {
 // another. Naming the commands also closes the path where the setting's name
 // arrives as a parameter the canary cannot follow.
 func declaresScope(s string) bool {
-	u := strings.ToUpper(s)
-	return strings.Contains(u, "SET_CONFIG(") ||
-		strings.Contains(u, "SET LOCAL ") ||
-		strings.Contains(u, "SET SESSION ")
+	// Whitespace collapsed FIRST: a tab after LOCAL, a newline between SET
+	// and LOCAL, a space before the parenthesis of set_config — PostgreSQL
+	// reads them all the same, and a byte-exact substring read none of them.
+	return scopeCommand.MatchString(
+		sqlSpaces.ReplaceAllString(strings.ToUpper(s), " "))
 }
+
+// SET without LOCAL or SESSION is the SESSION scope, which outlives the
+// transaction, and RESET unsets it: both move the campaign, and neither
+// spells "SET LOCAL".
+var scopeCommand = regexp.MustCompile(
+	`\bSET_CONFIG\s*\(|\b(?:SET|RESET)\s+(?:LOCAL\s+|SESSION\s+)?APP\s*\.\s*ORG_ID\b`)
 
 func TestOnlyTheScopeItselfDeclaresTheCampaign(t *testing.T) {
 	allowed := map[string]bool{
@@ -820,6 +992,16 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		"multiorg.go:orgSchema": true,
 		"multiorg.go:enableRLS": true,
 		"db.go:schema":          true,
+		// Pass-through helpers: the statement is their PARAMETER, so it can
+		// never be read here — it is read at the call site, which is itself
+		// one of queryCalls and judged there. They looked readable only
+		// because a package-level `sql` from another file leaked in; with
+		// that pollution gone, the promise has to be made explicitly.
+		"routes_mayors.go:rows":            true,
+		"routes_mayors.go:column":          true,
+		"routes_mayors.go:counters":        true,
+		"routes_mayors.go:orderedCounters": true,
+		"db.go:textColumn":                 true,
 	}
 
 	files := apiPackage(t)
@@ -835,6 +1017,7 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 			if !ok {
 				continue
 			}
+			scoped := localScope(values, fn)
 			ast.Inspect(fn, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -854,7 +1037,7 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 					if i >= len(call.Args) {
 						continue
 					}
-					txt := sqlText(call.Args[i], values)
+					txt := sqlText(call.Args[i], scoped)
 					if txt == "" || !sqlVerb.MatchString(strings.ToUpper(txt)) {
 						continue
 					}
