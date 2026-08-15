@@ -52,6 +52,18 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     }
   };
 
+  // Direct creation ends on the same one-time password card as an approval:
+  // one display, whatever the door the campaign came through.
+  const create = async (creation: Parameters<typeof API.createCampaign>[0]) => {
+    const rep = await API.createCampaign(creation);
+    setOpened({
+      address: rep.address,
+      coordination: rep.coordination,
+      password: rep.password,
+    });
+    await load();
+  };
+
   if (!queue) return <p role="status">Chargement…</p>;
   const pending = queue.requests.filter((d) => d.state === "pending");
   const decided = queue.requests.filter((d) => d.state !== "pending");
@@ -136,6 +148,17 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
         </div>
       ))}
 
+      <h2>Créer une campagne</h2>
+      <p>
+        Sans passer par le formulaire public : la campagne s'ouvre
+        immédiatement, avec son compte de coordination.
+      </p>
+      <Creation
+        baseDomain={queue.base_domain}
+        onCreate={create}
+        onMessage={onMessage}
+      />
+
       <h2>Campagnes hébergées</h2>
       {/* in a card like every other table: it is also what lets a narrow
           screen scroll the table instead of the page */}
@@ -166,6 +189,114 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
         </table>
       </div>
 
+      <Traitees decided={decided} />
+    </>
+  );
+}
+
+// The creation form owns its fields so a submission can empty them: the
+// password card above is what carries the result.
+function Creation({
+  baseDomain,
+  onCreate,
+  onMessage,
+}: {
+  baseDomain: string;
+  onCreate: (c: {
+    slug: string;
+    name: string;
+    coordination_email: string;
+    coordination_name: string;
+  }) => Promise<void>;
+  onMessage: (m: Message) => void;
+}) {
+  const [slug, setSlug] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [coordination, setCoordination] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSending(true);
+    try {
+      await onCreate({
+        slug: slug.trim(),
+        name: name.trim(),
+        coordination_email: email.trim(),
+        coordination_name: coordination.trim(),
+      });
+      setSlug("");
+      setName("");
+      setEmail("");
+      setCoordination("");
+    } catch (err) {
+      onMessage({ tone: "erreur", text: (err as Error).message });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <form className="carte" onSubmit={submit}>
+      <p>
+        <label>
+          Adresse (sous-domaine)
+          <input
+            type="text"
+            required
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            aria-describedby="creation-adresse"
+          />
+        </label>
+        <span id="creation-adresse" className="gris">
+          {(slug.trim() || "votre-campagne") + "." + baseDomain}
+        </span>
+      </p>
+      <p>
+        <label>
+          Nom de la campagne
+          <input
+            type="text"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+      </p>
+      <p>
+        <label>
+          Email de la coordination
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+      </p>
+      <p>
+        <label>
+          Nom de la coordination
+          <input
+            type="text"
+            required
+            value={coordination}
+            onChange={(e) => setCoordination(e.target.value)}
+          />
+        </label>
+      </p>
+      <button type="submit" disabled={sending}>
+        {sending ? "Création…" : "Créer la campagne"}
+      </button>
+    </form>
+  );
+}
+
+function Traitees({ decided }: { decided: QueuedRequest[] }) {
+  return (
+    <>
       {decided.length > 0 && (
         <>
           <h2>Demandes traitées</h2>

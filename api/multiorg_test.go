@@ -301,6 +301,78 @@ func TestRequestThenApprovalCreatesCampaign(t *testing.T) {
 	}
 }
 
+// The administration can open a campaign without a request: the queue's own
+// ceiling message promises that door, and this is it.
+func TestDirectCreationOpensCampaign(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, "admin@paraphe.test", "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("administration sign-in: %d", code)
+	}
+	body := map[string]any{
+		"slug": "directe", "name": "Campagne directe",
+		"coordination_email": "coord@exemple.fr", "coordination_name": "Coordination",
+	}
+	code, rep := admin.call(http.MethodPost, "/api/admin/campaigns", body)
+	if code != http.StatusCreated {
+		t.Fatalf("direct creation refused: %d %v", code, rep)
+	}
+	pw, _ := rep["password"].(string)
+	if pw == "" {
+		t.Fatal("no password returned for the created coordination")
+	}
+	// the same slug twice: a conflict, and still exactly one organisation
+	if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns", body); code != http.StatusConflict {
+		t.Errorf("second creation on the same subdomain: %d, want 409", code)
+	}
+	if n := scalar[int](t, s, "SELECT count(*) FROM orgs WHERE slug='directe'"); n != 1 {
+		t.Fatalf("%d organisation(s) for one slug", n)
+	}
+	// an unusable slug is refused before anything is written
+	if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns",
+		map[string]any{"slug": "Pas Valide!", "name": "X",
+			"coordination_email": "c@exemple.fr", "coordination_name": "C"}); code != http.StatusBadRequest {
+		t.Errorf("invalid slug accepted: %d", code)
+	}
+
+	// the campaign answers, and its coordination enters with the returned
+	// password
+	fresh := clientOn(t, srv, "directe.paraphe.test")
+	code, cfg := fresh.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK || cfg["mode"] != "team" {
+		t.Fatalf("the created campaign does not answer: %d %v", code, cfg)
+	}
+	if code := fresh.signIn("coord@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("the coordination cannot enter its campaign: %d", code)
+	}
+	code, me := fresh.call(http.MethodGet, "/api/me", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/me: %d %v", code, me)
+	}
+	account, _ := me["account"].(map[string]any)
+	if account["role"] != RoleCoordination {
+		t.Errorf("the coordination enters with role %v", account["role"])
+	}
+
+	// a campaign role cannot open campaigns — the return code is asserted
+	// first, then the absence of the write (house rule)
+	if code, _ := fresh.call(http.MethodPost, "/api/admin/campaigns",
+		map[string]any{"slug": "encore", "name": "Encore",
+			"coordination_email": "e@exemple.fr",
+			"coordination_name":  "E"}); code != http.StatusForbidden {
+		t.Fatalf("campaign coordination on the administration door: %d, want 403", code)
+	}
+	if n := scalar[int](t, s, "SELECT count(*) FROM orgs WHERE slug='encore'"); n != 0 {
+		t.Fatal("a campaign role created an organisation")
+	}
+}
+
 // A suspended campaign keeps its work, but nobody gets in.
 func TestSuspendedCampaignAcceptsNoRequest(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")

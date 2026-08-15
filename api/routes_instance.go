@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -214,6 +215,43 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// createCampaign creates the organisation and, in the same stroke, its
+// coordination account — without which the address opens for nobody. The
+// password is returned to be shown ONCE and is never stored in the clear.
+// Approving a hosting request and the administration's direct creation both
+// end here: one implementation, so the two doors cannot drift apart.
+func createCampaign(ctx context.Context, tx pgx.Tx, slug, name string,
+	campaign []byte, coordinationEmail, coordinationName, createdBy string,
+) (int, string, error) {
+	var orgID int
+	if err := tx.QueryRow(ctx,
+		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
+			"VALUES($1,$2,$3::jsonb,$4,$5,$6) RETURNING id",
+		slug, name, string(campaign), defaultBatchSize, OrgActive,
+		shortTimestamp()).Scan(&orgID); err != nil {
+		return 0, "", err
+	}
+	password, err := ReadablePassword()
+	if err != nil {
+		return 0, "", err
+	}
+	hashed, err := HashPassword(password)
+	if err != nil {
+		return 0, "", err
+	}
+	// the account is born INSIDE the created campaign, which is what org_id
+	// names here: creation is the one place the instance scope writes into
+	// a campaign, and it writes exactly one row
+	if _, err := tx.Exec(ctx,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
+			"VALUES($1,$2,$3,$4,$5,$6,$7)",
+		orgID, coordinationEmail, coordinationName, hashed, RoleCoordination,
+		shortTimestamp(), createdBy); err != nil {
+		return 0, "", err
+	}
+	return orgID, password, nil
+}
+
 type hostingDecision struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`
@@ -273,28 +311,6 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 					"l'expliquant, la campagne pourra en redemander une autre.", slug)
 			return
 		}
-		var orgID int
-		if err := s.tx(r).QueryRow(ctx,
-			"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
-				"VALUES($1,$2,$3::jsonb,$4,$5,$6) RETURNING id",
-			slug, name, string(campaign), defaultBatchSize, OrgActive,
-			shortTimestamp()).Scan(&orgID); err != nil {
-			s.failure(w, err)
-			return
-		}
-		// The coordination account is created with the campaign: without
-		// it, the organisation exists but nobody can enter or open access,
-		// and the requester receives an address that refuses to open.
-		password, err := ReadablePassword()
-		if err != nil {
-			s.failure(w, err)
-			return
-		}
-		hashed, err := HashPassword(password)
-		if err != nil {
-			s.failure(w, err)
-			return
-		}
 		var requesterEmail, requesterName string
 		if err := s.tx(r).QueryRow(ctx,
 			"SELECT requester_email, requester_name FROM hosting_requests WHERE id=$1",
@@ -302,14 +318,9 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			s.failure(w, err)
 			return
 		}
-		// the account is born INSIDE the created campaign, which is what
-		// org_id names here: approval is the one place an instance
-		// administrator writes into a campaign, and it writes exactly one row
-		if _, err := s.tx(r).Exec(ctx,
-			"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
-				"VALUES($1,$2,$3,$4,$5,$6,$7)",
-			orgID, requesterEmail, requesterName, hashed, RoleCoordination,
-			shortTimestamp(), accountOf(r).Email); err != nil {
+		orgID, password, err := createCampaign(ctx, s.tx(r), slug, name,
+			campaign, requesterEmail, requesterName, accountOf(r).Email)
+		if err != nil {
 			s.failure(w, err)
 			return
 		}
@@ -338,4 +349,98 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 		"slug", slug, "decision", d.Decision,
 		"by", s.accountPseudonym(accountOf(r).Email))
 	replyJSON(w, http.StatusOK, response)
+}
+
+type campaignCreation struct {
+	Slug              string            `json:"slug"`
+	Name              string            `json:"name"`
+	CoordinationEmail string            `json:"coordination_email"`
+	CoordinationName  string            `json:"coordination_name"`
+	Campaign          map[string]string `json:"campaign"`
+}
+
+// POST /api/admin/campaigns — the administration opens a campaign without a
+// hosting request: its own campaigns, one arranged off-form, or the way out
+// the queue's ceiling message promises when moderation is flooded. A pending
+// request on the same slug stays untouched: approving it later answers 409
+// and tells the moderator to refuse it with a word of explanation.
+func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
+	var d campaignCreation
+	if !readBody(w, r, &d) {
+		return
+	}
+	slug := strings.ToLower(strings.TrimSpace(d.Slug))
+	name := strings.TrimSpace(d.Name)
+	email := normalizeEmail(d.CoordinationEmail)
+	coordination := strings.TrimSpace(d.CoordinationName)
+
+	// the same bounds as the public form: both doors write the same columns
+	if !ValidSlug(slug) {
+		errorJSON(w, http.StatusBadRequest,
+			"L'adresse demandée doit tenir en 2 à 63 caractères, en minuscules, "+
+				"chiffres et tirets, et ne pas être un nom réservé : %q.", slug)
+		return
+	}
+	if name == "" || coordination == "" || !strings.Contains(email, "@") {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de la campagne, le nom et l'email de sa coordination sont requis.")
+		return
+	}
+	if utf8.RuneCountInString(email) > maxEmailRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Cette adresse email est trop longue (254 caractères maximum).")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes ||
+		utf8.RuneCountInString(coordination) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de la campagne et celui de sa coordination ne doivent pas "+
+				"dépasser 200 caractères.")
+		return
+	}
+	for k, v := range d.Campaign {
+		if utf8.RuneCountInString(v) > maxCampaignRunes {
+			errorJSON(w, http.StatusBadRequest,
+				"Le champ « %s » de la campagne ne doit pas dépasser "+
+					"2000 caractères.", k)
+			return
+		}
+	}
+
+	ctx := r.Context()
+	taken, err := slugTaken(ctx, s.tx(r), slug)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if taken {
+		errorJSON(w, http.StatusConflict,
+			"L'adresse %s.%s est déjà utilisée par une campagne.", slug, BaseDomain())
+		return
+	}
+	campaign, err := json.Marshal(completeCampaign(d.Campaign))
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	orgID, password, err := createCampaign(ctx, s.tx(r), slug, name, campaign,
+		email, coordination, accountOf(r).Email)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.securityEvent(r, slog.LevelInfo, "campaign_created",
+		"slug", slug, "by", s.accountPseudonym(accountOf(r).Email))
+	replyJSON(w, http.StatusCreated, map[string]any{
+		"organisation": orgID, "slug": slug,
+		"address":      fmt.Sprintf("%s.%s", slug, BaseDomain()),
+		"coordination": email,
+		// returned ONCE, never stored in the clear: the administrator
+		// passes it on
+		"password": password,
+	})
 }

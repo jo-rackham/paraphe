@@ -279,3 +279,16 @@ export const decideRequest = (
   password?: string;
 }> =>
   call(`admin/requests/${id}`, { method: "POST", body: { decision, reason } });
+
+export const createCampaign = (creation: {
+  slug: string;
+  name: string;
+  coordination_email: string;
+  coordination_name: string;
+}): Promise<{
+  organisation: number;
+  slug: string;
+  address: string;
+  coordination: string;
+  password: string;
+}> => call("admin/campaigns", { method: "POST", body: creation });

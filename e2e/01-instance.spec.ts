@@ -102,6 +102,52 @@ test.describe
       ).toBeVisible();
     });
 
+    test("the administration creates a campaign directly, without a request", async ({
+      page,
+    }) => {
+      await page.goto(`${API_ORIGIN}/`);
+      await page.getByRole("button", { name: "Se connecter" }).click();
+      await page.getByLabel("Adresse email").fill(INSTANCE_ADMIN.email);
+      await page.getByLabel("Mot de passe").fill(INSTANCE_ADMIN.password);
+      await page.getByRole("button", { name: "Se connecter" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Créer une campagne" }),
+      ).toBeVisible();
+
+      await page.getByLabel("Adresse (sous-domaine)").fill("directe");
+      await page
+        .getByLabel("Nom de la campagne")
+        .fill("Campagne ouverte en direct");
+      await page
+        .getByLabel("Email de la coordination")
+        .fill("coord@directe.test");
+      await page.getByLabel("Nom de la coordination").fill("Coordination");
+      await page.getByRole("button", { name: "Créer la campagne" }).click();
+
+      // same one-time password card as an approval, whatever the door
+      await expect(
+        page.getByRole("heading", {
+          name: "Campagne ouverte : directe.localhost",
+        }),
+      ).toBeVisible();
+      const password = (
+        await page.locator(".carte code").first().innerText()
+      ).trim();
+      expect(password.length).toBeGreaterThan(8);
+
+      // the campaign answers, and its coordination enters with that password
+      await signIn(
+        page,
+        campaignOrigin("directe"),
+        "coord@directe.test",
+        password,
+      );
+      await openTab(page, "Mon équipe");
+      await expect(
+        page.getByRole("heading", { name: "La campagne" }),
+      ).toBeVisible();
+    });
+
     test("the instance administrator never sees a campaign's work", async ({
       page,
     }) => {

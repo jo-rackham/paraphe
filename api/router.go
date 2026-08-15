@@ -155,7 +155,20 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/{id}", s.routeDecideHosting)
 		})
+		// Direct creation, same scope as moderation: the queue's ceiling
+		// message points a flooded requester at exactly this door.
+		r.With(guard(s.administrationOnly),
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+			Post("/admin/campaigns", s.routeCreateCampaign)
 	})
+
+	// The account-less browser version. Its /navigateur/api/* paths are
+	// answered with HTML by the handler itself, which is what keeps that
+	// build in browser mode. With no build configured the handler steps
+	// aside, and the paths belong to the ordinary interface fallback.
+	r.Handle("/navigateur",
+		http.RedirectHandler("/navigateur/", http.StatusMovedPermanently))
+	r.Handle("/navigateur/*", http.HandlerFunc(s.serveBrowserVersion))
 
 	// Everything else is the interface, when this binary serves one.
 	r.NotFound(s.serveInterface)
