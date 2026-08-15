@@ -130,6 +130,16 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U paraphe"
           --health-interval 2s --health-timeout 3s --health-retries 30
+      # No password: a GitHub service container cannot override the image's
+      # command, and the image only takes requirepass through one. Localhost
+      # of an ephemeral runner; the authenticated path is exercised by the
+      # sentinel drill below and by local runs.
+      valkey:
+        image: valkey/valkey:8.1-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 30
     defaults:
       run:
         working-directory: api
@@ -152,10 +162,37 @@ jobs:
       - name: Tests
         # the database is provided on purpose: without it the integration
         # tests skip themselves, and they are what covers concurrent
-        # allocation and the wall between teams
+        # allocation and the wall between teams — Valkey likewise, for the
+        # shared rate-limit counters
         run: go test -race -count=1 ./...
         env:
           PARAPHE_TEST_DATABASE_URL: postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe_test
+          PARAPHE_TEST_VALKEY_URL: valkey://127.0.0.1:6379
+
+      - name: Bascule Sentinel
+        # The HA claim, demonstrated rather than assumed: a primary, a
+        # replica and a sentinel; counters written THROUGH the sentinel
+        # address, the primary killed, and the same tests pass again once
+        # the sentinel has promoted the replica. Counters restart at zero
+        # across the failover — re-opened windows are the documented cost.
+        run: |
+          docker compose -f ../outils/sentinel-drill/compose.yml up -d --wait
+          go test -race -count=1 -run 'TestValkeyCountsAtomicallyAndExpires|TestValkeyForgetResetsTheWindow|TestTwoInstancesShareOneCeiling' .
+          docker kill sentinel-drill-primary
+          # host networking gives every node one address: what moves on a
+          # failover is the PORT the sentinel answers with (6380 → 6381)
+          for i in $(seq 1 30); do
+            port=$(docker exec sentinel-drill-sentinel valkey-cli -p 26379 \
+              --no-auth-warning sentinel get-master-addr-by-name paraphe | sed -n 2p)
+            if [ "$port" = "6381" ]; then break; fi
+            if [ "$i" = 30 ]; then echo "::error::no failover after 30 s"; exit 1; fi
+            sleep 1
+          done
+          go test -race -count=1 -run 'TestValkeyCountsAtomicallyAndExpires|TestValkeyForgetResetsTheWindow|TestTwoInstancesShareOneCeiling' .
+          docker compose -f ../outils/sentinel-drill/compose.yml down
+        env:
+          PARAPHE_TEST_VALKEY_URL: valkey+sentinel://127.0.0.1:26379/paraphe
+          PARAPHE_TEST_VALKEY_PASSWORD: drill
 
   interface:
     name: ⚛️ interface
@@ -367,11 +404,28 @@ jobs:
             --set postgres.external.existingSecret=ma-base
           rendre sauvegarde --set postgres.cnpg.backup.enabled=true \
             --set postgres.cnpg.backup.s3CredentialsSecret=mes-cles
+          rendre sans-valkey --set valkey.enabled=false
           grep -q "kind: Deployment" /tmp/defaut.yaml
           # ONE application container, and no volume: nothing is written to
-          # disk, and a mount reappearing means something is again.
-          if [ "$(grep -c 'volumeMounts:' /tmp/defaut.yaml)" != 0 ]; then
+          # disk, and a mount reappearing means something is again. Judged
+          # on the valkey-less render, because the valkey pods DO mount —
+          # tmpfs only, for a config that carries a password and counters
+          # that are disposable; the assertions below hold that line.
+          if [ "$(grep -c 'volumeMounts:' /tmp/sans-valkey.yaml)" != 0 ]; then
             echo "::error::a volume is mounted again — the application writes nothing"
+            exit 1
+          fi
+          # Valkey by default: present, walled off, and DISKLESS — a
+          # PersistentVolumeClaim appearing means counters started living
+          # somewhere a failover is supposed to be allowed to lose.
+          grep -q "kind: StatefulSet" /tmp/defaut.yaml
+          grep -q "kind: NetworkPolicy" /tmp/defaut.yaml
+          if grep -q "PersistentVolumeClaim" /tmp/defaut.yaml; then
+            echo "::error::a PVC under Valkey — its counters are disposable by design"
+            exit 1
+          fi
+          if [ "$(grep -c 'emptyDir:' /tmp/defaut.yaml)" != "$(grep -c 'medium: Memory' /tmp/defaut.yaml)" ]; then
+            echo "::error::a Valkey emptyDir left tmpfs — its config carries the password"
             exit 1
           fi
           # CloudNativePG CRDs: kubeconform does not know them, skip them
@@ -382,4 +436,5 @@ jobs:
           kubeconform -strict -summary \
             -ignore-missing-schemas -skip Cluster,ScheduledBackup \
             /tmp/defaut.yaml /tmp/ingress.yaml /tmp/multi-campagnes.yaml \
-            /tmp/autoscaling.yaml /tmp/base-externe.yaml /tmp/sauvegarde.yaml
+            /tmp/autoscaling.yaml /tmp/base-externe.yaml /tmp/sauvegarde.yaml \
+            /tmp/sans-valkey.yaml

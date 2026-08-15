@@ -275,6 +275,22 @@ refuses to open rather than let anyone in.
   The verifier never READS `alg`, it compares the header byte for byte, which
   is what rules out `alg:none`, HS/RS confusion and `kid`/`jku` injection. The repository's example
   values are refused at startup — they are public.
+- **Rate limits, declared once in `api/limiter.go`**: sign-in per source
+  AND per submitted address (counted whether the account exists or not — a
+  429 must reveal nothing the decoy hash withholds), public hosting form,
+  anonymous reads, authenticated writes, export. Ceilings are constants,
+  not settings. Counters live in **Valkey** (`PARAPHE_VALKEY_URL`, direct
+  or `valkey+sentinel://…/paraphe`) when set — the chart ships a 3-node
+  Sentinel group, diskless by design — and in process memory otherwise,
+  which is exact for one replica; a Valkey outage degrades to per-instance
+  counting, said once, recovered alone. Two canaries walk the route tree:
+  every route names its ceiling (`limiter_routes_test.go`) and every route
+  parameter has an executed foreign-identifier refusal (`idor_test.go`).
+- **Privacy first, no address in the clear**: limiter keys are HMAC of the
+  subject (IPv4 addr / IPv6 **/64** aggregate, or org+email), security
+  events log day-scoped pseudonyms only, and `X-Forwarded-For` is believed
+  solely behind `PARAPHE_TRUSTED_PROXIES`. No fail2ban feed on purpose —
+  the ban is the in-app ceiling.
 - **Real values never go in a versioned file**: `.env` (compose) and
   `config/campagne.local.yaml` are ignored; `docker-compose.yml` and
   `config/campagne.yaml` are public templates.

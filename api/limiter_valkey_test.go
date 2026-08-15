@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
@@ -56,6 +58,18 @@ func TestValkeyURLParsing(t *testing.T) {
 	}
 }
 
+// testNonce distinguishes this PROCESS's keys: the store outlives the test
+// binary, and a key with a minute of TTL would otherwise carry its count
+// into the next run — including the second round of the sentinel drill,
+// which reruns these very tests right after a failover.
+var testNonce = func() string {
+	raw := make([]byte, 6)
+	if _, err := rand.Read(raw); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(raw)
+}()
+
 // Integration: a disposable Valkey named by PARAPHE_TEST_VALKEY_URL —
 // `task db` starts one and prints the value. Keys are HMAC bucket names
 // under a test secret; nothing here needs flushing.
@@ -79,7 +93,7 @@ func testValkey(t *testing.T) *valkeyStore {
 func TestValkeyCountsAtomicallyAndExpires(t *testing.T) {
 	v := testValkey(t)
 	ctx := context.Background()
-	key := "rl:test:" + t.Name()
+	key := "rl:test:" + testNonce + ":" + t.Name()
 	for i := 1; i <= 3; i++ {
 		total, retryIn, err := v.count(ctx, key, 400*time.Millisecond)
 		if err != nil {
@@ -106,7 +120,7 @@ func TestValkeyCountsAtomicallyAndExpires(t *testing.T) {
 func TestValkeyForgetResetsTheWindow(t *testing.T) {
 	v := testValkey(t)
 	ctx := context.Background()
-	key := "rl:test:" + t.Name()
+	key := "rl:test:" + testNonce + ":" + t.Name()
 	for range 5 {
 		if _, _, err := v.count(ctx, key, time.Minute); err != nil {
 			t.Fatal(err)
@@ -134,7 +148,7 @@ func TestTwoInstancesShareOneCeiling(t *testing.T) {
 	one := newRateLimiter(secret, v, clock.now)
 	two := newRateLimiter(secret, v, clock.now)
 	ctx := context.Background()
-	class := limitClass{"shared_" + t.Name(), 4, time.Minute}
+	class := limitClass{"shared_" + testNonce + "_" + t.Name(), 4, time.Minute}
 
 	for i := 1; i <= 4; i++ {
 		instance := one

@@ -39,6 +39,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-pg" (include "paraphe.nomComplet" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "paraphe.nomValkey" -}}
+{{- printf "%s-valkey" (include "paraphe.nomComplet" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* Its own selector: the Valkey pods must not be picked up by the
+     application's Service, its PDB or its NetworkPolicy rules. */}}
+{{- define "paraphe.selecteurValkey" -}}
+app.kubernetes.io/name: {{ include "paraphe.nom" . }}-valkey
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
 {{/* Secret et clé où lire le DSN PostgreSQL : celui que CloudNativePG
      génère pour le rôle applicatif, ou celui fourni par l'exploitant. */}}
 {{- define "paraphe.secretBase" -}}

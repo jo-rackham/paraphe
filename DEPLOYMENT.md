@@ -54,6 +54,9 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_BASE_DOMAIN` | domain of the campaign subdomains — **empty = a single campaign** (see below) |
 | `PARAPHE_ORG_SLUG` | subdomain of the campaign described by the variables above (default `campagne`) |
 | `PARAPHE_INSTANCE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | instance administration: approves hosting requests. Required in multi-campaign mode |
+| `PARAPHE_VALKEY_URL` | shared rate-limit counters: `valkey://host:6379`, or `valkey+sentinel://h1:26379,h2:26379,h3:26379/paraphe`. Empty = counted in process memory, which is exact for ONE replica and says so at startup |
+| `PARAPHE_VALKEY_PASSWORD` | Valkey password — never inside the URL, which travels in process lists and deployment files |
+| `PARAPHE_TRUSTED_PROXIES` | CIDRs whose `X-Forwarded-For` is believed (your TLS proxy, the ingress). Empty = every request is attributed to its TCP peer — behind a proxy, everyone then shares one counter |
 
 A variable left unset falls back to the embedded `campagne.yaml` (or to
 `config/campagne.local.yaml`, git-ignored, if you prefer a file).
@@ -204,6 +207,27 @@ public service directory). What is sensitive is **the team's notes**: who said
 what, who is hesitating, who refused. Hence HTTPS, named accounts, encrypted
 backups if they leave the server, and deleting the notes when the campaign
 ends.
+
+**Rate limits** guard the doors: sign-in per source and per submitted
+address, the public hosting form, the anonymous reads, the authenticated
+writes and the CSV export each have a ceiling, generous enough that a
+campaign office behind one NAT never meets them. The ceilings are constants,
+not settings. With several replicas the counters must be shared or every
+ceiling silently multiplies: that is what Valkey is for — one node in the
+compose file, a three-node Sentinel group in the chart, automatic failover.
+Its content is disposable TTL'd counters, so it has **no volume anywhere**:
+losing it re-opens the windows, nothing more, and the application counts per
+instance (and says so) whenever Valkey is unreachable.
+
+**No client address in the clear, anywhere.** The limiter's keys are keyed
+hashes of the source (IPv4 address or IPv6 /64) and of the submitted email;
+the security events (`signin_failed`, `rate_limited`, `account_toggled`…)
+carry day-scoped pseudonyms — correlatable across replicas within a day,
+non-reversible, unlinkable across days. The logs never become a second
+nominative store, and there is deliberately no fail2ban feed: the ban IS the
+in-application ceiling. A 429 is identical for an address that has an
+account and one that does not, so the limiter answers nothing the decoy
+hash refuses to.
 
 ## Personal data
 

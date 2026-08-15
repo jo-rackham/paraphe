@@ -126,14 +126,62 @@ secrets:
   # l'enregistre en base, ce qui fonctionne mais rend les sessions
   # dépendantes de l'ordre de démarrage.
   secretKey: ""
-  # Nom d'un Secret existant. Il doit porter TROIS clés en multi-campagnes,
-  # DEUX en mono-campagne — le chart ne peut pas lire son contenu, et une
-  # clé manquante ne se voit qu'en CreateContainerConfigError, aucun pod ne
-  # devenant jamais prêt :
+  # mot de passe de Valkey (compteurs du rate-limiting). Vide = tiré au
+  # hasard et conservé d'une mise à jour à l'autre.
+  valkeyPassword: ""
+  # Nom d'un Secret existant. Il doit porter les clés suivantes — le chart
+  # ne peut pas lire son contenu, et une clé manquante ne se voit qu'en
+  # CreateContainerConfigError, aucun pod ne devenant jamais prêt :
   #   PARAPHE_ADMIN_PASSWORD           (toujours)
-  #   PARAPHE_SECRET_KEY                 (toujours)
+  #   PARAPHE_SECRET_KEY               (toujours)
   #   PARAPHE_INSTANCE_ADMIN_PASSWORD  (dès que instance.baseDomain est posé)
+  #   PARAPHE_VALKEY_PASSWORD          (dès que valkey.enabled est vrai)
   existingSecret: ""
+
+# -- Valkey : la mémoire PARTAGÉE du rate-limiting. Avec 3 réplicas de
+# l'application, des compteurs par pod vaudraient trois fois le plafond
+# annoncé ; Valkey les met en commun. Haute disponibilité par Sentinel :
+# chaque pod porte un serveur ET une sentinelle, quorum à 2, bascule
+# automatique. AUCUN volume : les compteurs sont jetables par nature (les
+# perdre rouvre les fenêtres, rien de plus), tout vit en tmpfs, mot de
+# passe compris. Désactivé, chaque pod compte seul et le dit au démarrage —
+# correct à 1 réplica, triple les plafonds au-delà.
+valkey:
+  enabled: true
+  # 3 = tolère la perte d'un nœud. En dessous de 3, le quorum de 2 n'est
+  # plus atteignable et la bascule automatique disparaît (le service, lui,
+  # continue).
+  replicas: 3
+  quorum: 2
+  # le nom que les sentinelles donnent au groupe — repris dans l'URL côté
+  # application, aucune raison d'en changer
+  masterName: paraphe
+  # mémoire des compteurs, format Valkey. `noeviction` est câblé : sous
+  # pression, une écriture échoue BRUYAMMENT plutôt que d'évincer la
+  # fenêtre de quelqu'un d'autre en silence.
+  maxMemory: 64mb
+  image:
+    repository: valkey/valkey
+    tag: "8.1-alpine"
+  resources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      memory: 192Mi
+  sentinelResources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# -- Réseaux dont le X-Forwarded-For est cru par le rate-limiting (l'ingress,
+# un éventuel proxy devant lui). Dans la forme de ce chart le trafic arrive
+# toujours par l'ingress, qui porte une adresse privée du cluster — d'où ce
+# défaut. Vide = ne croire personne : chaque requête est attribuée à son
+# pair TCP.
+trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 
 # -- Lien « code source » affiché en pied de page (dépôt public, MIT)
 sourceUrl: "https://github.com/jo-rackham/paraphe"

@@ -15,6 +15,9 @@ ignore: |
   .claude/
   .gh-local/
   .plans/
+  # working clones of other people's repositories (see the .repos
+  # convention): their formatting belongs to them
+  .repos/
   # Helm templates are not YAML until they are rendered: `{{ .Values.x }}`
   # is a syntax error to any parser, and there is no configuration that
   # makes one read it. That directory is covered by `helm lint` and by

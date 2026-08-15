@@ -163,6 +163,20 @@ spec:
                   name: {{ include "paraphe.nomSecret" . }}
                   key: PARAPHE_SECRET_KEY
                   optional: true
+            # the proxies whose X-Forwarded-For the rate limiter believes:
+            # in this chart's shape, traffic always arrives through the
+            # ingress, which lives on a cluster-private address
+            - name: PARAPHE_TRUSTED_PROXIES
+              value: {{ .Values.trustedProxies | quote }}
+            {{- if .Values.valkey.enabled }}
+            - name: PARAPHE_VALKEY_URL
+              value: "valkey+sentinel://{{ include "paraphe.nomValkey" . }}-sentinel:26379/{{ .Values.valkey.masterName }}"
+            - name: PARAPHE_VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+            {{- end }}
           startupProbe:
             httpGet:
               path: {{ .Values.probes.path }}

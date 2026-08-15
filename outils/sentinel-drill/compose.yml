@@ -1,0 +1,104 @@
+# The Sentinel failover drill: a primary, a replica and one sentinel, on
+# the HOST network so the addresses the sentinel announces are the ones a
+# test process on the host can dial. Quorum 1 — one sentinel decides — which
+# is exactly what a drill wants and exactly what production must not do
+# (the chart runs three, quorum 2).
+#
+# Used by the CI api job and by `task valkey-drill`: write counters through
+# the sentinel address, kill the primary, and the same tests must pass
+# again once the replica is promoted. Ports 6380/6381/26379 to stay clear
+# of the plain Valkey a `task db` may have on 6379.
+services:
+  primary:
+    image: valkey/valkey:8.1-alpine
+    container_name: sentinel-drill-primary
+    network_mode: host
+    command:
+      - valkey-server
+      - --port
+      - "6380"
+      - --requirepass
+      - drill
+      - --masterauth
+      - drill
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    environment:
+      # valkey-cli 8.1 still reads the auth from REDISCLI_AUTH; both are
+      # set so the day it honours its own name nothing here moves
+      REDISCLI_AUTH: drill
+      VALKEYCLI_AUTH: drill
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -p 6380 ping | grep -q PONG"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+
+  replica:
+    image: valkey/valkey:8.1-alpine
+    container_name: sentinel-drill-replica
+    network_mode: host
+    depends_on:
+      primary:
+        condition: service_healthy
+    command:
+      - valkey-server
+      - --port
+      - "6381"
+      - --replicaof
+      - 127.0.0.1 6380
+      - --requirepass
+      - drill
+      - --masterauth
+      - drill
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    environment:
+      # valkey-cli 8.1 still reads the auth from REDISCLI_AUTH; both are
+      # set so the day it honours its own name nothing here moves
+      REDISCLI_AUTH: drill
+      VALKEYCLI_AUTH: drill
+    healthcheck:
+      # replication established, not merely listening: a drill against a
+      # replica that never synced would "fail over" to an empty stranger
+      test: ["CMD-SHELL", "valkey-cli -p 6381 info replication | grep -q 'master_link_status:up'"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  sentinel:
+    image: valkey/valkey:8.1-alpine
+    container_name: sentinel-drill-sentinel
+    network_mode: host
+    depends_on:
+      replica:
+        condition: service_healthy
+    # sentinel rewrites its configuration file, so it gets a writable copy
+    # in the container's own tmp
+    command:
+      - sh
+      - -ec
+      - |
+        {
+          echo "port 26379"
+          echo "requirepass drill"
+          echo "sentinel monitor paraphe 127.0.0.1 6380 1"
+          echo "sentinel auth-pass paraphe drill"
+          echo "sentinel down-after-milliseconds paraphe 2000"
+          echo "sentinel failover-timeout paraphe 10000"
+        } > /tmp/sentinel.conf
+        exec valkey-sentinel /tmp/sentinel.conf
+    environment:
+      # valkey-cli 8.1 still reads the auth from REDISCLI_AUTH; both are
+      # set so the day it honours its own name nothing here moves
+      REDISCLI_AUTH: drill
+      VALKEYCLI_AUTH: drill
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -p 26379 ping | grep -q PONG"]
+      interval: 1s
+      timeout: 2s
+      retries: 20

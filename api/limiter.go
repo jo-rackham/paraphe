@@ -44,7 +44,14 @@ type limitClass struct {
 }
 
 var (
-	limitSignInIP      = limitClass{"signin_ip", 20, 10 * time.Minute}
+	// 60, not 20: one source is often one BUILDING — an office NAT, or the
+	// single /64 an IPv6 household counts as — and twenty volunteers
+	// signing in over one morning coffee are indistinguishable from a slow
+	// script. The end-to-end suite demonstrated it first: its journeys sign
+	// in from one loopback address and tripped 20 halfway through. At 60
+	// per 10 minutes a source still gets ~8 600 guesses a day against a
+	// 39.8-bit space; the per-ACCOUNT ceiling below is the sharp wall.
+	limitSignInIP      = limitClass{"signin_ip", 60, 10 * time.Minute}
 	limitSignInAccount = limitClass{"signin_account", 10, 15 * time.Minute}
 	limitHostingIP     = limitClass{"hosting_ip", 3, time.Hour}
 	limitAnonIP        = limitClass{"anon_ip", 120, time.Minute}

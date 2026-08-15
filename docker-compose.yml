@@ -31,6 +31,45 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # The rate limiter's shared memory. ONE node here: Sentinel on a single
+  # host would elect nobody the host outlives, and this compose serves the
+  # one-VPS shape — the chart carries the HA topology. Counters only, all
+  # TTL'd: no volume, losing them re-opens the rate windows and nothing else.
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command:
+      - valkey-server
+      - --requirepass
+      - ${PARAPHE_VALKEY_PASSWORD}
+      - --maxmemory
+      - 64mb
+      # under memory pressure a write FAILS — the application then counts
+      # per instance, out loud — rather than silently evicting someone
+      # else's rate window
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    environment:
+      # the healthcheck reads it from the environment: a password on a
+      # command line would sit in plain sight of every `ps`. valkey-cli 8.1
+      # still reads REDISCLI_AUTH; both names are set so nothing moves the
+      # day it honours its own.
+      REDISCLI_AUTH: ${PARAPHE_VALKEY_PASSWORD}
+      VALKEYCLI_AUTH: ${PARAPHE_VALKEY_PASSWORD}
+    ports:
+      # loopback ONLY, like the database: exposed to a public IP, an open
+      # counter store lets anyone reset or exhaust the ceilings
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -38,10 +77,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     environment:
       # here and not in .env: `environment` wins over `env_file`, so
       # setting it in .env would have no effect and nobody would see why
       PARAPHE_DATABASE_URL: postgresql://paraphe:${PARAPHE_PG_PASSWORD}@postgres:5432/paraphe
+      PARAPHE_VALKEY_URL: valkey://valkey:6379
+      PARAPHE_VALKEY_PASSWORD: ${PARAPHE_VALKEY_PASSWORD}
     ports:
       # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
       # compose on a public-IP VPS behind a TLS proxy, and "8047:8047" would

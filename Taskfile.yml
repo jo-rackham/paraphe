@@ -58,6 +58,19 @@ tasks:
           echo "  cp .env.exemple .env && sed -i \"s|^PARAPHE_PG_PASSWORD=.*|PARAPHE_PG_PASSWORD=\$(openssl rand -hex 24)|\" .env" >&2
           exit 1
         fi
+      - |
+        set -eu
+        vpass="${PARAPHE_VALKEY_PASSWORD:-}"
+        if [ -z "$vpass" ] && [ -f .env ]; then
+          vpass=$(grep -E '^PARAPHE_VALKEY_PASSWORD=.+' .env | tail -1 | cut -d= -f2- || true)
+        fi
+        if [ -z "$vpass" ]; then
+          echo "PARAPHE_VALKEY_PASSWORD est vide." >&2
+          echo "Valkey tient les compteurs du rate-limiting : ouvert sans mot de" >&2
+          echo "passe, n'importe quel processus de l'hôte peut les remettre à zéro." >&2
+          echo "  sed -i \"s|^PARAPHE_VALKEY_PASSWORD=.*|PARAPHE_VALKEY_PASSWORD=\$(openssl rand -hex 24)|\" .env" >&2
+          exit 1
+        fi
       - docker compose up -d --build
 
   stop:
@@ -196,12 +209,37 @@ tasks:
       - docker compose exec -T postgres psql -U paraphe -c "TRUNCATE notes, assignments;"
 
   db:
-    desc: Démarre PostgreSQL en local (pour `task api` hors Docker)
+    desc: Démarre PostgreSQL et Valkey en local (pour `task api` hors Docker)
     deps: [db-ready]
     cmds:
       # the DSN printed is the one db-ready actually started, no .env in
       # sight; with a .env the password is yours and this line would lie
       - 'if [ -f .env ]; then echo "base démarrée — DSN selon votre .env"; else echo "PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe"; fi'
+      - 'if [ -f .env ]; then echo "valkey démarré — mot de passe selon votre .env"; else echo "PARAPHE_VALKEY_URL=valkey://127.0.0.1:6379 (mot de passe local : paraphe)"; fi'
+      - 'echo "tests d''intégration : PARAPHE_TEST_VALKEY_URL=valkey://127.0.0.1:6379 (+ PARAPHE_TEST_VALKEY_PASSWORD)"'
+
+  valkey-drill:
+    desc: 'Bascule Sentinel en local : compteurs écrits, primaire tué, compteurs de nouveau'
+    dir: api
+    cmds:
+      - docker compose -f ../outils/sentinel-drill/compose.yml up -d --wait
+      - defer: docker compose -f ../outils/sentinel-drill/compose.yml down
+      - go test -race -count=1 -run 'TestValkeyCountsAtomicallyAndExpires|TestValkeyForgetResetsTheWindow|TestTwoInstancesShareOneCeiling' .
+      - docker kill sentinel-drill-primary
+      # host networking gives every node one address: what moves on a
+      # failover is the PORT the sentinel answers with (6380 → 6381)
+      - |
+        for i in $(seq 1 30); do
+          port=$(docker exec sentinel-drill-sentinel valkey-cli -p 26379 \
+            --no-auth-warning sentinel get-master-addr-by-name paraphe | sed -n 2p)
+          if [ "$port" = "6381" ]; then echo "bascule faite en ${i}s"; break; fi
+          if [ "$i" = 30 ]; then echo "pas de bascule après 30 s" >&2; exit 1; fi
+          sleep 1
+        done
+      - go test -race -count=1 -run 'TestValkeyCountsAtomicallyAndExpires|TestValkeyForgetResetsTheWindow|TestTwoInstancesShareOneCeiling' .
+    env:
+      PARAPHE_TEST_VALKEY_URL: valkey+sentinel://127.0.0.1:26379/paraphe
+      PARAPHE_TEST_VALKEY_PASSWORD: drill
 
   web:
     desc: Interface en développement (http://127.0.0.1:5180), /api proxyfié vers `task api`
@@ -344,6 +382,20 @@ tasks:
         psql "${ADMIN%/postgres}/paraphe_essai" -c \
           "GRANT CREATE, USAGE ON SCHEMA public TO paraphe_essai" >/dev/null
         echo "base d'essai : paraphe_essai (rôle sans privilège)"
+      # Valkey beside it, same three cases: whatever already answers on 6379
+      # is reused, otherwise the compose service starts — with the .env
+      # password when one exists, with the known local one when not.
+      - |
+        if valkey-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1 || \
+           redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1 || \
+           REDISCLI_AUTH=paraphe valkey-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+          echo "Valkey répond déjà sur 6379 — réutilisé tel quel"
+        elif [ -f .env ]; then
+          docker compose up -d --wait valkey
+        else
+          PARAPHE_PG_PASSWORD=paraphe PARAPHE_VALKEY_PASSWORD=paraphe \
+            docker compose up -d --wait valkey
+        fi
 
   web-donnees:
     desc: Copie les listes construites vers la version navigateur

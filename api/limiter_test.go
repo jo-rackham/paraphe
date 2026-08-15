@@ -103,17 +103,6 @@ func TestProcessStoreSweepsExpiredWindows(t *testing.T) {
 	}
 }
 
-// failingStore: the shared store during an outage.
-type failingStore struct{ calls int }
-
-func (f *failingStore) count(context.Context, string, time.Duration) (int64, time.Duration, error) {
-	f.calls++
-	return 0, 0, errors.New("connection refused")
-}
-func (f *failingStore) forget(context.Context, string) error {
-	return errors.New("connection refused")
-}
-
 // flakyStore fails until told otherwise — the outage that ends.
 type flakyStore struct {
 	down  bool

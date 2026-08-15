@@ -1,0 +1,287 @@
+{{/*
+  Valkey, in high availability through Sentinel: the shared memory of the
+  rate limiter. Three pods, each running a valkey server AND a sentinel;
+  quorum 2 elects a new primary when the current one goes silent.
+
+  Deliberately self-contained — no operator, no subchart: the payload is
+  TTL'd counters whose total loss merely re-opens the rate windows, so the
+  machinery persistence and backups exist for has nothing to protect here.
+  For the same reason there is no PVC: every volume is a tmpfs, and a
+  failover or restart starts from zero counters, which is the documented
+  and accepted cost (the application degrades per instance meanwhile).
+
+  Bootstrap: a starting pod asks its siblings who is primary and follows
+  them; with no answer, pod 0 takes the role. A primary restarting while
+  another holds the role therefore claims it for a few seconds until the
+  sentinels demote it — acceptable for counters, and the price of not
+  carrying an operator for a cache.
+*/}}
+{{- if .Values.valkey.enabled }}
+{{- $name := include "paraphe.nomValkey" . -}}
+{{- $headless := printf "%s.%s.svc" $name .Release.Namespace -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # pods must resolve each other BEFORE being ready, or nobody can ever
+  # join anybody and readiness never comes
+  publishNotReadyAddresses: true
+  selector: {{- include "paraphe.selecteurValkey" . | nindent 4 }}
+  ports:
+    - name: valkey
+      port: 6379
+    - name: sentinel
+      port: 26379
+---
+{{/* The address the APPLICATION dials: one name, answered by every
+     sentinel. valkey-go asks them for the primary and follows the
+     +switch-master announcements from there. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-sentinel
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  selector: {{- include "paraphe.selecteurValkey" . | nindent 4 }}
+  ports:
+    - name: sentinel
+      port: 26379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: {{ .Values.valkey.replicas }}
+  selector:
+    matchLabels: {{- include "paraphe.selecteurValkey" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paraphe.selecteurValkey" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # the official image's valkey user
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "paraphe.selecteurValkey" . | nindent 20 }}
+      containers:
+        - name: valkey
+          image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+            # valkey-cli reads it from the environment: the password must
+            # not surface in a process list through probe commands.
+            # REDISCLI_AUTH is the name 8.1 honours; its own is set too so
+            # nothing here moves the day it does.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+            - name: VALKEYCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+          command:
+            - sh
+            - -ec
+            # The configuration is WRITTEN, not passed as flags: flags end
+            # up in /proc/*/cmdline with the password expanded. The file
+            # lives in a tmpfs and never touches a disk.
+            #
+            # noeviction, because evicting a counter under memory pressure
+            # silently weakens a ceiling for whoever it was counting: a
+            # refused write takes the application's loud degraded path
+            # instead. No save, no appendonly: losing counters re-opens
+            # windows, nothing more.
+            - |
+              primary=""
+              i=0
+              while [ "$i" -lt {{ .Values.valkey.replicas }} ]; do
+                host="{{ $name }}-$i.{{ $headless }}"
+                if [ "$host" != "$(hostname).{{ $headless }}" ]; then
+                  role=$(valkey-cli --no-auth-warning -h "$host" -p 6379 INFO replication 2>/dev/null | tr -d '\r' | sed -n 's/^role://p')
+                  if [ "$role" = "master" ]; then primary="$host"; break; fi
+                fi
+                i=$((i+1))
+              done
+              {
+                echo "requirepass $VALKEY_PASSWORD"
+                echo "masterauth $VALKEY_PASSWORD"
+                echo "maxmemory {{ .Values.valkey.maxMemory }}"
+                echo "maxmemory-policy noeviction"
+                echo "appendonly no"
+                echo 'save ""'
+                echo "replica-announce-ip $(hostname).{{ $headless }}"
+              } > /conf/valkey.conf
+              if [ -n "$primary" ]; then
+                echo "replicaof $primary 6379" >> /conf/valkey.conf
+              elif [ "$(hostname)" != "{{ $name }}-0" ]; then
+                echo "replicaof {{ $name }}-0.{{ $headless }} 6379" >> /conf/valkey.conf
+              fi
+              exec valkey-server /conf/valkey.conf
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "--no-auth-warning", "-p", "6379", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "--no-auth-warning", "-p", "6379", "ping"]
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+            - name: data
+              mountPath: /data
+          resources: {{- toYaml .Values.valkey.resources | nindent 12 }}
+        - name: sentinel
+          image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+            # same two names as on the valkey container, for the same reason
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+            - name: VALKEYCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_VALKEY_PASSWORD
+          command:
+            - sh
+            - -ec
+            # A restarted sentinel starts from a BLANK config (tmpfs), so
+            # it must be told who the primary is: it asks the valkey pods,
+            # and falls back to pod 0 when nobody answers. The other
+            # sentinels correct it through gossip if the election moved
+            # meanwhile. Hostnames, not pod IPs: an IP dies with its pod,
+            # a name survives it.
+            - |
+              primary="{{ $name }}-0.{{ $headless }}"
+              i=0
+              while [ "$i" -lt {{ .Values.valkey.replicas }} ]; do
+                host="{{ $name }}-$i.{{ $headless }}"
+                role=$(valkey-cli --no-auth-warning -h "$host" -p 6379 INFO replication 2>/dev/null | tr -d '\r' | sed -n 's/^role://p')
+                if [ "$role" = "master" ]; then primary="$host"; break; fi
+                i=$((i+1))
+              done
+              {
+                echo "port 26379"
+                echo "requirepass $VALKEY_PASSWORD"
+                echo "sentinel resolve-hostnames yes"
+                echo "sentinel announce-hostnames yes"
+                echo "sentinel announce-ip $(hostname).{{ $headless }}"
+                echo "sentinel monitor {{ .Values.valkey.masterName }} $primary 6379 {{ .Values.valkey.quorum }}"
+                echo "sentinel auth-pass {{ .Values.valkey.masterName }} $VALKEY_PASSWORD"
+                echo "sentinel down-after-milliseconds {{ .Values.valkey.masterName }} 5000"
+                echo "sentinel failover-timeout {{ .Values.valkey.masterName }} 60000"
+                echo "sentinel parallel-syncs {{ .Values.valkey.masterName }} 1"
+              } > /conf/sentinel.conf
+              exec valkey-sentinel /conf/sentinel.conf
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "--no-auth-warning", "-p", "26379", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "--no-auth-warning", "-p", "26379", "ping"]
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - name: sentinel-conf
+              mountPath: /conf
+          resources: {{- toYaml .Values.valkey.sentinelResources | nindent 12 }}
+      volumes:
+        # tmpfs everywhere: the configuration carries the password and the
+        # data is disposable counters — neither belongs on a disk
+        - name: conf
+          emptyDir:
+            medium: Memory
+        - name: sentinel-conf
+          emptyDir:
+            medium: Memory
+        - name: data
+          emptyDir:
+            medium: Memory
+            # a replica receives a full snapshot during its initial sync;
+            # the dataset itself is bounded by maxmemory, far below this
+            sizeLimit: 256Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "paraphe.selecteurValkey" . | nindent 6 }}
+---
+{{/* Only the application and the valkey pods themselves (replication,
+     sentinel gossip) may speak to Valkey: it holds no campaign data, but
+     an open counter store would let any pod in the cluster reset or
+     exhaust the ceilings. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "paraphe.selecteurValkey" . | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "paraphe.selecteur" . | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "paraphe.selecteurValkey" . | nindent 14 }}
+      ports:
+        - port: 6379
+        - port: 26379
+{{- end }}
