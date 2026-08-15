@@ -45,6 +45,8 @@ type hostingRequest struct {
 	RequesterName  string            `json:"requester_name"`
 	Message        string            `json:"message"`
 	Campaign       map[string]string `json:"campaign"`
+	// nil = listed: the directory is the default, discretion the choice
+	Listed *bool `json:"listed"`
 }
 
 // POST /api/demande — public form to host a campaign.
@@ -167,11 +169,11 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 	var id int64
 	if err := s.tx(r).QueryRow(r.Context(),
 		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
-			"requester_name, message, state, ts) "+
-			"VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8) RETURNING id",
+			"requester_name, message, state, ts, listed) "+
+			"VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9) RETURNING id",
 		slug, name, string(campaign), email, requester,
 		strings.TrimSpace(d.Message), RequestPending,
-		shortTimestamp()).Scan(&id); err != nil {
+		shortTimestamp(), d.Listed == nil || *d.Listed).Scan(&id); err != nil {
 		s.failure(w, err)
 		return
 	}
@@ -199,7 +201,7 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 	// campaign's off the only screen that can accept it, with no way for
 	// that campaign to know.
 	const queueColumns = "id, slug, name, requester_email, requester_name, " +
-		"message, state, COALESCE(reason,'') AS reason, COALESCE(ts,'') AS ts, " +
+		"message, state, listed, COALESCE(reason,'') AS reason, COALESCE(ts,'') AS ts, " +
 		"COALESCE(decided_at,'') AS decided_at, " +
 		"COALESCE(decided_by,'') AS decided_by FROM hosting_requests "
 	requests, err := s.rows(r,
@@ -236,13 +238,14 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 // end here: one implementation, so the two doors cannot drift apart.
 func createCampaign(ctx context.Context, tx pgx.Tx, slug, name string,
 	campaign []byte, coordinationEmail, coordinationName, createdBy string,
+	listed bool,
 ) (int, string, error) {
 	var orgID int
 	if err := tx.QueryRow(ctx,
-		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
-			"VALUES($1,$2,$3::jsonb,$4,$5,$6) RETURNING id",
+		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at, listed) "+
+			"VALUES($1,$2,$3::jsonb,$4,$5,$6,$7) RETURNING id",
 		slug, name, string(campaign), defaultBatchSize, OrgActive,
-		shortTimestamp()).Scan(&orgID); err != nil {
+		shortTimestamp(), listed).Scan(&orgID); err != nil {
 		return 0, "", err
 	}
 	password, err := ReadablePassword()
@@ -325,9 +328,10 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var requesterEmail, requesterName string
+		var listed bool
 		if err := s.tx(r).QueryRow(ctx,
-			"SELECT requester_email, requester_name FROM hosting_requests WHERE id=$1",
-			id).Scan(&requesterEmail, &requesterName); err != nil {
+			"SELECT requester_email, requester_name, listed FROM hosting_requests WHERE id=$1",
+			id).Scan(&requesterEmail, &requesterName, &listed); err != nil {
 			s.failure(w, err)
 			return
 		}
@@ -343,7 +347,7 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		orgID, password, err := createCampaign(ctx, s.tx(r), slug, name,
-			blank, requesterEmail, requesterName, accountOf(r).Email)
+			blank, requesterEmail, requesterName, accountOf(r).Email, listed)
 		if err != nil {
 			s.failure(w, err)
 			return
@@ -381,6 +385,8 @@ type campaignCreation struct {
 	CoordinationEmail string            `json:"coordination_email"`
 	CoordinationName  string            `json:"coordination_name"`
 	Campaign          map[string]string `json:"campaign"`
+	// nil = listed, like the public form
+	Listed *bool `json:"listed"`
 }
 
 // POST /api/admin/campaigns — the administration opens a campaign without a
@@ -448,7 +454,7 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgID, password, err := createCampaign(ctx, s.tx(r), slug, name, campaign,
-		email, coordination, accountOf(r).Email)
+		email, coordination, accountOf(r).Email, d.Listed == nil || *d.Listed)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -475,7 +481,7 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 // campaign endpoint says the name.
 func (s *Server) routeCampaignDirectory(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.rows(r,
-		"SELECT slug, name FROM orgs WHERE state=$1 ORDER BY name, slug",
+		"SELECT slug, name FROM orgs WHERE state=$1 AND listed ORDER BY name, slug",
 		OrgActive)
 	if err != nil {
 		s.failure(w, err)

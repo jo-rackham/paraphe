@@ -246,14 +246,16 @@ export const exportUrl = () => `${ROOT}export.csv`;
 export const updateCampaign = (
   campaign: Record<string, string>,
   batchSize?: number,
+  listed?: boolean,
 ): Promise<{
   campaign: Record<string, string>;
   batch_size: number;
+  listed: boolean;
   unfilled: string[];
 }> =>
   call("campaign", {
     method: "POST",
-    body: { campaign, batch_size: batchSize },
+    body: { campaign, batch_size: batchSize, listed },
   });
 
 // -- Instance landing page (apex) -------------------------------------------
@@ -290,6 +292,7 @@ export const createCampaign = (creation: {
   name: string;
   coordination_email: string;
   coordination_name: string;
+  listed?: boolean;
 }): Promise<{
   organisation: number;
   slug: string;

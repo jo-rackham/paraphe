@@ -57,6 +57,12 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			reason TEXT NOT NULL DEFAULT '',
 			ts TEXT, decided_at TEXT, decided_by TEXT)`,
 		`CREATE INDEX IF NOT EXISTS hosting_requests_state ON hosting_requests(state, id DESC)`,
+		// Whether the apex directory lists the campaign: chosen on the
+		// hosting request, carried onto the organisation at approval, and
+		// adjustable later by its coordination — discretion is strategic
+		// for a campaign preparing its announcement.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT TRUE`,
 		// The work columns move out of `mayors`: they are the only ones that
 		// belong to an organisation, hence the only ones walled.
 		`CREATE TABLE IF NOT EXISTS assignments(
@@ -144,9 +150,9 @@ func (s *Server) ReadOrg(ctx context.Context, q interface {
 	var o Org
 	var campaign []byte
 	err := q.QueryRow(ctx,
-		"SELECT id, slug, name, campaign::text, batch_size, state, COALESCE(created_at,'') "+
+		"SELECT id, slug, name, campaign::text, batch_size, state, COALESCE(created_at,''), listed "+
 			"FROM orgs WHERE slug=$1", slug).
-		Scan(&o.ID, &o.Slug, &o.Name, &campaign, &o.BatchSize, &o.State, &o.CreatedAt)
+		Scan(&o.ID, &o.Slug, &o.Name, &campaign, &o.BatchSize, &o.State, &o.CreatedAt, &o.Listed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -129,6 +129,11 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             — demandée par {d.requester_name} ({d.requester_email}), le {d.ts}
           </p>
           {d.message && <p>{d.message}</p>}
+          <p className="gris">
+            {d.listed
+              ? "Souhaite apparaître dans l'annuaire public."
+              : "Souhaite rester HORS de l'annuaire public."}
+          </p>
           <p>
             <label>
               Motif (transmis au demandeur en cas de refus)
@@ -223,6 +228,7 @@ function Creation({
     name: string;
     coordination_email: string;
     coordination_name: string;
+    listed: boolean;
   }) => Promise<void>;
   onMessage: (m: Message) => void;
 }) {
@@ -230,6 +236,7 @@ function Creation({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [coordination, setCoordination] = useState("");
+  const [listed, setListed] = useState(true);
   const [sending, setSending] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -242,6 +249,7 @@ function Creation({
         name: name.trim(),
         coordination_email: email.trim(),
         coordination_name: coordination.trim(),
+        listed,
       });
       setSlug("");
       setName("");
@@ -302,6 +310,16 @@ function Creation({
             value={coordination}
             onChange={(e) => setCoordination(e.target.value)}
           />
+        </label>
+      </p>
+      <p>
+        <label>
+          <input
+            type="checkbox"
+            checked={listed}
+            onChange={(e) => setListed(e.target.checked)}
+          />{" "}
+          Référencer la campagne dans l'annuaire public
         </label>
       </p>
       <button type="submit" aria-disabled={sending || undefined}>

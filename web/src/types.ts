@@ -65,7 +65,7 @@ export interface ServerConfig {
   ranks: Rank[];
   no_account: boolean;
   /** Present when the instance hosts several campaigns. */
-  organisation?: { slug: string; name: string };
+  organisation?: { slug: string; name: string; listed: boolean };
 }
 
 /** The apex of a multi-campaign instance: no campaign to describe. */
@@ -86,6 +86,8 @@ export interface CampaignRequest {
   requester_name: string;
   message: string;
   campaign?: Record<string, string>;
+  /** absent = référencée : l'annuaire est le défaut, la discrétion le choix */
+  listed?: boolean;
 }
 
 export interface QueuedRequest {
@@ -96,6 +98,7 @@ export interface QueuedRequest {
   requester_name: string;
   message: string;
   state: "pending" | "accepted" | "refused";
+  listed: boolean;
   reason: string;
   ts: string;
   decided_at: string;

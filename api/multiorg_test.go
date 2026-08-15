@@ -453,6 +453,10 @@ func TestApexListsHostedCampaigns(t *testing.T) {
 		"UPDATE orgs SET state=$1 WHERE id=$2", OrgSuspended, suspended)
 	// still named by the shipped template: not an identity to advertise
 	createOrg(t, s, "gabarit", "Prénom NOM")
+	// chose discretion: real name, and still not advertised
+	discrete := createOrg(t, s, "discrete", "Campagne discrète")
+	execAsMaintenance(t, s,
+		"UPDATE orgs SET listed=FALSE WHERE id=$1", discrete)
 
 	apex := clientOn(t, srv, "paraphe.test")
 	code, rep := apex.call(http.MethodGet, "/api/campaigns", nil)
@@ -476,6 +480,10 @@ func TestApexListsHostedCampaigns(t *testing.T) {
 	if slugs["gabarit"] {
 		t.Fatal("a campaign still named by the template is advertised")
 	}
+	// discretion is a choice the directory honours
+	if slugs["discrete"] {
+		t.Fatal("a campaign that chose not to be listed is advertised")
+	}
 	// name and slug, and NOTHING else — a column added to orgs must not
 	// leak here by accident
 	for _, c := range campaigns {
@@ -489,6 +497,92 @@ func TestApexListsHostedCampaigns(t *testing.T) {
 	campaign := clientOn(t, srv, testSlug+".paraphe.test")
 	if code, _ := campaign.call(http.MethodGet, "/api/campaigns", nil); code != http.StatusNotFound {
 		t.Errorf("/api/campaigns on a campaign host: %d, want 404", code)
+	}
+}
+
+// The listing choice travels through every door a campaign is born by, and
+// its coordination can change its mind afterwards.
+func TestListingChoiceTravelsAndToggles(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, "admin@paraphe.test", "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("administration sign-in: %d", code)
+	}
+
+	// door 1: the public form, discretion ticked, carried through approval
+	apex := clientOn(t, srv, "paraphe.test")
+	code, rep := apex.call(http.MethodPost, "/api/request", map[string]any{
+		"slug": "reservee", "name": "Campagne réservée",
+		"requester_email": "porteur@exemple.fr", "requester_name": "Porteur",
+		"listed": false,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("request refused: %d %v", code, rep)
+	}
+	code, queue := admin.call(http.MethodGet, "/api/admin/requests", nil)
+	if code != http.StatusOK {
+		t.Fatalf("queue: %d", code)
+	}
+	requests, _ := queue["requests"].([]any)
+	if len(requests) == 0 {
+		t.Fatal("no request in the queue")
+	}
+	first := requests[0].(map[string]any)
+	// the moderator sees the choice before deciding
+	if listed, _ := first["listed"].(bool); listed {
+		t.Fatal("the queue shows the request as listed; discretion was asked")
+	}
+	id := int64(first["id"].(float64))
+	if code, _ := admin.call(http.MethodPost, "/api/admin/requests/"+itoa(id),
+		map[string]any{"decision": RequestAccepted}); code != http.StatusOK {
+		t.Fatalf("approval: %d", code)
+	}
+	if scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='reservee'") {
+		t.Fatal("the request asked for discretion; the organisation is listed")
+	}
+
+	// door 2: direct creation, discretion ticked
+	code, dc := admin.call(http.MethodPost, "/api/admin/campaigns", map[string]any{
+		"slug": "directe-discrete", "name": "Directe discrète",
+		"coordination_email": "coord@exemple.fr", "coordination_name": "C",
+		"listed": false,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("direct creation: %d %v", code, dc)
+	}
+	if scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='directe-discrete'") {
+		t.Fatal("direct creation asked for discretion; the organisation is listed")
+	}
+
+	// and the coordination changes its mind from « Mon équipe »
+	pw, _ := dc["password"].(string)
+	campaign := clientOn(t, srv, "directe-discrete.paraphe.test")
+	if code := campaign.signIn("coord@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	code, upd := campaign.call(http.MethodPost, "/api/campaign",
+		map[string]any{"listed": true})
+	if code != http.StatusOK {
+		t.Fatalf("toggle: %d %v", code, upd)
+	}
+	if listed, _ := upd["listed"].(bool); !listed {
+		t.Fatal("the update response does not carry the new choice")
+	}
+	if !scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='directe-discrete'") {
+		t.Fatal("the toggle did not reach the organisation")
+	}
+	// a save that says nothing about the listing must not flip it
+	if code, _ := campaign.call(http.MethodPost, "/api/campaign",
+		map[string]any{"batch_size": 12}); code != http.StatusOK {
+		t.Fatal("plain save refused")
+	}
+	if !scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='directe-discrete'") {
+		t.Fatal("a save without the field flipped the listing")
 	}
 }
 

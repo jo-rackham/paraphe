@@ -9,6 +9,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
   const [requesterName, setRequesterName] = useState("");
   const [requesterEmail, setRequesterEmail] = useState("");
   const [pitch, setPitch] = useState("");
+  const [listed, setListed] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
         requester_name: requesterName.trim(),
         requester_email: requesterEmail.trim(),
         message: pitch.trim(),
+        listed,
       });
       setSent(rep.message);
     } catch (err) {
@@ -115,6 +117,21 @@ export function Demande({ config }: { config: InstanceConfig }) {
             onChange={(e) => setPitch(e.target.value)}
           />
         </label>
+      </p>
+      <p>
+        <label>
+          <input
+            type="checkbox"
+            checked={listed}
+            onChange={(e) => setListed(e.target.checked)}
+          />{" "}
+          Référencer la campagne dans l'annuaire public de {config.base_domain}
+        </label>
+      </p>
+      <p className="gris">
+        Décochez pour préparer la campagne discrètement : son adresse ne sera
+        pas affichée sur cet accueil. La coordination pourra changer ce choix à
+        tout moment.
       </p>
       <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Envoi…" : "Envoyer la demande"}

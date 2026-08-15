@@ -50,6 +50,9 @@ type Org struct {
 	BatchSize int               `json:"batch_size"`
 	State     string            `json:"state"`
 	CreatedAt string            `json:"created_at"`
+	// Listed: whether the apex directory shows this campaign — chosen on
+	// the hosting request, adjustable by coordination
+	Listed bool `json:"listed"`
 }
 
 // BaseDomain: the domain under which campaigns receive their subdomain.

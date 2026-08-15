@@ -19,6 +19,9 @@ import (
 type campaignRequest struct {
 	Campaign  map[string]string `json:"campaign"`
 	BatchSize *int              `json:"batch_size"`
+	// nil = untouched: the apex directory listing is edited from the same
+	// screen as the campaign, and a save must not flip it by omission
+	Listed *bool `json:"listed"`
 }
 
 // POST /api/campaign — coordination fills in its campaign.
@@ -78,6 +81,10 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	// is the one the request speaks for by construction. `orgs` is read by
 	// every campaign — resolving a subdomain requires it — which is why its
 	// WRITES are where naming the campaign matters most.
+	listed := org.Listed
+	if d.Listed != nil {
+		listed = *d.Listed
+	}
 	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
 		// The name follows the candidate: it is what /api/config returns as
@@ -85,7 +92,8 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		// out, it stayed at the template value for the campaign's whole
 		// life, however many times coordination filled the form.
 		"UPDATE orgs SET campaign="+req.p(string(raw))+"::jsonb, "+
-			"batch_size="+req.p(batchSize)+", name=COALESCE(NULLIF("+
+			"batch_size="+req.p(batchSize)+", listed="+req.p(listed)+", "+
+			"name=COALESCE(NULLIF("+
 			req.p(strings.TrimSpace(values["candidat"]))+",''), name) "+
 			"WHERE id=$1",
 		req.args...); err != nil {
@@ -106,7 +114,7 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyJSON(w, http.StatusOK, map[string]any{
-		"campaign": values, "batch_size": batchSize,
+		"campaign": values, "batch_size": batchSize, "listed": listed,
 		"unfilled": UnfilledKeys(values),
 	})
 }

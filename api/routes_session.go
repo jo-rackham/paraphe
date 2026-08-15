@@ -51,15 +51,19 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	campaign := completeCampaign(org.Campaign)
 	replyJSON(w, http.StatusOK, map[string]any{
-		"mode":         "team",
-		"campaign":     campaign,
-		"batch_size":   org.BatchSize,
-		"unfilled":     UnfilledKeys(campaign),
-		"source_url":   s.cfg.SourceURL,
-		"statuses":     Statuses,
-		"ranks":        Ranks,
-		"no_account":   noAccount,
-		"organisation": map[string]any{"slug": org.Slug, "name": org.Name},
+		"mode":       "team",
+		"campaign":   campaign,
+		"batch_size": org.BatchSize,
+		"unfilled":   UnfilledKeys(campaign),
+		"source_url": s.cfg.SourceURL,
+		"statuses":   Statuses,
+		"ranks":      Ranks,
+		"no_account": noAccount,
+		"organisation": map[string]any{
+			"slug": org.Slug, "name": org.Name,
+			// the toggle "Mon équipe" shows needs the current state
+			"listed": org.Listed,
+		},
 	})
 }
 

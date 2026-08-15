@@ -27,6 +27,7 @@ function ConfigurationCampagne({
 }) {
   const [values, setValues] = useState<Record<string, string>>(cfg.campaign);
   const [batchSize, setBatchSize] = useState(String(cfg.batch_size));
+  const [listed, setListed] = useState(cfg.organisation?.listed ?? true);
   const [sending, setSending] = useState(false);
 
   const save = async (e: React.FormEvent) => {
@@ -34,12 +35,16 @@ function ConfigurationCampagne({
     if (sending) return; // aria-disabled greys the button but keeps it live
     setSending(true);
     try {
-      const r = await API.updateCampaign(values, Number(batchSize));
+      const r = await API.updateCampaign(values, Number(batchSize), listed);
       onCfg({
         ...cfg,
         campaign: r.campaign,
         batch_size: r.batch_size,
         unfilled: r.unfilled,
+        organisation: cfg.organisation && {
+          ...cfg.organisation,
+          listed: r.listed,
+        },
       });
       onMessage({
         tone: "ok",
@@ -82,6 +87,25 @@ function ConfigurationCampagne({
           />
         </label>
       </p>
+      {cfg.organisation && (
+        <>
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                checked={listed}
+                onChange={(e) => setListed(e.target.checked)}
+              />{" "}
+              Référencer la campagne dans l'annuaire public de l'instance
+            </label>
+          </p>
+          <p className="gris">
+            Décochée, l'adresse de la campagne n'apparaît pas sur l'accueil de
+            l'instance — elle reste joignable par qui la connaît. L'annuaire ne
+            l'affiche de toute façon qu'une fois la campagne nommée ci-dessus.
+          </p>
+        </>
+      )}
       <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Enregistrement…" : "Enregistrer la campagne"}
       </button>
