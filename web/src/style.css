@@ -178,7 +178,7 @@ button.secondaire, .bouton.secondaire { background: var(--noir); color: #fff;
 button.lien { background: none; border: 0; color: var(--lien); font: inherit;
   padding: 0; cursor: pointer; text-decoration: underline; text-align: left; }
 main button.lien { font-weight: inherit; }
-input[type=text], input[type=password], select, textarea {
+input[type=text], input[type=password], input[type=email], select, textarea {
   font: inherit; padding: .5rem .6rem; border: 1px solid var(--champ-trait);
   border-radius: .45rem; width: 100%; background: var(--champ);
   color: var(--texte); }
