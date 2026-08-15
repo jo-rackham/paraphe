@@ -17,6 +17,7 @@ import {
   Fiche,
   Guide,
   Hexagone,
+  LigneMaire,
   label,
   NavOnglets,
   PiedDePage,
@@ -24,6 +25,7 @@ import {
   ROLES,
   SkipLink,
   STATUSES,
+  TableMaires,
   useViewFocus,
 } from "./common.tsx";
 import * as M from "./messages.ts";
@@ -605,21 +607,11 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
         <p className="gris">Aucun pour l'instant — prenez un lot ci-dessus.</p>
       ) : (
         <div className="carte">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Commune</th>
-                <th scope="col">Département</th>
-                <th scope="col">Signal</th>
-                <th scope="col">Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.mine.map((m) => (
-                <LigneMaire key={m.insee_code} m={m} onOpen={onOpen} />
-              ))}
-            </tbody>
-          </table>
+          <TableMaires>
+            {data.mine.map((m) => (
+              <LigneCarte key={m.insee_code} m={m} onOpen={onOpen} />
+            ))}
+          </TableMaires>
         </div>
       )}
 
@@ -680,7 +672,8 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
   );
 }
 
-function LigneMaire({
+/** The shared row, fed with this mode's status and reservation columns. */
+function LigneCarte({
   m,
   onOpen,
 }: {
@@ -688,36 +681,12 @@ function LigneMaire({
   onOpen: (insee: string) => void;
 }) {
   return (
-    <tr>
-      <td>
-        <button
-          type="button"
-          className="lien"
-          onClick={() => onOpen(m.insee_code)}
-        >
-          <strong>{m.commune}</strong>
-        </button>
-        <br />
-        <span className="gris">
-          {m.title} {m.first_name} {m.last_name}
-        </span>
-      </td>
-      <td>{m.department}</td>
-      <td className="gris">
-        {M.rank(m) === "has_endorsed"
-          ? `${m.recent_candidate} (${m.recent_year})`
-          : M.RANKS[M.rank(m)]}
-      </td>
-      <td>
-        <Chip status={m.status ?? "to_contact"} />
-        {m.volunteer_name && (
-          <>
-            <br />
-            <span className="gris">{m.volunteer_name}</span>
-          </>
-        )}
-      </td>
-    </tr>
+    <LigneMaire
+      m={m}
+      status={m.status}
+      volunteer={m.volunteer_name}
+      onOpen={() => onOpen(m.insee_code)}
+    />
   );
 }
 
@@ -895,21 +864,11 @@ function ListeServeur({
 
       <CompteurResultats shown={rows.length} total={total} />
       <div className="carte">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Commune</th>
-              <th scope="col">Département</th>
-              <th scope="col">Signal</th>
-              <th scope="col">Statut</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <LigneMaire key={m.insee_code} m={m} onOpen={onOpen} />
-            ))}
-          </tbody>
-        </table>
+        <TableMaires>
+          {rows.map((m) => (
+            <LigneCarte key={m.insee_code} m={m} onOpen={onOpen} />
+          ))}
+        </TableMaires>
         <div ref={sentinel} />
         {loading && (
           <p className="gris" role="status" style={{ textAlign: "center" }}>

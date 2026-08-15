@@ -322,6 +322,86 @@ export function Chip({ status }: { status: string }) {
   );
 }
 
+/**
+ * One row of a mayor list, shared by the three mayor tables (browser list,
+ * server list, dashboard). Under 640 px the row lays out as a stacked card
+ * (`table.maires`), and a changed display strips the implicit table
+ * semantics — the explicit roles below keep them for assistive technology.
+ */
+export function LigneMaire({
+  m,
+  status,
+  volunteer,
+  onOpen,
+}: {
+  m: Mayor;
+  status?: string | null;
+  /** Team mode: who reserved the card, shown under its status. */
+  volunteer?: string | null;
+  onOpen: (m: Mayor) => void;
+}) {
+  // biome-ignore-start lint/a11y/noRedundantRoles: kept on purpose — display:grid at narrow widths strips the implicit roles
+  return (
+    <tr role="row">
+      <td role="cell">
+        <button type="button" className="lien" onClick={() => onOpen(m)}>
+          <strong>{m.commune}</strong>
+        </button>
+        <br />
+        <span className="gris">
+          {m.title} {m.first_name} {m.last_name}
+        </span>
+      </td>
+      <td role="cell" className="departement">
+        {m.department}
+      </td>
+      <td role="cell" className="gris">
+        {M.rank(m) === "has_endorsed"
+          ? `${m.recent_candidate} (${m.recent_year})`
+          : M.RANKS[M.rank(m)]}
+      </td>
+      <td role="cell">
+        <Chip status={status ?? "to_contact"} />
+        {volunteer && (
+          <>
+            <br />
+            <span className="gris">{volunteer}</span>
+          </>
+        )}
+      </td>
+    </tr>
+  );
+  // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
+}
+
+/** The mayor table shell around `LigneMaire` rows — one copy of the four
+ * column headers, and of the roles that survive the card layout. */
+export function TableMaires({ children }: { children: ReactNode }) {
+  // biome-ignore-start lint/a11y/noRedundantRoles: kept on purpose — display changes at narrow widths strip the implicit roles
+  return (
+    <table className="maires" role="table">
+      <thead role="rowgroup">
+        <tr role="row">
+          <th scope="col" role="columnheader">
+            Commune
+          </th>
+          <th scope="col" role="columnheader">
+            Département
+          </th>
+          <th scope="col" role="columnheader">
+            Signal
+          </th>
+          <th scope="col" role="columnheader">
+            Statut
+          </th>
+        </tr>
+      </thead>
+      <tbody role="rowgroup">{children}</tbody>
+    </table>
+  );
+  // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
+}
+
 export function PiedDePage({
   children,
   sourceUrl,

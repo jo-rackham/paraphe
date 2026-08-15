@@ -3,7 +3,6 @@ import {
   Alerte,
   CAMPAIGN_FIELDS,
   type CardDraft,
-  Chip,
   CompteurResultats,
   campaignLabel,
   EMPTY_CFG,
@@ -11,10 +10,12 @@ import {
   Fiche,
   Guide,
   Hexagone,
+  LigneMaire,
   NavOnglets,
   PiedDePage,
   RenderGuard,
   SkipLink,
+  TableMaires,
   useViewFocus,
 } from "./common.tsx";
 import {
@@ -862,48 +863,16 @@ function Liste({
         total={mayors.length}
       />
       <div className="carte">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Commune</th>
-              <th scope="col">Département</th>
-              <th scope="col">Signal</th>
-              <th scope="col">Statut</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mayors.slice(0, shown).map((m) => (
-              <tr key={m.insee_code as string}>
-                <td>
-                  <button
-                    type="button"
-                    className="lien"
-                    onClick={() => onChoose(m)}
-                  >
-                    <strong>{m.commune}</strong>
-                  </button>
-                  <br />
-                  <span className="gris">
-                    {m.title} {m.first_name} {m.last_name}
-                  </span>
-                </td>
-                <td>{m.department}</td>
-                <td className="gris">
-                  {M.rank(m) === "has_endorsed"
-                    ? `${m.recent_candidate} (${m.recent_year})`
-                    : M.RANKS[M.rank(m)]}
-                </td>
-                <td>
-                  <Chip
-                    status={
-                      tracking[m.insee_code as string]?.status ?? "to_contact"
-                    }
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <TableMaires>
+          {mayors.slice(0, shown).map((m) => (
+            <LigneMaire
+              key={m.insee_code as string}
+              m={m}
+              status={tracking[m.insee_code as string]?.status}
+              onOpen={onChoose}
+            />
+          ))}
+        </TableMaires>
         {mayors.length === 0 && (
           <p className="gris">Aucun maire avec ces critères.</p>
         )}

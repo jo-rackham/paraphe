@@ -109,8 +109,10 @@ button, .bouton { background: var(--accent); color: var(--accent-txt); border: 0
 button:hover, .bouton:hover { background: var(--jaune-vif); }
 button.secondaire, .bouton.secondaire { background: var(--noir); color: #fff;
   border-bottom-color: var(--jaune); }
+/* text-align: a button centres its label, and a link-styled button that
+   wraps (a long commune name on a phone) must read like a link */
 button.lien { background: none; border: 0; color: var(--lien); font: inherit;
-  padding: 0; cursor: pointer; text-decoration: underline; }
+  padding: 0; cursor: pointer; text-decoration: underline; text-align: left; }
 main button.lien { font-weight: inherit; }
 input[type=text], input[type=password], select, textarea {
   font: inherit; padding: .5rem .6rem; border: 1px solid var(--champ-trait);
@@ -163,6 +165,33 @@ footer .officiel { border: 1px solid var(--trait);
          border-left: 5px solid var(--rouge); border-radius: .45rem;
          padding: .5rem .8rem; }
 @media (max-width: 640px) { main { padding: .6rem } .marque .sous { display: none } }
+
+/* Under 640 px a mayor row lays out as a stacked card: the four-column
+   table forced a horizontal scroll that hid the status. The explicit roles
+   in the markup (TableMaires) keep the semantics this display change
+   strips.
+      commune, elected official     status chip
+      signal                        department   */
+@media (max-width: 640px) {
+  table.maires, table.maires tbody { display: block; }
+  table.maires thead { position: absolute; width: 1px; height: 1px;
+    margin: -1px; overflow: hidden; clip-path: inset(50%); }
+  table.maires tr { display: grid; grid-template-columns: 1fr auto;
+    column-gap: .6rem; align-items: start;
+    border: 1px solid var(--trait); border-radius: .5rem;
+    padding: .5rem .65rem; margin: .55rem 0; }
+  table.maires td { display: block; border: 0; padding: 0; }
+  table.maires td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  table.maires td:nth-child(2) { grid-column: 2; grid-row: 2;
+    text-align: right; font-size: .85rem; color: var(--texte-sec); }
+  table.maires td:nth-child(3) { grid-column: 1; grid-row: 2; }
+  table.maires td:nth-child(4) { grid-column: 2; grid-row: 1;
+    text-align: right; }
+  /* the filters above the list: two per row instead of a full-width
+     stack — only free text keeps the whole line */
+  form.enligne > div { min-width: 0; flex: 1 1 45%; }
+  form.enligne > div:has(input[type="text"]) { flex-basis: 100%; }
+}
 @media print { header, footer, .rayures, .tricolore, details summary { display: none } }
 
 /* GUIDE.md rendu dans l'application : la même source que le dépôt. */
