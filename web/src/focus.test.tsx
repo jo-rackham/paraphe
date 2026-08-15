@@ -301,6 +301,56 @@ describe("focus survives the control's own destruction", () => {
     expect(document.activeElement?.id).toBe("contenu");
   });
 
+  it("Demande: two submits in one tick file ONE request", async () => {
+    // the spies live for the whole file: an earlier journey already called
+    // this one, and counting its calls too would prove nothing
+    vi.mocked(API.requestCampaign).mockClear();
+    vi.mocked(API.me).mockRejectedValueOnce(
+      Object.assign(new Error("non connecté"), { code: 401 }),
+    );
+    vi.mocked(API.requestCampaign).mockResolvedValue({
+      id: 1,
+      slug: "ma-campagne",
+      message: "Demande enregistrée.",
+    });
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    const versDemande = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Demander"),
+    );
+    await click(versDemande as Element);
+    await flush();
+
+    const set = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      for (const input of container.querySelectorAll("input[required]")) {
+        set?.call(input, "ma-campagne");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    const submit = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Envoyer"),
+    ) as HTMLButtonElement;
+    // aria-disabled keeps the button clickable ON PURPOSE, so the handler is
+    // what has to refuse the second press — and `sending`, read from the
+    // render's closure, is still false for both
+    await act(async () => {
+      submit.form?.requestSubmit(submit);
+      submit.form?.requestSubmit(submit);
+    });
+    await flush();
+
+    expect(
+      vi.mocked(API.requestCampaign).mock.calls.length,
+      "one intended request filed two rows in the moderation queue",
+    ).toBe(1);
+  });
+
   it("RenderGuard: « Continuer » unmounts the error screen — focus is rescued", async () => {
     let boom = true;
     function Bomb() {

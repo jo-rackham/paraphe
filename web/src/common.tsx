@@ -284,6 +284,34 @@ export function rescueFocusAfterCommit() {
   }, 0);
 }
 
+/**
+ * The re-entry guard of a busy submit, told by a REF and not by state.
+ *
+ * `aria-disabled` greys the button and deliberately keeps it clickable — a
+ * `disabled` one drops keyboard focus to `<body>`. What refuses the second
+ * press is therefore the handler, and `if (sending) return` does not: React
+ * gives the handler the `sending` of the render it was created in, so two
+ * submits in the same tick both read `false` and both call the API. One
+ * intended hosting request then files two rows in the moderation queue, and
+ * one sign-in spends two of its ten attempts.
+ *
+ * Returns `busy()` — true when a call is already in flight — and `done()`.
+ * The visible state stays in React; only the guard is a ref.
+ */
+export function useSubmitGuard(): [() => boolean, () => void] {
+  const inFlight = useRef(false);
+  return [
+    () => {
+      if (inFlight.current) return true;
+      inFlight.current = true;
+      return false;
+    },
+    () => {
+      inFlight.current = false;
+    },
+  ];
+}
+
 /** First focusable element of every page; its target is `<main id="contenu">`. */
 export function SkipLink() {
   return (

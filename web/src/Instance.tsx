@@ -8,6 +8,7 @@ import {
   RenderGuard,
   SkipLink,
   ThemeToggle,
+  useSubmitGuard,
   useViewFocus,
 } from "./common.tsx";
 import { Moderation } from "./InstanceModeration.tsx";
@@ -355,10 +356,14 @@ function AdministrationSignIn({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [busy, done] = useSubmitGuard();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    // a REF, not `sending`: aria-disabled keeps the button clickable, and
+    // two submits in one tick both read the state of the render they were
+    // created in — one sign-in then spends two of its ten attempts
+    if (busy()) return;
     setError(null);
     setSending(true);
     try {
@@ -366,6 +371,7 @@ function AdministrationSignIn({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      done();
       setSending(false);
     }
   };
