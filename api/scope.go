@@ -13,12 +13,13 @@ import (
 // One HTTP request = one transaction, opened on the scope its Host header
 // designates.
 //
-// This is the non-negotiable counterpart of walling campaigns off by the
-// `org_id` column: the filter does not rest on the discipline of each SQL
-// query, but on `app.org_id` set here once and enforced by PostgreSQL. A
-// route that forgot its WHERE clause would still see nothing of another
-// campaign — which is exactly what TestNoCampaignSeesAnother
-// verifies.
+// The wall between campaigns is the `org_id` predicate that every query on
+// a walled table binds — as $1, by the single constructor scoped(r).
+// PostgreSQL enforces nothing itself (row-level security was a second wall
+// and was removed): two tests carry the whole guarantee.
+// TestEveryQueryOnAWalledTableNamesTheCampaign reads the package as an AST
+// and demands the predicate per table alias, and TestNoCampaignSeesAnother
+// runs two campaigns against every route.
 
 const scopeKey contextKey = 1
 
@@ -26,9 +27,9 @@ type Scope struct {
 	Tx pgx.Tx
 	// Org: the campaign being served. Nil on the instance scope (the apex).
 	Org *Org
-	// OrgID: the same scope as a number, and the one `app.org_id` carries —
-	// including the sentinels, where Org is nil: 0 on the apex. Every query
-	// on a walled table binds it: that predicate IS the wall.
+	// OrgID: the same scope as a number — including the sentinels, where
+	// Org is nil: 0 on the apex. Every query on a walled table binds it:
+	// that predicate IS the wall.
 	OrgID int
 
 	conn *pgxpool.Conn

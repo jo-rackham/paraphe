@@ -422,12 +422,12 @@ func zeroByte(expr ast.Expr) bool {
 // write path out of ten.
 func TestUnstorableTextIsRefusedAtTheEntryPoints(t *testing.T) {
 	files := apiPackage(t)
-	main, auth := files["main.go"], files["auth.go"]
-	if main == nil || auth == nil {
-		t.Fatal("main.go or auth.go missing: the entry points cannot be checked")
+	router, auth := files["router.go"], files["auth.go"]
+	if router == nil || auth == nil {
+		t.Fatal("router.go or auth.go missing: the entry points cannot be checked")
 	}
-	if !callsFunction(main, "refuseUnstorableText") {
-		t.Error("main.go: the path and query refusal no longer wraps the mux — " +
+	if !callsFunction(router, "refuseUnstorableText") {
+		t.Error("router.go: the path and query refusal no longer wraps the mux — " +
 			"a NUL in ?department= answers 500 again")
 	}
 	if !callsFunction(auth, "carriesNul") {
@@ -442,10 +442,10 @@ func TestUnstorableTextIsRefusedAtTheEntryPoints(t *testing.T) {
 	// second copy sit beside the legitimate one unnoticed. The one
 	// legitimate site — the pagination cursor is base64, so what the entry
 	// points see is the encoding, not the three text fields inside it.
-	exempt := map[string]bool{"routes_mayors.go:decodeCursor": true}
+	exempt := map[string]bool{"cursor.go:decodeCursor": true}
 	seen := map[string]bool{}
 	for name, file := range files {
-		if name == "main.go" || name == "auth.go" {
+		if name == "router.go" || name == "auth.go" {
 			continue
 		}
 		for _, decl := range file.Decls {

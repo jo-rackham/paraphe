@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -188,7 +188,7 @@ func CheckSettings(dir string) error {
 		}
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
+		slices.Sort(missing)
 		return fmt.Errorf("missing configuration:\n  %s",
 			strings.Join(missing, "\n  "))
 	}
@@ -244,6 +244,6 @@ func declaredKeys() string {
 	for _, s := range Settings {
 		keys = append(keys, s.Key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return strings.Join(keys, ", ")
 }

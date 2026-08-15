@@ -12,14 +12,14 @@ import (
 
 // Walls between campaigns.
 //
-// The filter does NOT rest on the discipline of each query: review already
-// found two scope holes in this very code (/export.csv, then /status), and a
-// third one between organisations would leak one campaign's work into
-// another. PostgreSQL therefore enforces the wall itself — ENABLE then FORCE
-// ROW LEVEL SECURITY, one policy per table, and `app.org_id` set for the
-// duration of the transaction at the start of every HTTP request. FORCE is
-// essential: without it, the owner of the tables (the account the
-// application connects with) walks past every policy.
+// The wall IS the discipline of each query: every one touching a
+// per-campaign table names the campaign, bound as $1 by the single
+// constructor scoped(r). Row-level security was a second wall and was
+// removed — do not reintroduce it without reopening that decision. What
+// holds the remaining wall is a pair of tests:
+// TestEveryQueryOnAWalledTableNamesTheCampaign reads the package as an AST
+// and refuses a query that leaves a walled alias unbounded, and
+// TestNoCampaignSeesAnother runs two campaigns against every route.
 
 // Tables that carry per-campaign rows. `mayors` is not among them: the list
 // is public, identical for everyone, and read-only.

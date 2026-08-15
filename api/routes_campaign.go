@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -33,7 +34,7 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	values := completeCampaign(org.Campaign)
 	var unknown []string
 	for k, v := range d.Campaign {
-		if !contains(CampaignKeys, k) {
+		if !slices.Contains(CampaignKeys, k) {
 			unknown = append(unknown, k)
 			continue
 		}

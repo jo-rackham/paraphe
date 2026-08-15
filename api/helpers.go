@@ -3,7 +3,15 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
+
+// normalizeEmail: addresses are stored and compared lowercase, trimmed —
+// one form everywhere, or a volunteer signing in as Jo@… would not match
+// the account their lead created as jo@….
+func normalizeEmail(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
 
 // text: CSV rendering of a value coming from PostgreSQL. NULL is written
 // empty, not "<nil>" — volunteers open this file in a spreadsheet.
@@ -41,13 +49,4 @@ func integer(v any) (int, bool) {
 		return x, true
 	}
 	return 0, false
-}
-
-func contains(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }

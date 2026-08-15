@@ -1,15 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
-	"strconv"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -138,7 +135,7 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	departments := []string{}
 	for _, d := range available {
-		if len(myDepts) == 0 || contains(myDepts, d) {
+		if len(myDepts) == 0 || slices.Contains(myDepts, d) {
 			departments = append(departments, d)
 		}
 	}
@@ -349,7 +346,7 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dept := text(m["department"])
-		if len(myDepts) > 0 && !contains(myDepts, dept) {
+		if len(myDepts) > 0 && !slices.Contains(myDepts, dept) {
 			errorJSON(w, http.StatusForbidden,
 				"%s n'est pas dans le périmètre de votre équipe.", dept)
 			return
@@ -441,7 +438,7 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// a local team only draws from its geographic scope
-	if d.Department != "" && len(myDepts) > 0 && !contains(myDepts, d.Department) {
+	if d.Department != "" && len(myDepts) > 0 && !slices.Contains(myDepts, d.Department) {
 		errorJSON(w, http.StatusForbidden,
 			"%s n'est pas dans le périmètre de votre équipe.", d.Department)
 		return
@@ -662,136 +659,4 @@ func (s *Server) loadMayor(w http.ResponseWriter, r *http.Request,
 		return nil, false
 	}
 	return m, true
-}
-
-func (s *Server) rows(r *http.Request, sql string, args ...any) ([]map[string]any, error) {
-	res, err := s.tx(r).Query(r.Context(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := pgx.CollectRows(res, pgx.RowToMap)
-	if err != nil {
-		return nil, err
-	}
-	if rows == nil {
-		rows = []map[string]any{}
-	}
-	return rows, nil
-}
-
-func (s *Server) column(r *http.Request, sql string, args ...any) ([]string, error) {
-	rows, err := s.tx(r).Query(r.Context(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var v *string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
-		if v != nil {
-			out = append(out, *v)
-		}
-	}
-	return out, rows.Err()
-}
-
-func (s *Server) counters(r *http.Request, sql string, args ...any) (map[string]int, error) {
-	rows, err := s.tx(r).Query(r.Context(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	for rows.Next() {
-		var key *string
-		var n int
-		if err := rows.Scan(&key, &n); err != nil {
-			return nil, err
-		}
-		if key != nil {
-			out[*key] = n
-		}
-	}
-	return out, rows.Err()
-}
-
-// orderedCounters keeps the SQL order, which a Go map would lose.
-type counter struct {
-	Key string `json:"key"`
-	N   int    `json:"n"`
-}
-
-func (s *Server) orderedCounters(r *http.Request, sql string, args ...any) ([]counter, error) {
-	rows, err := s.tx(r).Query(r.Context(), sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []counter{}
-	for rows.Next() {
-		var key *string
-		var n int
-		if err := rows.Scan(&key, &n); err != nil {
-			return nil, err
-		}
-		if key != nil {
-			out = append(out, counter{*key, n})
-		}
-	}
-	return out, rows.Err()
-}
-
-// cursor: the last row of a page, in the sort's own order. Opaque to the
-// client — it is a position in a result set, not something to compose.
-type cursor struct {
-	Score      int
-	Department string
-	Commune    string
-	Insee      string
-}
-
-func encodeCursor(score, department, commune, insee string) string {
-	n, _ := strconv.Atoi(strings.TrimSpace(score)) // unreadable sorts as 0, like the query
-	raw, _ := json.Marshal(cursor{Score: -n, Department: department,
-		Commune: commune, Insee: insee})
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-// A cursor that does not decode is REFUSED, not silently treated as "start
-// from the beginning": serving page 1 in its place returns page 1's own
-// cursor, so the browser asks again, forever.
-//
-// JSON rather than a separator: a commune is free to contain any byte, and
-// a delimiter that data can carry is a delimiter that will be carried.
-func decodeCursor(raw string) (*cursor, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("cursor is not base64: %w", err)
-	}
-	var c cursor
-	dec := json.NewDecoder(strings.NewReader(string(decoded)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("cursor is not a position: %w", err)
-	}
-	if dec.More() {
-		return nil, fmt.Errorf("cursor carries more than one position")
-	}
-	// pgx encodes it as int4: outside that range the query raises, and the
-	// volunteer reads "erreur interne" for a bookmark
-	if c.Score < math.MinInt32 || c.Score > math.MaxInt32 {
-		return nil, fmt.Errorf("cursor score %d is out of range", c.Score)
-	}
-	// same refusal as the NUL stripped from `q`: PostgreSQL rejects the
-	// byte in any text value, and these three travel the same query
-	if strings.ContainsRune(c.Department+c.Commune+c.Insee, 0) {
-		return nil, fmt.Errorf("cursor carries a NUL byte")
-	}
-	return &c, nil
 }

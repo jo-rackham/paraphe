@@ -11,13 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Password hashes never leave the database: the selection is explicit,
-// never `SELECT *` — a newly added column must not travel to the browser
-// because nobody re-read the query.
-const accountColumns = "c.email, c.name, c.role, c.team_id, c.active, " +
-	"COALESCE(c.personal_note,'') AS personal_note, COALESCE(c.created_at,'') AS created_at, " +
-	"COALESCE(c.created_by,'') AS created_by, g.name AS team"
-
 // GET /api/team — the accounts. Coordination sees everyone; a team lead,
 // only their own team.
 func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +127,7 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	me := accountOf(r)
-	email := strings.ToLower(strings.TrimSpace(d.Email))
+	email := normalizeEmail(d.Email)
 	name := strings.TrimSpace(d.Name)
 	if email == "" || !strings.Contains(email, "@") || name == "" {
 		errorJSON(w, http.StatusBadRequest, "Nom et adresse email sont requis.")
@@ -224,7 +217,7 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 	// UNESCAPED: chi matches on the raw path when it differs from the decoded
 	// one, so an address arrives as `someone%40example.fr`. Compared as is, it
 	// matches no account and the call answers 404 while looking like it worked.
-	target := strings.ToLower(strings.TrimSpace(pathParam(r, "email")))
+	target := normalizeEmail(pathParam(r, "email"))
 	if target == me.Email {
 		errorJSON(w, http.StatusBadRequest, "On ne désactive pas son propre compte.")
 		return

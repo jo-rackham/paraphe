@@ -1038,11 +1038,11 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		// one of queryCalls and judged there. They looked readable only
 		// because a package-level `sql` from another file leaked in; with
 		// that pollution gone, the promise has to be made explicitly.
-		"routes_mayors.go:rows":            true,
-		"routes_mayors.go:column":          true,
-		"routes_mayors.go:counters":        true,
-		"routes_mayors.go:orderedCounters": true,
-		"db.go:textColumn":                 true,
+		"queries.go:rows":            true,
+		"queries.go:column":          true,
+		"queries.go:counters":        true,
+		"queries.go:orderedCounters": true,
+		"import.go:textColumn":       true,
 	}
 
 	files := apiPackage(t)
