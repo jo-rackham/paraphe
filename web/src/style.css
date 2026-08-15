@@ -194,6 +194,9 @@ tr.inactif td { color: var(--texte-sec); }
           border-bottom: 1px solid var(--trait); padding-bottom: .3rem; }
 .groupe:first-child { margin-top: 0; }
 .aide { display: block; margin-top: .25rem; }
+/* a field still holding the shipped template value: it LOOKS filled, and
+   the dashed border plus the line under it say it is not */
+input.exemple, textarea.exemple { border-style: dashed; }
 .grand-tel { font-size: 1.5rem; font-weight: 700; margin: .2rem 0; }
 /* why this mayor: the one line that justifies the whole card */
 .pourquoi { border-left: 4px solid var(--jaune); padding: .1rem .8rem;

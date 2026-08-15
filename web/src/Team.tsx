@@ -8,8 +8,8 @@ import {
 import * as API from "./api.ts";
 import {
   Alerte,
-  CAMPAIGN_FIELDS,
   type CardDraft,
+  ChampsCampagne,
   Chip,
   CompteurResultats,
   campaignLabel,
@@ -1010,7 +1010,8 @@ function ConfigurationCampagne({
         text:
           r.unfilled.length === 0
             ? "Campagne enregistrée. Les messages sont prêts à partir."
-            : `Campagne enregistrée. Restent à remplir : ${r.unfilled.join(", ")}.`,
+            : "Campagne enregistrée. Restent à remplir : " +
+              `${r.unfilled.map(campaignLabel).join(", ")}.`,
       });
     } catch (err) {
       onError(err);
@@ -1027,46 +1028,12 @@ function ConfigurationCampagne({
         manque, l'application le dit sur chaque page et le publipostage de masse
         refuse de tourner.
       </p>
-      {CAMPAIGN_FIELDS.map((f, i) => (
-        <div key={f.key}>
-          {f.group !== CAMPAIGN_FIELDS[i - 1]?.group && (
-            <h3 className="groupe">{f.group}</h3>
-          )}
-          <p>
-            {/* associated by id, not nested: a textarea nested in its label
-                makes its own CONTENT part of the label's text */}
-            <label htmlFor={`champ-${f.key}`}>{f.label}</label>
-            {f.long ? (
-              <textarea
-                id={`champ-${f.key}`}
-                rows={3}
-                placeholder={f.example}
-                aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
-                value={values[f.key] ?? ""}
-                onChange={(e) =>
-                  setValues({ ...values, [f.key]: e.target.value })
-                }
-              />
-            ) : (
-              <input
-                id={`champ-${f.key}`}
-                type="text"
-                placeholder={f.example}
-                aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
-                value={values[f.key] ?? ""}
-                onChange={(e) =>
-                  setValues({ ...values, [f.key]: e.target.value })
-                }
-              />
-            )}
-            {f.hint && (
-              <span className="gris aide" id={`champ-${f.key}-aide`}>
-                {f.hint}
-              </span>
-            )}
-          </p>
-        </div>
-      ))}
+      {/* h3 group titles: under this card's own h2 */}
+      <ChampsCampagne
+        values={values}
+        groupe="h3"
+        onEdit={(key, value) => setValues({ ...values, [key]: value })}
+      />
       <p>
         <label>
           Maires attribués par « prendre un lot »

@@ -157,6 +157,87 @@ export const campaignLabel = (key: string): string =>
   CAMPAIGN_FIELDS.find((f) => f.key === key)?.label ?? key;
 
 /**
+ * The nine campaign fields, rendered once for both modes. A field still on
+ * its template value SAYS so, beside it: the shipped values look filled
+ * ("Prénom NOM"), and the banner alone never said which lines were the
+ * trap. The predicate is the engine's own `unfilledKeys` — the same
+ * normalisation that decides whether the mass mailing refuses to run.
+ *
+ * `groupe`: the heading level of the group titles — h2 right under the
+ * browser tab's h1, h3 under the team card's h2. The hierarchy has no
+ * level to skip.
+ */
+export function ChampsCampagne({
+  values,
+  onEdit,
+  groupe: Groupe,
+}: {
+  values: Record<string, string>;
+  onEdit: (key: string, value: string) => void;
+  groupe: "h2" | "h3";
+}) {
+  const unfilled = new Set(M.unfilledKeys(values));
+  return (
+    <>
+      {CAMPAIGN_FIELDS.map((f, i) => {
+        const example = unfilled.has(f.key);
+        const described =
+          [
+            f.hint ? `champ-${f.key}-aide` : "",
+            example ? `champ-${f.key}-exemple` : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined;
+        return (
+          <div key={f.key}>
+            {f.group !== CAMPAIGN_FIELDS[i - 1]?.group && (
+              <Groupe className="groupe">{f.group}</Groupe>
+            )}
+            <p>
+              {/* associated by id, not nested: a textarea nested in its
+                  label makes its own CONTENT part of the label's text */}
+              <label htmlFor={`champ-${f.key}`}>{f.label}</label>
+              {f.long ? (
+                <textarea
+                  id={`champ-${f.key}`}
+                  rows={3}
+                  placeholder={f.example}
+                  className={example ? "exemple" : undefined}
+                  aria-describedby={described}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => onEdit(f.key, e.target.value)}
+                />
+              ) : (
+                <input
+                  id={`champ-${f.key}`}
+                  type="text"
+                  placeholder={f.example}
+                  className={example ? "exemple" : undefined}
+                  aria-describedby={described}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => onEdit(f.key, e.target.value)}
+                />
+              )}
+              {example && (
+                <span className="gris aide" id={`champ-${f.key}-exemple`}>
+                  <strong>Valeur d'exemple</strong> — remplacez-la : elle
+                  partirait telle quelle dans les messages.
+                </span>
+              )}
+              {f.hint && (
+                <span className="gris aide" id={`champ-${f.key}-aide`}>
+                  {f.hint}
+                </span>
+              )}
+            </p>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
  * Decorative pictogram (emoji, arrow): hidden from assistive technology —
  * the text beside it carries the meaning, and a screen reader saying
  * "enveloppe" before every button label is noise, not information.

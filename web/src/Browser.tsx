@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alerte,
-  CAMPAIGN_FIELDS,
   type CardDraft,
+  ChampsCampagne,
   CompteurResultats,
   campaignLabel,
   EMPTY_CFG,
@@ -1080,47 +1080,12 @@ function CampaignTab({
           Ces valeurs remplissent les messages. Elles restent dans ce
           navigateur.
         </p>
-        {CAMPAIGN_FIELDS.map((f, i) => (
-          <div key={f.key}>
-            {f.group !== CAMPAIGN_FIELDS[i - 1]?.group && (
-              // h2: right under the tab's h1 — h3 would skip a level here
-              <h2 className="groupe">{f.group}</h2>
-            )}
-            <p>
-              {/* associated by id, not nested: a textarea nested in its
-                  label makes its own CONTENT part of the label's text */}
-              <label htmlFor={`champ-${f.key}`}>{f.label}</label>
-              {f.long ? (
-                <textarea
-                  id={`champ-${f.key}`}
-                  rows={3}
-                  placeholder={f.example}
-                  aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
-                  value={draft[f.key]}
-                  onChange={(e) =>
-                    onEdit({ ...draft, [f.key]: e.target.value })
-                  }
-                />
-              ) : (
-                <input
-                  id={`champ-${f.key}`}
-                  type="text"
-                  placeholder={f.example}
-                  aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
-                  value={draft[f.key]}
-                  onChange={(e) =>
-                    onEdit({ ...draft, [f.key]: e.target.value })
-                  }
-                />
-              )}
-              {f.hint && (
-                <span className="gris aide" id={`champ-${f.key}-aide`}>
-                  {f.hint}
-                </span>
-              )}
-            </p>
-          </div>
-        ))}
+        {/* h2 group titles: right under the tab's h1 */}
+        <ChampsCampagne
+          values={draft}
+          groupe="h2"
+          onEdit={(key, value) => onEdit({ ...draft, [key]: value })}
+        />
         <p>
           <label>
             Votre touche personnelle (insérée dans vos emails)
