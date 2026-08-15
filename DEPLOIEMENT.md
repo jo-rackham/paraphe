@@ -151,6 +151,32 @@ puis pointez `PARAPHE_DATABASE_URL` sur ce rôle. Avec CloudNativePG, le secret
 `<cluster>-app` généré par l'opérateur convient déjà : son rôle n'est pas
 superutilisateur.
 
+#### Ce que ce rôle peut encore faire, et pourquoi c'est assumé
+
+Ce rôle est **propriétaire** des tables — il faut bien que quelqu'un les crée,
+et l'application fait son propre schéma au démarrage. `FORCE ROW LEVEL
+SECURITY` le fait obéir aux politiques ligne à ligne, mais un propriétaire
+garde quatre pouvoirs qu'aucune politique ne borne :
+
+- `TRUNCATE` — une politique n'est **jamais** consultée pour TRUNCATE ;
+- `LOCK TABLE … ACCESS EXCLUSIVE` — ne visite aucune ligne ;
+- `DROP TABLE` ;
+- `ALTER TABLE … DISABLE ROW LEVEL SECURITY` — le mur tombe en une instruction.
+
+Ces droits ne se révoquent pas au propriétaire, et un event trigger qui les
+refuserait exige un superutilisateur, que CloudNativePG ne fournit pas. Le seul
+correctif réel serait deux rôles — un propriétaire pour le schéma, un rôle
+d'exécution qui ne reçoit que `SELECT, INSERT, UPDATE, DELETE` — au prix d'un
+second rôle à provisionner et d'une étape de migration séparée. **Choix
+assumé : un seul rôle.**
+
+Ce qui reste en face : la suite de tests refuse ces quatre verbes contre une
+table cloisonnée **dans le code source**, donc personne ne les écrit par
+inadvertance. Le risque résiduel est un attaquant capable d'exécuter du SQL
+arbitraire — exactement la situation où RLS devrait le contenir, et où il
+pourrait ici s'en affranchir. À rouvrir si l'instance héberge un jour des
+campagnes rivales.
+
 ### Kubernetes + HAProxy Ingress
 
 Le chart rend l'Ingress avec **deux hôtes** dès que `instance.baseDomain` est

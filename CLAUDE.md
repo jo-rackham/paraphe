@@ -375,3 +375,17 @@ Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
   l'avertit en mono. Les tests d'intégration créent exprès un rôle sans
   privilège : joués sous le compte d'administration, ils vérifieraient un
   cloisonnement qui n'existe pas en production.
+- **Limite ASSUMÉE : le rôle applicatif est PROPRIÉTAIRE des tables.** Un seul
+  rôle est provisionné, celui que CNPG génère, et l'application fait son propre
+  DDL au démarrage. `FORCE ROW LEVEL SECURITY` le fait obéir aux politiques sur
+  les lignes, mais un propriétaire garde `TRUNCATE` (aucune politique n'est
+  jamais consultée pour TRUNCATE), `LOCK`, `DROP TABLE` et `ALTER TABLE …
+  DISABLE ROW LEVEL SECURITY` — le mur tombe en une instruction. Ces droits ne
+  se révoquent pas, et un event trigger qui les refuserait exige un
+  superutilisateur, que CNPG ne donne pas : **il n'existe pas de demi-mesure
+  côté base**. Ce qui reste : `TestEveryQueryOnAWalledTableNamesTheCampaign`
+  refuse ces quatre verbes contre une table murée **dans le source**, donc le
+  chemin « quelqu'un l'écrit » est fermé ; le chemin « quelqu'un obtient du SQL
+  arbitraire » ne l'est que par l'absence d'injection. Séparer propriétaire et
+  applicatif est le seul vrai correctif, et il a été écarté pour ne provisionner
+  qu'un rôle.
