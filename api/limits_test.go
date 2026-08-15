@@ -63,10 +63,23 @@ func apiPackage(t *testing.T) map[string]*ast.File {
 	return files
 }
 
-// stringValues: every identifier bound to a string the canary can read —
-// constants AND variables, at package level or inside a function. Reading
-// only constants misses a query moved into a local variable, and with it
-// that query's missing LIMIT.
+// stringValues: every identifier bound to a string at PACKAGE level —
+// constants and variables, declared at the top of a file and nowhere else.
+//
+// It used to walk each file whole, learning from every assignment it met,
+// including those inside function bodies. Two consequences, and both were
+// holes rather than imprecision:
+//
+//   - It kept the LAST value it saw for a name, wherever that was. A package
+//     binding holding unbounded SQL, plus a function NEVER CALLED reassigning
+//     it to a bounded form, made the canary read the bounded one while the
+//     driver ran the other.
+//   - The map is keyed on the name alone, so a `var` local to a dead function
+//     overwrote the package binding of the same name.
+//
+// What is written inside a function belongs to that function: localScope
+// learns it there, from the function's own body, where a dead sibling cannot
+// reach it.
 func stringValues(files map[string]*ast.File) map[string]string {
 	known := map[string]string{}
 	learn := func(names []*ast.Ident, values []ast.Expr) {
@@ -87,33 +100,20 @@ func stringValues(files map[string]*ast.File) map[string]string {
 	// several passes: one binding may be built from another
 	for range 3 {
 		for _, file := range files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				switch decl := n.(type) {
-				case *ast.GenDecl:
-					if decl.Tok != token.CONST && decl.Tok != token.VAR {
-						return true
-					}
-					for _, spec := range decl.Specs {
-						if value, ok := spec.(*ast.ValueSpec); ok {
-							learn(value.Names, value.Values)
-						}
-					}
-				case *ast.AssignStmt:
-					if decl.Tok != token.DEFINE && decl.Tok != token.ASSIGN {
-						return true
-					}
-					var names []*ast.Ident
-					for _, target := range decl.Lhs {
-						ident, ok := target.(*ast.Ident)
-						if !ok {
-							return true
-						}
-						names = append(names, ident)
-					}
-					learn(names, decl.Rhs)
+			// file.Decls and not ast.Inspect: a `var` inside a function body
+			// is a GenDecl too, and Inspect reaches it. Only what is declared
+			// at the top of a file is visible to the whole package.
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
+					continue
 				}
-				return true
-			})
+				for _, spec := range gen.Specs {
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						learn(value.Names, value.Values)
+					}
+				}
+			}
 		}
 	}
 	return known

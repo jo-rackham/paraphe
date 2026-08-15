@@ -53,6 +53,33 @@ var (
 	// A statement whose TABLE is a format verb: which table it reads cannot
 	// be known from the source, so neither can whether it names the campaign.
 	dynamicTable = regexp.MustCompile(`(?:FROM|JOIN|INTO|USING|UPDATE)\s+%`)
+	// A table POSITION whose operand the canary could not read as a name.
+	//
+	// This is the inversion the eighth round argued for, and it is the one
+	// rule that closes a whole class rather than a shape. Until it existed,
+	// a reference the canary failed to resolve simply was not a reference:
+	// the statement carried no walled table, matched no rule, and was passed
+	// over in silence — "I could not read this" answered as "nothing to see
+	// here". Three of the four criticals were only that, dressed
+	// differently:
+	//
+	//	FROM %      a format verb — the table is chosen at run time
+	//	FROM $?     an expression sqlTextMarked gave up on
+	//	FROM ,      a name that VANISHED: `strings.Join(tables, ",")` left
+	//	            its separator behind and nothing else
+	//	FROM        the text ends where the table should be
+	//
+	// A statement matching this touches a table and does not say which, so
+	// nothing can be concluded about the campaign — which is a finding, not
+	// a pass. Either the query becomes readable, or the site is declared in
+	// readsNoWalledTable.
+	unreadableTable = regexp.MustCompile(
+		`\b(?:FROM|JOIN|INTO|USING)\s*(?:%|\$\?|,|;|$)` +
+			// UPDATE is listed apart, and without the end-of-text case: the
+			// row locking this application allocates cards with ends its
+			// statement on `FOR UPDATE`, which is a locking clause and not a
+			// table position. Only an operand it could not read counts.
+			`|\bUPDATE\s*(?:%|\$\?|,)`)
 	// What makes a resolved string a statement rather than a value. Session
 	// commands count: `SET lock_timeout` reads no table, but it IS the
 	// statement of its call.
@@ -134,11 +161,18 @@ func stripBlockComments(sql string) string {
 }
 
 // sqlTextMarked is sqlText with one difference: an expression it cannot
-// resolve becomes the marker `$?` instead of vanishing. Dropped, a bound
-// parameter written `"org_id="+req.p(org)` leaves the text reading `ORG_ID=`
-// with no right-hand side, so a bound predicate looks unbound. The marker
-// counts as bound; a right-hand side the resolver CAN read is judged on its
-// merits.
+// resolve becomes the marker `$?` instead of vanishing. Dropped, the gap
+// closes and the text reads as something nobody wrote — `"… FROM " +
+// join(tables)` became `FROM `, a statement with no table, hence no walled
+// table, hence nothing to check.
+//
+// The marker does NOT count as bounded, and this comment used to say the
+// opposite of what the code did. `ORG_ID = $?` says the canary could not
+// read the right-hand side, and orgPredicate does not accept it: an
+// unreadable value may be a bound parameter or the string a caller passed
+// in, and telling them apart is the whole question. A marker is what the
+// reader failed to do, never what the code proved — either the predicate
+// becomes readable, or the crossing is declared.
 func sqlTextMarked(expr ast.Expr, values map[string]string) string {
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
@@ -307,18 +341,44 @@ func destructiveRef(table string) *regexp.Regexp {
 	const qualified = `(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?`
 	return regexp.MustCompile(
 		// the table right after the verb…
-		`\b(TRUNCATE|LOCK|DROP|ALTER|COPY)\s+(?:TABLE\s+)?(?:IF\s+EXISTS\s+)?` +
-			`(?:ONLY\s+)?` + qualified + table + `"?\b` +
+		`\b(TRUNCATE|LOCK|DROP|ALTER|COPY|REINDEX|CLUSTER)\s+(?:TABLE\s+)?` +
+			`(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?` + qualified + table + `"?\b` +
 			// …or behind an object that governs it. `DROP POLICY p ON
 			// accounts` takes the wall down for good, `CREATE POLICY p ON
 			// accounts USING (true)` adds a permissive one that ORs with it,
 			// and a trigger on a walled table runs on every row of every
 			// campaign.
 			`|\b(CREATE|DROP|ALTER)\s+(?:POLICY|TRIGGER|RULE|INDEX|CONSTRAINT)\b` +
-			`[^;]*?\bON\s+(?:ONLY\s+)?` + qualified + table + `"?\b`)
+			`[^;]*?\bON\s+(?:ONLY\s+)?` + qualified + table + `"?\b` +
+			// …or named as the OBJECT of a privilege change. `GRANT SELECT ON
+			// accounts TO public` is one line, needs no disguise, and hands
+			// the table to every role in the cluster — including whichever
+			// one another campaign's deployment connects with. It bounds
+			// nothing and no WHERE can follow it.
+			`|\b(GRANT|REVOKE)\b[^;]*?\bON\s+(?:TABLE\s+)?(?:ALL\s+TABLES\s+IN\s+SCHEMA\s+)?` +
+			`(?:ONLY\s+)?` + qualified + table + `"?\b`)
 }
 
+// schemaWide: statements that reach every walled table at once WITHOUT
+// naming one. `DROP SCHEMA public CASCADE` takes them all, and a pattern
+// built from a table name can never see it — there is no table name to see.
+// `GRANT … ON ALL TABLES IN SCHEMA public` is the same shape for privileges.
+//
+// Checked once per statement rather than once per table, because what it
+// matches is the absence of a table.
+var schemaWide = regexp.MustCompile(
+	`\b(?:DROP|ALTER|CREATE)\s+SCHEMA\b` +
+		`|\bON\s+ALL\s+TABLES\s+IN\s+SCHEMA\b` +
+		`|\bALTER\s+DEFAULT\s+PRIVILEGES\b`)
+
 // Words that follow a table name without being an alias.
+//
+// Every one missing from this list is a FALSE POSITIVE, and in a guard that
+// blocks the build a false positive costs as much as a hole: it sends the
+// next author around the canary rather than through it. `FROM accounts
+// NATURAL JOIN teams` read NATURAL as the alias, so the perfectly walled
+// `WHERE accounts.org_id=$1` addressed a name that did not exist and the
+// query was refused.
 var notAnAlias = map[string]bool{
 	"ON": true, "WHERE": true, "SET": true, "VALUES": true, "GROUP": true,
 	"ORDER": true, "LIMIT": true, "RETURNING": true, "LEFT": true,
@@ -326,6 +386,11 @@ var notAnAlias = map[string]bool{
 	"JOIN": true, "AND": true, "OR": true, "SELECT": true, "FROM": true,
 	"USING": true, "HAVING": true, "UNION": true, "EXCEPT": true,
 	"INTERSECT": true, "ON CONFLICT": true, "WITH": true, "AS": true,
+	// join decorations and clause openers, none of which name the table
+	"NATURAL": true, "LATERAL": true, "TABLESAMPLE": true, "WINDOW": true,
+	// `SELECT … FROM assignments FOR UPDATE SKIP LOCKED` — the row locking
+	// this application allocates cards with
+	"FOR": true, "OFFSET": true, "FETCH": true, "DO": true,
 }
 
 // Statements allowed to cross campaigns, keyed by the SHA-256 of their
@@ -339,6 +404,15 @@ var crossesCampaigns = map[string]string{
 	// maintenance scope, the only place that can.
 	"7cbd5bd6f79d9c4b": "removeStale: the shared mayor list spans every campaign",
 }
+
+// Statements that stand where a table name should be unreadable, and touch
+// no walled table. Keyed by the SHA-256 of their normalised text, like
+// crossesCampaigns and for the same reason: keyed by function, a second
+// statement written into it would inherit the promise in silence.
+//
+// Each is a claim that the canary cannot check, so each is a liability. An
+// entry matching nothing is an error, not a leftover.
+var readsNoWalledTable = map[string]string{}
 
 // Query calls whose SQL the canary must be able to read. A call it cannot
 // read is not a pass — see TestNoQueryIsInvisibleToTheCanary.
@@ -358,6 +432,7 @@ var queryCalls = map[string]bool{
 // build()` puts two names on the left, which the collector below ignores.
 func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	scoped := map[string]string{}
+	appended := map[string]bool{}
 	for k, v := range values {
 		scoped[k] = v
 	}
@@ -378,23 +453,42 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 		}
 		return true
 	})
-	// …then learn back the ones this function sets to something readable
-	ast.Inspect(fn, func(n ast.Node) bool {
-		if a, ok := n.(*ast.AssignStmt); ok &&
-			len(a.Lhs) == 1 && len(a.Rhs) == 1 {
-			if id, ok := a.Lhs[0].(*ast.Ident); ok {
-				if txt := sqlTextMarked(a.Rhs[0], values); txt != "" &&
-					txt != "$?" {
-					if a.Tok.String() == "+=" {
-						scoped[id.Name] += txt
-					} else {
-						scoped[id.Name] = txt
-					}
-				}
+	// …then learn back the ones this function sets to something readable.
+	//
+	// Several passes, resolving against `scoped` and not against the package
+	// map: since stringValues stopped learning inside function bodies, this
+	// is the ONLY place a local binding is read, and one local is regularly
+	// built from another — `base := "SELECT …"` then `sql := base + filter`.
+	// Resolving against the package map alone left the second unreadable, and
+	// an unreadable statement is one the canary passes over.
+	for range 3 {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			a, ok := n.(*ast.AssignStmt)
+			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
+				return true
 			}
-		}
-		return true
-	})
+			id, ok := a.Lhs[0].(*ast.Ident)
+			if !ok || id.Name == "_" {
+				return true
+			}
+			txt := sqlTextMarked(a.Rhs[0], scoped)
+			if txt == "" || txt == "$?" {
+				return true
+			}
+			if a.Tok.String() == "+=" {
+				// `+=` accumulates, so a second pass over the same statement
+				// would append its text twice and invent a query nobody
+				// wrote. Applied once, on the first pass only.
+				if !appended[id.Name] {
+					appended[id.Name] = true
+					scoped[id.Name] += txt
+				}
+				return true
+			}
+			scoped[id.Name] = txt
+			return true
+		})
+	}
 	return scoped
 }
 
@@ -442,9 +536,14 @@ func sqlStatements(t *testing.T) []statement {
 
 // insertNaming: `INSERT INTO <table>(ORG_ID, …` — the row being written is
 // stamped with the campaign, which is how a write names it.
+//
+// The alias is optional and it is not decoration: `INSERT INTO accounts AS a
+// (org_id, email) … ON CONFLICT … DO UPDATE` is how an upsert refers to the
+// existing row, and refusing it made the canary reject a write that names
+// the campaign in the only place that counts.
 func insertNaming(table string) *regexp.Regexp {
 	return regexp.MustCompile(`INSERT INTO\s+(?:[A-Z_]+\.)?"?` + table +
-		`"?\s*\$SUB(\d+)`)
+		`"?\s*(?:AS\s+[A-Z][A-Z0-9_]*\s*)?\$SUB(\d+)`)
 }
 
 // insertNamesCampaign: the row written carries the campaign, AND — when the
@@ -653,6 +752,44 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 				"\n\t%s", where, st.SQL)
 			continue
 		}
+		// sqlStatements yields every readable string reaching a call, which
+		// is deliberate — a query hidden in a helper is still a query — but
+		// it also yields error messages and log lines. The rules below judge
+		// the SHAPE of a statement rather than a table name in it, so they
+		// need something that is one: "columns missing from %s" carries a
+		// FROM and no verb, and blaming it teaches the reader to distrust
+		// the canary.
+		if !sqlVerb.MatchString(st.SQL) {
+			continue
+		}
+		// A statement that reaches every walled table at once by naming none
+		// of them. No per-table pattern can see it: there is no table name
+		// in it to match.
+		if schemaWide.MatchString(st.SQL) {
+			t.Errorf("%s: this statement acts on the SCHEMA, so it reaches "+
+				"every walled table at once without naming one. No predicate "+
+				"bounds it and no per-table rule can see it:\n\t%s",
+				where, st.SQL)
+			continue
+		}
+		// Where a table should stand, something the canary could not read as
+		// a name. Refused rather than passed over: an unresolved reference
+		// used to mean the statement carried no walled table, which is how
+		// three of the four criticals of the eighth round read as compliant.
+		if loc := unreadableTable.FindStringIndex(st.SQL); loc != nil {
+			if _, declared := readsNoWalledTable[print]; declared {
+				used[print] = true
+			} else {
+				t.Errorf("%s: the canary cannot read which table this "+
+					"statement touches (%q). Not being able to read a "+
+					"reference is not the same as there being none, and it "+
+					"cannot be told whether the campaign is named. Write the "+
+					"table where it can be read, or — if it touches no walled "+
+					"table — declare %q in readsNoWalledTable:\n\t%s",
+					where, strings.TrimSpace(st.SQL[loc[0]:loc[1]]), print, st.SQL)
+				continue
+			}
+		}
 		// One Exec can carry several statements. Without the split, the
 		// first one's `org_id = $1` counted as the second one's filter.
 		for _, one := range strings.Split(st.SQL, ";") {
@@ -797,6 +934,12 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 	for print, why := range crossesCampaigns {
 		if !used[print] {
 			t.Errorf("the exemption %q (%s) matches no statement any more — "+
+				"drop it", print, why)
+		}
+	}
+	for print, why := range readsNoWalledTable {
+		if !used[print] {
+			t.Errorf("the declaration %q (%s) matches no statement any more — "+
 				"drop it", print, why)
 		}
 	}
