@@ -149,8 +149,11 @@ tr.inactif td { color: var(--texte-sec); }
              margin: .5rem 0; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);
           border-left: 5px solid var(--jaune); border-radius: .45rem;
-          padding: .6rem .9rem; }
+          padding: .5rem .8rem; }
 .alerte.erreur { border-left-color: var(--rouge); }
+/* stacked banners: the default 1em paragraph margins made three of them
+   fill a phone's first screen */
+p.alerte { margin: .55rem 0; }
 pre { white-space: pre-wrap; font: inherit; margin: 0; }
 pre.lettre { background: var(--fond); border: 1px solid var(--trait);
              border-radius: .45rem; padding: 1rem; }

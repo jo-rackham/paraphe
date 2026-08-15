@@ -432,11 +432,25 @@ export default function Browser() {
           )}
           {unfilled.length > 0 && (
             <p className="alerte">
+              {/* one line, not the list of nine labels: the campaign tab
+                  marks each missing field itself, and a banner repeated on
+                  every screen must stay short enough to leave the screen
+                  to the work */}
               <strong>Campagne non configurée.</strong> Les messages contiennent
-              encore des valeurs d'exemple (
-              {unfilled.map(campaignLabel).join(", ")}) :{" "}
-              <strong>n'envoyez rien</strong> avant d'avoir rempli l'onglet « Ma
-              campagne ».
+              encore des valeurs d'exemple : <strong>n'envoyez rien</strong>{" "}
+              avant d'avoir rempli l'onglet « Ma campagne ».
+              {tab !== "campagne" && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    className="lien"
+                    onClick={() => setTab("campagne")}
+                  >
+                    Ouvrir l'onglet
+                  </button>
+                </>
+              )}
             </p>
           )}
 
@@ -827,9 +841,8 @@ function Liste({
       )}
       {loadedList === "light" && (
         <p className="alerte">
-          Vous travaillez sur la <strong>liste prioritaire</strong> (
-          {counts.total} maires). Les 500 signatures ne sortiront pas d'eux
-          seuls : quand vous les aurez épuisés,{" "}
+          <strong>Liste prioritaire</strong> ({counts.total} maires) — les 500
+          signatures n'en sortiront pas seules : épuisée,{" "}
           <button
             type="button"
             className="lien"
@@ -838,8 +851,10 @@ function Liste({
           >
             chargez les 34 826 maires de France
           </button>{" "}
-          <span className="gris">(2 Mo, une seule fois)</span>. Votre suivi est
-          conservé.
+          <span className="gris">
+            (2 Mo, une seule fois ; votre suivi est conservé)
+          </span>
+          .
         </p>
       )}
       <CompteurResultats

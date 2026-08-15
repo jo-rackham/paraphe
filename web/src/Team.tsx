@@ -205,11 +205,23 @@ export default function Team({ config }: { config: ServerConfig }) {
       <Alerte message={message} onClose={() => setMessage(null)} />
       {cfg.unfilled?.length > 0 && (
         <p className="alerte">
+          {/* one line, not the list of nine labels: the campaign form marks
+              each missing field itself, and this banner sits on every screen */}
           <strong>Campagne non configurée.</strong> Les messages contiennent
-          encore des valeurs d'exemple (
-          {cfg.unfilled.map(campaignLabel).join(", ")}) :{" "}
-          <strong>n'envoyez rien</strong> avant que la coordination ait
-          renseigné la campagne — onglet « Mon équipe ».
+          encore des valeurs d'exemple : <strong>n'envoyez rien</strong> avant
+          que la coordination ait renseigné la campagne.
+          {me.may_manage && tab !== "equipe" && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="lien"
+                onClick={() => setTab("equipe")}
+              >
+                Ouvrir « Mon équipe »
+              </button>
+            </>
+          )}
         </p>
       )}
 

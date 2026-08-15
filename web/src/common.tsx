@@ -364,6 +364,18 @@ export function Alerte({
   // mutation. One paragraph per role, since a role must not change either.
   const error = message?.tone === "erreur" ? message : null;
   const ok = message && message.tone !== "erreur" ? message : null;
+  // A success confirms and may leave on its own; an error is the only word
+  // about a failed write and stays until acted on. The live region spoke
+  // when the text arrived, so removing it later loses nothing. `onClose`
+  // goes through a ref: parents pass a fresh closure on every render, and
+  // depending on it would rearm the timer for ever.
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!ok) return undefined;
+    const timer = setTimeout(() => close.current?.(), 7000);
+    return () => clearTimeout(timer);
+  }, [ok]);
   const fermer = onClose && (
     <>
       {" "}
