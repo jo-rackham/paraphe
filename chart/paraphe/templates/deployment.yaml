@@ -27,6 +27,11 @@ spec:
       # to finish, plus margin. Shorter than the sum and SIGKILL lands in the
       # middle of a CSV export.
       terminationGracePeriodSeconds: {{ add .Values.drainSeconds 30 }}
+      # The Service is named `paraphe`, so the legacy Docker-links variables
+      # kubelet injects arrive as PARAPHE_PORT=tcp://<ip>:80 — the exact name
+      # the application reads as its own setting, and every future PARAPHE_*
+      # key is one Service rename away from the same silent collision.
+      enableServiceLinks: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
