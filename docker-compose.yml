@@ -64,7 +64,14 @@ services:
       # counter store lets anyone reset or exhaust the ceilings
       - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      # Answering is not enough — it must REFUSE an unauthenticated caller.
+      # `--requirepass ""` (what an unset PARAPHE_VALKEY_PASSWORD interpolates
+      # to) starts a Valkey open to every process on the host, and a plain
+      # `ping` calls that healthy. PostgreSQL fails closed on an empty
+      # password in this same file; this is how Valkey does too, without a
+      # `${VAR:?}` that would break `docker compose down`. The api service
+      # waits on this health, so an open counter store stops the stack.
+      test: ["CMD-SHELL", "env -u REDISCLI_AUTH -u VALKEYCLI_AUTH valkey-cli ping 2>&1 | grep -q NOAUTH && valkey-cli ping | grep -q PONG"]
       interval: 2s
       timeout: 3s
       retries: 30

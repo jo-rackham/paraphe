@@ -415,15 +415,23 @@ jobs:
             echo "::error::a volume is mounted again — the application writes nothing"
             exit 1
           fi
-          # Valkey by default: present, walled off, and DISKLESS — a
-          # PersistentVolumeClaim appearing means counters started living
-          # somewhere a failover is supposed to be allowed to lose.
+          # Valkey by default: present, walled off, and DISKLESS. Storage
+          # appearing under it means counters started living somewhere a
+          # failover is supposed to be allowed to lose — and the valkey
+          # configuration, which carries the password, started living on a
+          # disk. Every way of writing that is refused BY NAME, because a
+          # guard that watches one of four doors watches none: a `hostPath`
+          # and a `volumeClaimTemplates` each walked past a check that only
+          # knew the string "PersistentVolumeClaim", with the emptyDir count
+          # still matching.
           grep -q "kind: StatefulSet" /tmp/defaut.yaml
           grep -q "kind: NetworkPolicy" /tmp/defaut.yaml
-          if grep -q "PersistentVolumeClaim" /tmp/defaut.yaml; then
-            echo "::error::a PVC under Valkey — its counters are disposable by design"
-            exit 1
-          fi
+          for forbidden in PersistentVolumeClaim volumeClaimTemplates: hostPath: nfs: csi:; do
+            if grep -q "$forbidden" /tmp/defaut.yaml; then
+              echo "::error::$forbidden under Valkey — its counters are disposable by design"
+              exit 1
+            fi
+          done
           if [ "$(grep -c 'emptyDir:' /tmp/defaut.yaml)" != "$(grep -c 'medium: Memory' /tmp/defaut.yaml)" ]; then
             echo "::error::a Valkey emptyDir left tmpfs — its config carries the password"
             exit 1

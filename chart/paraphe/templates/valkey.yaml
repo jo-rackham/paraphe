@@ -63,6 +63,15 @@ spec:
   template:
     metadata:
       labels: {{- include "paraphe.selecteurValkey" . | nindent 8 }}
+      annotations:
+        # The SAME checksum the application's Deployment carries. Without it,
+        # a changed PARAPHE_VALKEY_PASSWORD rolled the application and left
+        # these pods on the old one: every counter write then answers NOAUTH,
+        # the limiter degrades to per-instance counting, and the only sign is
+        # one log line — the ceilings are silently multiplied by the replica
+        # count until somebody restarts this StatefulSet by hand.
+        checksum/secret: {{ printf "%s|%s" (include (print $.Template.BasePath "/secret.yaml") .)
+            (.Values.secrets.existingSecret | default "") | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true

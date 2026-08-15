@@ -101,15 +101,38 @@ func TestMappedIPv4CountsAsItsIPv4(t *testing.T) {
 	}
 }
 
-func TestOverlongForwardedChainFallsBackToThePeer(t *testing.T) {
+// Padding the header must not move a caller out of its own bucket, and
+// must not move it into a SHARED one. Discarding an overlong chain wholesale
+// attributed the request to the peer — the ingress, behind a proxy — so 65
+// entries of padding both hid the sender and poisoned the bucket every
+// unattributable request lands in. The window is kept at the right end,
+// where the hops that actually handled the request wrote.
+func TestPaddedForwardedChainStillNamesTheClient(t *testing.T) {
 	trusted := mustProxies(t, "10.0.0.0/8")
-	entries := make([]string, maxForwardedEntries+2)
+	entries := make([]string, maxForwardedEntries+6)
+	for i := range entries {
+		entries[i] = "1.1.1.1" // what the caller invented
+	}
+	entries[len(entries)-1] = "203.0.113.7" // what the ingress appended
+	r := requestFrom("10.0.0.2:33000", strings.Join(entries, ", "))
+	if got := clientAggregate(r, trusted); got != "203.0.113.7" {
+		t.Fatalf("attributed to %q: padding the header changed the bucket, "+
+			"and %q is the ingress — a ceiling shared by everyone behind it",
+			got, "10.0.0.2")
+	}
+}
+
+// …and a chain that is ALL trusted hops, however long, still falls back to
+// the peer: there is no client in it to name.
+func TestOverlongAllTrustedChainFallsBackToThePeer(t *testing.T) {
+	trusted := mustProxies(t, "10.0.0.0/8")
+	entries := make([]string, maxForwardedEntries+6)
 	for i := range entries {
 		entries[i] = "10.0.0.9"
 	}
 	r := requestFrom("10.0.0.2:33000", strings.Join(entries, ", "))
 	if got := clientAggregate(r, trusted); got != "10.0.0.2" {
-		t.Fatalf("attributed to %q on a chain built to be walked", got)
+		t.Fatalf("attributed to %q, want the peer", got)
 	}
 }
 

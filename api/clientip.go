@@ -51,9 +51,18 @@ func (t trustedProxies) contains(a netip.Addr) bool {
 	return false
 }
 
-// maxForwardedEntries bounds how much attacker-shaped header is parsed. A
-// chain longer than this is not a topology anyone runs; it is a request
-// padding its own attribution.
+// maxForwardedEntries bounds how much of the header is kept — from the
+// RIGHT, which is the only end worth keeping.
+//
+// Each trusted hop APPENDS the peer it accepted, so the useful entries are
+// the last few; everything to their left is what the client itself sent,
+// and is never read past the first untrusted hop anyway. Keeping the left
+// end instead was a hole with a bucket at the end of it: 65 entries of
+// padding pushed the proxy's own entry out of the window, the header was
+// discarded whole, and the request was attributed to the PEER — which,
+// behind a proxy, is the ingress, a bucket shared with every other
+// unattributable request. Three padded calls could then close a 3-per-hour
+// ceiling for everyone.
 const maxForwardedEntries = 64
 
 // clientAggregate returns the subject a per-IP limit counts: the IPv4
@@ -123,15 +132,16 @@ func peerAddr(r *http.Request) netip.Addr {
 	return ap.Addr().Unmap()
 }
 
+// forwardedEntries returns the LAST maxForwardedEntries of the chain, in
+// order. A caller padding the header only pushes its own lies off the left
+// edge — the hops that actually handled the request stay in the window.
 func forwardedEntries(r *http.Request) []string {
 	var entries []string
 	for _, header := range r.Header.Values("X-Forwarded-For") {
 		for _, e := range strings.Split(header, ",") {
 			entries = append(entries, strings.TrimSpace(e))
 			if len(entries) > maxForwardedEntries {
-				// longer than any real topology: attribute to the peer
-				// rather than walk a list built to be walked
-				return nil
+				entries = entries[1:]
 			}
 		}
 	}

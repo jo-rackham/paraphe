@@ -47,11 +47,14 @@ const (
 	idorApex  = "paraphe.test"
 
 	idorLead1 = "lead1@exemple.fr"
-	idorVol1  = "vol1@exemple.fr"
-	idorVol2  = "vol2@exemple.fr"
-	idorCoord = "coord-a@exemple.fr"
-	idorVolB  = "vol-b@exemple.fr"
-	idorAdmin = "admin@exemple.fr"
+	// a SECOND lead of the SAME team: the only shape that isolates the
+	// role predicate from the team predicate
+	idorLead1b = "lead1b@exemple.fr"
+	idorVol1   = "vol1@exemple.fr"
+	idorVol2   = "vol2@exemple.fr"
+	idorCoord  = "coord-a@exemple.fr"
+	idorVolB   = "vol-b@exemple.fr"
+	idorAdmin  = "admin@exemple.fr"
 
 	// the card team 2 owns: the object of every cross-team case
 	idorOwnedCard = "02000"
@@ -72,6 +75,7 @@ func idorSetup(t *testing.T) *idorFixture {
 	f.teamB = createTeamIn(t, s, f.orgB, "Équipe de B", "")
 
 	f.passwords[idorLead1] = createAccountIn(t, s, f.orgA, idorLead1, RoleLead, &f.team1)
+	f.passwords[idorLead1b] = createAccountIn(t, s, f.orgA, idorLead1b, RoleLead, &f.team1)
 	f.passwords[idorVol1] = createAccountIn(t, s, f.orgA, idorVol1, RoleVolunteer, &f.team1)
 	f.passwords[idorVol2] = createAccountIn(t, s, f.orgA, idorVol2, RoleVolunteer, &f.team2)
 	f.passwords[idorCoord] = createAccountIn(t, s, f.orgA, idorCoord, RoleCoordination, nil)
@@ -204,6 +208,24 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				if !scalar[bool](t, s, "SELECT active FROM accounts WHERE org_id=$1 "+
 					"AND email=$2", f.orgA, idorCoord) {
 					t.Fatal("coordination was deactivated by a lead")
+				}
+			}},
+			// The case above cannot see the ROLE predicate: coordination has
+			// no team, so the team predicate alone already refuses it, and
+			// deleting `AND role=…` left every test green. A lead's peer IN
+			// THEIR OWN TEAM is the one shape where only the role can refuse.
+			{"a lead cannot toggle their own team's other lead", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorLead1b+"/active", map[string]any{})
+				if code != http.StatusNotFound {
+					t.Fatalf("a lead toggling a fellow lead of the same team: %d, "+
+						"want 404 — a lead opens VOLUNTEER access, and nothing else", code)
+				}
+				if !scalar[bool](t, s, "SELECT active FROM accounts WHERE org_id=$1 "+
+					"AND email=$2", f.orgA, idorLead1b) {
+					t.Fatal("a lead deactivated a fellow lead: the role predicate " +
+						"is gone, and the team predicate cannot see this case")
 				}
 			}},
 			{"coordination cannot reach another campaign's account", func(t *testing.T) {
