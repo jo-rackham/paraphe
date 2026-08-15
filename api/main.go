@@ -395,12 +395,12 @@ func acceptableText(s string) bool {
 
 // signInAdmission bounds the sign-in attempts allowed PAST this point.
 // inScope takes a pool connection and a transaction BEFORE the handler,
-// so an attempt queued on scryptGate held a PostgreSQL connection for
+// so an attempt queued on hashGate held a PostgreSQL connection for
 // nothing: 200 anonymous attempts measured 8.8 ms → 2.17 s on every
 // authenticated request. Admitted at the gate's own width, the queue
 // holds no connection, and ctx.Done() sheds a caller who hung up before
 // their derivation started.
-var signInAdmission = make(chan struct{}, cap(scryptGate))
+var signInAdmission = make(chan struct{}, cap(hashGate))
 
 func admitSignIn(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

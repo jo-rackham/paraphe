@@ -386,6 +386,51 @@ func (c *client) signIn(email, password string) int {
 	return code
 }
 
+// An account created before argon2id carries a scrypt hash, and the password
+// is known at exactly one moment: a successful sign-in. If it is not replaced
+// there it is never replaced at all — a volunteer's password is handed out
+// once by a lead and nobody changes it afterwards.
+func TestSignInUpgradesAnOlderHash(t *testing.T) {
+	s, srv := testServer(t)
+	const email = "marie@exemple.fr"
+	createAccount(t, s, email, RoleVolunteer, nil)
+	// the werkzeug scrypt hash pinned in password_test.go, and its password
+	execAsMaintenance(t, s,
+		"UPDATE accounts SET password_hash=$1 WHERE email=$2", scryptHash, email)
+
+	read := func() string {
+		var stored string
+		asMaintenance(t, s.pool, func(tx pgx.Tx) {
+			if err := tx.QueryRow(context.Background(),
+				"SELECT password_hash FROM accounts WHERE email=$1", email,
+			).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+		})
+		return stored
+	}
+	if before := read(); !strings.HasPrefix(before, "scrypt:") {
+		t.Fatalf("the fixture did not take: %s", before)
+	}
+
+	c := newClient(t, srv)
+	if code := c.signIn(email, referencePassword); code != http.StatusOK {
+		t.Fatalf("the old hash no longer opens a session: %d", code)
+	}
+	after := read()
+	if !strings.HasPrefix(after, "argon2id:") {
+		t.Errorf("the hash was not upgraded on sign-in, so it never will "+
+			"be: %s", after)
+	}
+	if NeedsRehash(after) {
+		t.Errorf("the upgraded hash is already stale: %s", after)
+	}
+	// …and the password still works against what replaced it
+	if code := c.signIn(email, referencePassword); code != http.StatusOK {
+		t.Errorf("the upgraded hash refuses the same password: %d", code)
+	}
+}
+
 func TestSignInAndImmediateRevocation(t *testing.T) {
 	s, srv := testServer(t)
 	pw := createAccount(t, s, "marie@exemple.fr", RoleVolunteer, nil)

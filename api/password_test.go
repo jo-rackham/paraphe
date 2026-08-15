@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -21,12 +22,22 @@ const (
 
 	pbkdf2Hash = "pbkdf2:sha256:1000$rmz3vX7EmHEAtUjf$" +
 		"d1aee1dd2a27dac8f15b0ae6728787d530290130a33a0bbcbc8b6903d8760134"
+
+	// What this build writes. Pinned for the same reason as the two above,
+	// pointing the other way: those guard against losing the ability to read
+	// what werkzeug wrote, this one against drifting away from what we write
+	// ourselves — a changed parameter or a changed key length locks every
+	// account out at once, and the failure looks like everyone mistyping.
+	argon2Hash = "argon2id:3:32768:1$Fxk3GDIkd8pVKXuo$" +
+		"cf066d84b98c1d86f781bb90ac9953cf91a2459bdae2343c1132dffe7a6d2fbb" +
+		"e192b0eb8fd874eb74676fbc8e9b81d47a13ce9ec11c6e89445b1c6e3a333208"
 )
 
 func TestVerifiesWerkzeugHash(t *testing.T) {
 	for name, hash := range map[string]string{
-		"scrypt": scryptHash,
-		"pbkdf2": pbkdf2Hash,
+		"scrypt":   scryptHash,
+		"pbkdf2":   pbkdf2Hash,
+		"argon2id": argon2Hash,
 	} {
 		ok, err := VerifyPassword(hash, referencePassword)
 		if err != nil {
@@ -60,6 +71,78 @@ func TestHashVerifyRoundTrip(t *testing.T) {
 	}
 	if other == hash {
 		t.Error("two hashes of the same password are identical: salt not drawn")
+	}
+}
+
+// What HashPassword writes is argon2id, and it says so in the hash. Read
+// from the produced string rather than restated here: the point is that the
+// scheme travelling with the hash is the scheme that was used.
+func TestHashPasswordWritesArgon2id(t *testing.T) {
+	hash, err := HashPassword(referencePassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(hash, "argon2id:") {
+		t.Fatalf("a new hash is not argon2id: %s", hash)
+	}
+	if NeedsRehash(hash) {
+		t.Errorf("a hash just written is already stale: %s", hash)
+	}
+}
+
+// A hash in an older scheme is replaced the next time its owner signs in.
+// Without that, accounts created before argon2id would keep their scrypt
+// hash until someone changed the password — which, for a volunteer's account
+// handed out once by a lead, is never.
+func TestNeedsRehashSeesAnOlderScheme(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hash string
+		want bool
+	}{
+		"scrypt":                  {scryptHash, true},
+		"pbkdf2":                  {pbkdf2Hash, true},
+		"argon2id, current cost":  {argon2Hash, false},
+		"argon2id, cheaper cost":  {"argon2id:1:8192:1$sel$abcd", true},
+		"argon2id, no parameters": {"argon2id$sel$abcd", true},
+		"not a hash at all":       {"", true},
+	} {
+		if got := NeedsRehash(tc.hash); got != tc.want {
+			t.Errorf("%s: NeedsRehash = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// The parameters are read FROM the hash, so a row claiming a gigabyte would
+// let one anonymous sign-in attempt take the process down — /api/session is
+// public and needs no account to reach. Nothing but this code writes these
+// hashes, so anything above what it writes is a corrupted row or a planted
+// one, and it is refused rather than honoured.
+func TestArgon2ParametersAboveWhatWeWriteAreRefused(t *testing.T) {
+	for name, hash := range map[string]string{
+		"a gigabyte of memory": "argon2id:3:1048576:1$sel$abcd",
+		"a thousand passes":    "argon2id:1000:32768:1$sel$abcd",
+		"sixty-four threads":   "argon2id:3:32768:64$sel$abcd",
+		"zero memory":          "argon2id:3:0:1$sel$abcd",
+		"zero passes":          "argon2id:0:32768:1$sel$abcd",
+		"missing parameters":   "argon2id:3$sel$abcd",
+		"unreadable memory":    "argon2id:3:beaucoup:1$sel$abcd",
+	} {
+		ok, err := VerifyPassword(hash, referencePassword)
+		if err == nil {
+			t.Errorf("%s: accepted without error (ok=%v)", name, ok)
+		}
+		if ok {
+			t.Errorf("%s: the password verified against it", name)
+		}
+	}
+	// …and a cheaper hash that this code DID write once stays readable, or
+	// raising the cost would lock out every account it was raised for
+	cheap := "argon2id:1:8192:1$" + strings.Repeat("a", 16) + "$"
+	sum := deriveArgon2id(referencePassword, strings.Repeat("a", 16), 1, 8192, 1)
+	ok, err := VerifyPassword(cheap+hex.EncodeToString(sum), referencePassword)
+	if err != nil || !ok {
+		t.Errorf("a hash written under a lower cost no longer verifies: "+
+			"ok=%v err=%v", ok, err)
 	}
 }
 
@@ -113,8 +196,18 @@ func TestDerivationsAreGated(t *testing.T) {
 			_, err := HashPassword("colline-verger-42")
 			return err
 		},
-		"verifying against scrypt": func() error {
+		"verifying against argon2id": func() error {
 			ok, err := VerifyPassword(stored, "colline-verger-42")
+			if err == nil && !ok {
+				return fmt.Errorf("the right password did not verify")
+			}
+			return err
+		},
+		// still reached: an account created before argon2id keeps its scrypt
+		// hash until its owner next signs in, and that sign-in is the very
+		// request the gate protects
+		"verifying against scrypt": func() error {
+			ok, err := VerifyPassword(scryptHash, referencePassword)
 			if err == nil && !ok {
 				return fmt.Errorf("the right password did not verify")
 			}
@@ -128,8 +221,8 @@ func TestDerivationsAreGated(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			for range cap(scryptGate) {
-				scryptGate <- struct{}{}
+			for range cap(hashGate) {
+				hashGate <- struct{}{}
 			}
 			done := make(chan error, 1)
 			go func() { done <- derive() }()
@@ -139,8 +232,8 @@ func TestDerivationsAreGated(t *testing.T) {
 					"unbounded again")
 			case <-time.After(100 * time.Millisecond):
 			}
-			for range cap(scryptGate) {
-				<-scryptGate
+			for range cap(hashGate) {
+				<-hashGate
 			}
 			select {
 			case err := <-done:

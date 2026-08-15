@@ -115,11 +115,43 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			"Ce compte a été désactivé. Voyez votre référent.")
 		return
 	}
+	// Read BEFORE the upgrade below, because committing closes the
+	// transaction and everything this answer needs must already be in hand.
+	departments, err := s.teamDepartments(r, c)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+
+	// The password is known HERE and nowhere else, so this is the only
+	// moment a hash written under an older scheme can be replaced. An
+	// account created before argon2id would otherwise keep its scrypt hash
+	// until someone changed the password — which, for a volunteer's account
+	// handed out once by a lead, is never.
+	//
+	// A failure is logged and not answered: the sign-in itself succeeded,
+	// and refusing it because an upgrade could not be written would turn an
+	// improvement into an outage. The old hash still verifies.
+	if NeedsRehash(stored) {
+		if fresh, hashErr := HashPassword(d.Password); hashErr != nil {
+			log.Printf("hash not upgraded for %q: %v", email, hashErr)
+		} else if _, execErr := s.tx(r).Exec(r.Context(),
+			"UPDATE accounts SET password_hash=$3 WHERE org_id=$1 AND email=$2",
+			scopeOrg(r), email, fresh); execErr != nil {
+			log.Printf("hash not upgraded for %q: %v", email, execErr)
+		} else if commitErr := s.commit(r); commitErr != nil {
+			log.Printf("hash not upgraded for %q: %v", email, commitErr)
+		}
+	}
 	if err := s.sessions.Set(w, email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
 		return
 	}
-	s.replyMe(w, r, c)
+	replyJSON(w, http.StatusOK, map[string]any{
+		"account":     c,
+		"departments": departments,
+		"may_manage":  c.MayManage(),
+	})
 }
 
 // DELETE /api/session — sign out.
