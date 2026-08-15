@@ -218,7 +218,7 @@ One instance can host several campaigns, one per subdomain.
   Two tests carry the whole guarantee:
   1. `TestEveryQueryOnAWalledTableNamesTheCampaign` reads the package as an
      AST and demands the `org_id` predicate **per table alias**. One crossing
-     is exempt, `db.go:removeStale`, because the mayor list is common and
+     is exempt, `import.go:removeStale`, because the mayor list is common and
      deleting a row there must account for EVERY campaign. It also refuses
      `TRUNCATE`, `LOCK`, `DROP`, `ALTER`, `COPY` and `DO $$…$$` blocks: no
      predicate can bound them.

@@ -430,7 +430,7 @@ var notAnAlias = map[string]bool{
 // meant a second query written into it inherited the exemption in silence,
 // which is exactly what the old comment promised would not happen.
 var crossesCampaigns = map[string]string{
-	// db.go:removeStale — the mayors row is SHARED. Deleting a target that
+	// import.go:removeStale — the mayors row is SHARED. Deleting a target that
 	// left the list must not strip another campaign of its history, so
 	// "already worked on" is asked across every campaign, from the
 	// maintenance scope, the only place that can.
