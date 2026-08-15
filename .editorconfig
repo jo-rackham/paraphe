@@ -1,0 +1,29 @@
+# Biome is the authority for TypeScript and gofmt for Go; this file is what
+# an editor reads before either of them runs, so that a fresh clone does not
+# produce a diff on the first keystroke.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.go]
+indent_style = tab
+
+[Makefile]
+indent_style = tab
+
+# The generated lists are CRLF `;` UTF-8-BOM, which is what Excel and
+# LibreOffice expect from this separator. An editor normalising them would
+# undo noyau/csv.ts.
+[*.csv]
+end_of_line = crlf
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[*.md]
+trim_trailing_whitespace = false

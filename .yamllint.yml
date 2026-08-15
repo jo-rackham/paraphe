@@ -1,0 +1,46 @@
+# YAML that a machine reads: the workflows, the compose file, the Taskfile,
+# the chart's values. What is checked is what breaks a deployment, not what
+# offends a style guide — a duplicate key silently overriding the first, a
+# tab where YAML forbids one, an unquoted `:` inside a command.
+extends: default
+
+ignore: |
+  node_modules/
+  web/dist/
+  out/
+  data/
+  api/vendor/
+  .devbox/
+  .playwright-mcp/
+  .plans/
+  # Helm templates are not YAML until they are rendered: `{{ .Values.x }}`
+  # is a syntax error to any parser, and there is no configuration that
+  # makes one read it. That directory is covered by `helm lint` and by
+  # kubeconform on the RENDERED manifests, which is the only place the
+  # question can be answered. values.yaml and Chart.yaml are plain YAML and
+  # stay in scope.
+  chart/paraphe/templates/
+
+rules:
+  # Helm templates wrap on `{{ }}` boundaries, not on a column, and the
+  # comments of values.yaml are prose meant to be read by whoever runs a
+  # campaign.
+  line-length: disable
+  # `on:` in a GitHub workflow is the trigger block, not the boolean true.
+  # yamllint's truthy rule reads it as one and there is nothing to fix.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  # `vars: { PORT: '{{.PORT}}' }` is how the Taskfile passes one variable to
+  # one task, on one line. Spaces inside the braces are not a defect.
+  braces:
+    max-spaces-inside: 1
+  # A key written twice is the failure this file exists for: YAML keeps the
+  # LAST one, so the first is dead configuration that reads as live.
+  key-duplicates: enable
+  document-start: disable
+  # Helm's templating produces indentation yamllint cannot always follow.
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent

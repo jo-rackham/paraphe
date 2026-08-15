@@ -6,6 +6,12 @@
     "jq@latest",
     "curl@latest",
     "go-task@latest",
-    "kubernetes-helm@latest"
+    "kubernetes-helm@latest",
+    "lefthook@latest",
+    "golangci-lint@latest",
+    "actionlint@latest",
+    "yamllint@latest",
+    "shellcheck@latest",
+    "hadolint@latest"
   ]
 }

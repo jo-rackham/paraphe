@@ -1,0 +1,87 @@
+# The API is one package with no dependencies to speak of, so the linters
+# that pay here are the ones catching what `go vet` does not: an error nobody
+# reads, a value assigned and never used, a shadowed variable.
+#
+# gosec is on because this service holds nominative notes about elected
+# officials and hands out session cookies; its noisiest rules are turned off
+# below, with the reason, rather than the whole linter.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - bodyclose
+    - rowserrcheck
+    - nilerr
+    - errorlint
+
+  settings:
+    # govet's `shadow` is deliberately NOT enabled. `if err := f(); err !=
+    # nil` inside a function that already has an `err` is how Go is written,
+    # and it reported twelve of those and no defect.
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which reports the same thing once.
+        - G104
+        # G404: math/rand is never used for a secret here — every secret
+        # comes from crypto/rand, and UsableSecret refuses the repository's
+        # example values at startup.
+        - G404
+        # G304: the paths read are PARAPHE_CONFIG_DIR and PARAPHE_CSV, given
+        # by whoever runs the service. They come from the deployment, never
+        # from a request, and being able to point them elsewhere is the
+        # feature. A request cannot reach os.Open anywhere in this package.
+        - G304
+        # G505: crypto/sha1 is imported to VERIFY existing PBKDF2 hashes
+        # whose algorithm is recorded in the stored string. Refusing to read
+        # them would lock out the accounts that carry them; nothing new is
+        # ever hashed with it — password.go writes scrypt.
+        - G505
+    errcheck:
+      # A failed write to an http.ResponseWriter cannot be answered: the
+      # response has already begun. Logged where it matters, ignored here.
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+    staticcheck:
+      checks:
+        - all
+        # The ST family that golangci-lint leaves off by default: it wants a
+        # package comment in a fixed form, every comment to start with the
+        # name of what it documents, and receivers to be one letter. The
+        # comments here explain what a rule exists FOR, which is worth more
+        # than the shape they are in.
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # parser.ParseDir is deprecated in favour of go/packages, which
+        # lives in golang.org/x/tools — one direct dependency and its
+        # transitive tail, added to a test-only guard, in a module that
+        # keeps four. The canary reads one directory of one package, which
+        # is exactly what ParseDir does well.
+        - -SA1019
+
+  exclusions:
+    rules:
+      # The canary reads the package as an AST and builds patterns from it;
+      # its long functions and its regexp compilation in loops are what it
+      # is, and they run in tests only.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

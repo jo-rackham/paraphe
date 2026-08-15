@@ -6,6 +6,7 @@
   "description": "Racine de l'espace de travail : l'interface (web/) et les outils en ligne de commande (outils/) partagent le noyau (noyau/).",
   "packageManager": "pnpm@11.21.0",
   "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
     "@playwright/test": "^1.62.1",
     "@types/pg": "^8.21.0",
     "pg": "^8.23.0",

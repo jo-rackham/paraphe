@@ -90,6 +90,51 @@ tasks:
     cmds:
       - GH_CONFIG_DIR="{{.ROOT_DIR}}/.gh-local" gh auth login --hostname github.com --git-protocol https --web
 
+  lint:
+    desc: Tous les linters — TS, Go, shell, Dockerfile, workflows, YAML
+    cmds:
+      - task: lint-ts
+      - task: lint-go
+      - task: lint-shell
+      - task: lint-docker
+      - task: lint-ci
+
+  lint-fix:
+    desc: Applique ce que les linters savent corriger seuls
+    cmds:
+      - pnpm exec biome check --write .
+      - gofmt -l -w api
+
+  lint-ts:
+    desc: Biome sur noyau, outils, web et e2e (lint + format)
+    cmds: [pnpm exec biome check .]
+
+  lint-go:
+    desc: golangci-lint sur l'API
+    dir: api
+    cmds: [golangci-lint run]
+
+  lint-shell:
+    desc: shellcheck sur les scripts du dépôt
+    # -print0/-0 : un chemin peut contenir une espace, et `find | xargs`
+    # sans ça découpe le nom au lieu du fichier
+    cmds:
+      - 'find . -name "*.sh" -not -path "./node_modules/*" -not -path "./.devbox/*" -print0 | xargs -0 -r shellcheck'
+
+  lint-docker:
+    desc: hadolint sur les Dockerfiles
+    cmds:
+      - 'find . -name "Dockerfile*" -not -path "./node_modules/*" -print0 | xargs -0 -r hadolint'
+
+  lint-ci:
+    desc: actionlint sur les workflows, yamllint sur tout le YAML
+    cmds:
+      - actionlint
+      # `|| true` serait un mensonge : yamllint sort 1 sur une erreur, et
+      # c'est ce qu'on veut voir. Les avertissements, eux, sont désactivés
+      # par .yamllint.yml quand ils ne disent rien d'utile.
+      - yamllint .
+
   test:
     desc: Toute la suite — outils et noyau (TS), API (Go), interface (TS)
     cmds:
