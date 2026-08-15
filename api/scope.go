@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 
@@ -85,7 +86,7 @@ func (s *Server) commit(r *http.Request) error {
 func (p *Scope) close(ctx context.Context) {
 	if !p.committed {
 		// read-only, or interrupted write: rolling back is the right default
-		if err := p.Tx.Rollback(ctx); err != nil && err != pgx.ErrTxClosed {
+		if err := p.Tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 			log.Printf("transaction not rolled back: %v", err)
 		}
 	}

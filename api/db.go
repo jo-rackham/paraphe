@@ -610,7 +610,7 @@ func ReadCSV(path string) ([]map[string]string, error) {
 		return nil, fmt.Errorf("opening %s: %w (the image must be built "+
 			"after `task build`)", path, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only
 
 	reader := csv.NewReader(f)
 	reader.Comma = ';'

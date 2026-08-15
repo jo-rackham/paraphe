@@ -66,7 +66,7 @@ var rxPlaceholder = regexp.MustCompile(`\[[^\]]+\]|\{[^}]+\}|<[^>]+>`)
 
 // Zero-width characters and the byte-order mark: invisible, and enough to
 // make the shipped template pass for a filled value.
-var rxInvisible = regexp.MustCompile("[\\x{200b}-\\x{200d}\\x{feff}]")
+var rxInvisible = regexp.MustCompile(`[\x{200b}-\x{200d}\x{feff}]`)
 
 // NOT `\s+`: RE2 spells it [\t\n\f\r ], while the JavaScript engine
 // this must agree with also folds every Unicode space. A single

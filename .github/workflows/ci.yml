@@ -294,8 +294,15 @@ jobs:
           # without it, every approved campaign would require editing the
           # Ingress
           grep -q 'host: "\*.paraphe.exemple.fr"' /tmp/multi-campagnes.yaml
-          # and it does not appear when the instance hosts a single campaign
-          ! grep -q 'host: "\*' /tmp/ingress.yaml
+          # and it does not appear when the instance hosts a single campaign.
+          # Written as an `if` and not as `! grep`: the `!` suspends errexit
+          # for the command it negates, so this assertion passed whatever
+          # the render contained — including a wildcard opening every
+          # subdomain of a single-campaign instance.
+          if grep -q 'host: "\*' /tmp/ingress.yaml; then
+            echo "::error::a wildcard host on a single-campaign instance"
+            exit 1
+          fi
           rendre autoscaling --set autoscaling.enabled=true --set replicaCount=5
           rendre base-externe --set postgres.cnpg.enabled=false \
             --set postgres.external.existingSecret=ma-base

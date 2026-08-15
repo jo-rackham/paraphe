@@ -16,7 +16,9 @@ COPY modeles/ modeles/
 COPY web/ web/
 # the interface is served at the root here, unlike the Pages publication
 ENV PARAPHE_BASE_PATH=/
-RUN cd web && pnpm build
+WORKDIR /src/web
+RUN pnpm build
+WORKDIR /src
 
 # The mode marker, stamped at BUILD time. The interface picks its mode at
 # load: an API answers /api/config → team mode, nothing answers → browser

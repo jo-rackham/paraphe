@@ -35,9 +35,7 @@ func walledTablesUpper() []string {
 }
 
 var (
-	sqlLineComment  = regexp.MustCompile(`--[^\n]*`)
-	sqlBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	sqlStringLit    = regexp.MustCompile(`'[^']*'`)
+	sqlLineComment = regexp.MustCompile(`--[^\n]*`)
 	// The OPENING tag of a PostgreSQL dollar-quoted string. `$1` is not one:
 	// a tag never starts with a digit.
 	dollarOpen = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$`)
