@@ -16,7 +16,7 @@ app/
 .env
 .env.*
 !.env.exemple
-config/campagne.local.toml
+config/campagne.local.yaml
 # artefacts de construction de l'hôte : recopiés dans l'image, ils entrent en
 # conflit avec ceux que les étages construisent (pnpm refuse de démarrer sur un
 # node_modules qu'il n'a pas installé lui-même) et embarquent des binaires

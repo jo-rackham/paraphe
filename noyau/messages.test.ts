@@ -67,7 +67,7 @@ describe("the placeholder guard", () => {
 });
 
 describe("campaign values", () => {
-  // config/campagne.toml itself talks about "{placeholders}": writing
+  // config/campagne.yaml itself talks about "{placeholders}": writing
   // "équipe de campagne de {candidat}" is the natural move, and the string
   // went out verbatim to mayors.
   it("are flagged as template when they carry a hole", () => {

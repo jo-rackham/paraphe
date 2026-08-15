@@ -11,19 +11,19 @@ import (
 )
 
 const shippedTemplate = `
-[campagne]
-candidat = "Prénom NOM"
-candidat_description = "candidat(e) [courant / démarche], [profession]"
-candidat_description_longue = "Je suis [qui]."
-signataire = "Prénom Nom"
-signataire_qualite = "équipe de campagne de [candidat]"
-contact_tel = "06 00 00 00 00"
-contact_email = "contact@exemple.fr"
-site = "https://exemple.fr"
-ville_envoi = "Ville"
+campagne:
+  candidat: "Prénom NOM"
+  candidat_description: "candidat(e) [courant / démarche], [profession]"
+  candidat_description_longue: "Je suis [qui]."
+  signataire: "Prénom Nom"
+  signataire_qualite: "équipe de campagne de [candidat]"
+  contact_tel: "06 00 00 00 00"
+  contact_email: "contact@exemple.fr"
+  site: "https://exemple.fr"
+  ville_envoi: "Ville"
 
-[app]
-taille_lot = 10
+app:
+  taille_lot: 10
 `
 
 func configDir(t *testing.T, files map[string]string) string {
@@ -42,7 +42,7 @@ func configDir(t *testing.T, files map[string]string) string {
 // mayors.
 func TestTemplateDetected(t *testing.T) {
 	cfg, err := LoadConfig(configDir(t, map[string]string{
-		"campagne.toml": shippedTemplate}))
+		"campagne.yaml": shippedTemplate}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,12 @@ func TestTemplateDetected(t *testing.T) {
 
 func TestLocalOverrideThenEnvironment(t *testing.T) {
 	d := configDir(t, map[string]string{
-		"campagne.toml": shippedTemplate,
-		"campagne.local.toml": `
-[campagne]
-candidat = "Camille Réel"
-contact_email = "camille@exemple.org"
-site = "https://camille.example"
+		"campagne.yaml": shippedTemplate,
+		"campagne.local.yaml": `
+campagne:
+  candidat: "Camille Réel"
+  contact_email: "camille@exemple.org"
+  site: "https://camille.example"
 `,
 	})
 	t.Setenv("PARAPHE_CONTACT_EMAIL", "team@exemple.org")
@@ -78,9 +78,9 @@ site = "https://camille.example"
 	if cfg.BatchSize != 25 {
 		t.Errorf("batch_size = %d instead of 25", cfg.BatchSize)
 	}
-	// campagne.toml was not touched: that is what guarantees no real value
+	// campagne.yaml was not touched: that is what guarantees no real value
 	// ends up in the repository
-	raw, err := os.ReadFile(filepath.Join(d, "campagne.toml"))
+	raw, err := os.ReadFile(filepath.Join(d, "campagne.yaml"))
 	if err != nil || string(raw) != shippedTemplate {
 		t.Error("the versioned template was modified")
 	}
@@ -88,7 +88,7 @@ site = "https://camille.example"
 
 func TestIncompleteConfigFails(t *testing.T) {
 	_, err := LoadConfig(configDir(t, map[string]string{
-		"campagne.toml": "[campagne]\ncandidat = \"Camille\"\n[app]\ntaille_lot = 10\n"}))
+		"campagne.yaml": "campagne:\n  candidat: \"Camille\"\napp:\n  taille_lot: 10\n"}))
 	if err == nil {
 		t.Fatal("a configuration missing eight keys was accepted")
 	}
@@ -107,7 +107,7 @@ func TestMissingConfigSaysSo(t *testing.T) {
 }
 
 func TestBatchSizeIntegerAndPositive(t *testing.T) {
-	d := configDir(t, map[string]string{"campagne.toml": shippedTemplate})
+	d := configDir(t, map[string]string{"campagne.yaml": shippedTemplate})
 	t.Setenv("PARAPHE_BATCH_SIZE", "zéro")
 	if _, err := LoadConfig(d); err == nil {
 		t.Error("PARAPHE_BATCH_SIZE=zéro accepted")

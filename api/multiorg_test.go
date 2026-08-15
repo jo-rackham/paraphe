@@ -465,7 +465,7 @@ func itoa(n int64) string {
 }
 
 // The file configuration ALWAYS carries all nine campaign keys — a complete
-// configuration requires them, and the shipped campagne.toml fills them
+// configuration requires them, and the shipped campagne.yaml fills them
 // with template values. Reapplying it on restart reverted everything
 // coordination had typed into "Mon équipe", down to re-arming the
 // "campaign not configured" banner and regenerating "Prénom NOM" messages.

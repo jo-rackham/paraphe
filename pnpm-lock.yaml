@@ -29,9 +29,9 @@ importers:
 
   outils:
     dependencies:
-      smol-toml:
-        specifier: ^1.4.2
-        version: 1.8.0
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: ^26.2.0
@@ -39,9 +39,6 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@26.2.0)(jiti@2.7.0)(jsdom@30.0.1)(yaml@2.9.0)
-      yaml:
-        specifier: ^2.8.0
-        version: 2.9.0
 
   web:
     dependencies:
@@ -1615,10 +1612,6 @@ packages:
   smart-buffer@4.2.0:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
-
-  smol-toml@1.8.0:
-    resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
-    engines: {node: '>= 18'}
 
   socks-proxy-agent@10.1.0:
     resolution: {integrity: sha512-WlMj/67cEJ6MDI1OcsnjuYKDNDoyPCCYZ249kuuXPiMDw9F8PXkVaQ7YWu3siTydfQ/4BEZcvGzu+aYvz7dDCQ==}
@@ -3236,8 +3229,6 @@ snapshots:
   signal-exit@4.1.0: {}
 
   smart-buffer@4.2.0: {}
-
-  smol-toml@1.8.0: {}
 
   socks-proxy-agent@10.1.0:
     dependencies:

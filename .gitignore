@@ -7,14 +7,14 @@
 *.dump
 
 # Valeurs réelles de la campagne et secrets. Les fichiers versionnés
-# (.env.exemple, config/campagne.toml) sont des gabarits : les vraies
+# (.env.exemple, config/campagne.yaml) sont des gabarits : les vraies
 # valeurs vont dans ces fichiers-ci, jamais dans les gabarits.
 .env
 .env.*
 !.env.exemple
 # direnv : ni suivi ni ignoré jusqu'ici, donc emporté par un `git add -A`
 .envrc
-config/campagne.local.toml
+config/campagne.local.yaml
 
 # --- Données et sorties : reconstructibles, pas versionnées -------------
 # `task all` les régénère depuis les sources ouvertes. Les versionner

@@ -75,7 +75,7 @@ devbox install && task
 | `task test` | tous les tests : outils et noyau (TS), API (Go), interface (TS) |
 | `task deploy` | construit et lance l'app en Docker |
 
-Avant toute génération, remplissez `config/campagne.toml` (identité du
+Avant toute génération, remplissez `config/campagne.yaml` (identité du
 candidat, coordonnées, signature) — sinon les scripts refusent de tourner
 plutôt que d'expédier « Prénom NOM » à des milliers d'élus.
 

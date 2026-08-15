@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 // Campaign configuration. Three layers, least to most specific:
-// config/campagne.toml (versioned template), config/campagne.local.toml
+// config/campagne.yaml (versioned template), config/campagne.local.yaml
 // (real values, git-ignored), PARAPHE_* environment variables. The same file
 // feeds the mass mailing and the application, and filling the configuration
 // never modifies a git-tracked file.
@@ -98,10 +98,10 @@ type Config struct {
 }
 
 type configFile struct {
-	Campaign map[string]string `toml:"campagne"`
+	Campaign map[string]string `yaml:"campagne"`
 	App      struct {
-		BatchSize *int `toml:"taille_lot"`
-	} `toml:"app"`
+		BatchSize *int `yaml:"taille_lot"`
+	} `yaml:"app"`
 }
 
 // LoadConfig reads the three layers and refuses to return an incomplete
@@ -112,7 +112,7 @@ func LoadConfig(dir string) (*Config, error) {
 		Campaign: map[string]string{}, Overrides: map[string]string{}, BatchSize: 0,
 	}
 
-	base := filepath.Join(dir, "campagne.toml")
+	base := filepath.Join(dir, "campagne.yaml")
 	baseMissing := false
 	if err := merge(cfg, base); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -120,7 +120,7 @@ func LoadConfig(dir string) (*Config, error) {
 		}
 		baseMissing = true
 	}
-	local := filepath.Join(dir, "campagne.local.toml")
+	local := filepath.Join(dir, "campagne.local.yaml")
 	if err := merge(cfg, local); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func merge(cfg *Config, path string) error {
 		return err
 	}
 	var f configFile
-	if err := toml.Unmarshal(raw, &f); err != nil {
+	if err := yaml.Unmarshal(raw, &f); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	for k, v := range f.Campaign {

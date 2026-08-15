@@ -251,7 +251,7 @@ func ensureOrg(ctx context.Context, tx pgx.Tx, slug string, cfg *Config) (int, e
 	}
 	// `a || b` in JSONB lets b win. The file config ALWAYS carries all nine
 	// keys — a complete configuration requires them, and the shipped
-	// campagne.toml fills them with template values — so applying it here
+	// campagne.yaml fills them with template values — so applying it here
 	// reverted, at every restart, everything coordination had typed into
 	// "Mon équipe", down to re-arming the "campaign not configured" banner
 	// and regenerating "Prénom NOM" messages. Only the keys an operator

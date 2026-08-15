@@ -9,11 +9,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "smol-toml": "^1.4.2"
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "vitest": "^3.2.0",
-    "yaml": "^2.8.0"
+    "vitest": "^3.2.0"
   }
 }

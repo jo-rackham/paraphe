@@ -194,7 +194,7 @@ func (s *Server) unknownCampaign(w http.ResponseWriter, slug, base string) {
 	if base == "" {
 		errorJSON(w, http.StatusServiceUnavailable,
 			"Aucune campagne n'est configurée sur cette instance. Renseignez "+
-				"config/campagne.toml ou les variables PARAPHE_*, puis "+
+				"config/campagne.yaml ou les variables PARAPHE_*, puis "+
 				"redémarrez.")
 		return
 	}

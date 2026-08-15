@@ -1,7 +1,7 @@
 // Campaign configuration for the command-line tools.
 //
-// Three layers, least to most specific: config/campagne.toml (versioned
-// template), config/campagne.local.toml (real values, git-ignored),
+// Three layers, least to most specific: config/campagne.yaml (versioned
+// template), config/campagne.local.yaml (real values, git-ignored),
 // PARAPHE_* environment variables. Same contract as the Go API: filling
 // the configuration never modifies a git-tracked file, so nothing personal
 // goes to the repository.
@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "smol-toml";
+import { parse } from "yaml";
 
 import { CAMPAIGN_KEYS, unfilledKeys, type Campaign, type Templates }
   from "../noyau/messages.ts";
@@ -18,7 +18,7 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * The environment variable that overrides each campaign key. Not derivable
- * by uppercasing: the keys are French — they name campagne.toml entries and
+ * by uppercasing: the keys are French — they name campagne.yaml entries and
  * the {placeholders} a team edits — while the variables are English, read by
  * whoever operates the service. `noyau/campaign-env.json` holds the same
  * table, and the tests of both languages check theirs against it.
@@ -55,11 +55,11 @@ export function loadConfig({ strict = true } = {}): Config {
   const campaign: Campaign = {};
   let batchSize = 0;
 
-  const base = join(ROOT, "config", "campagne.toml");
+  const base = join(ROOT, "config", "campagne.yaml");
   if (!existsSync(base)) {
     throw new Error(`configuration absente : ${base}`);
   }
-  for (const path of [base, join(ROOT, "config", "campagne.local.toml")]) {
+  for (const path of [base, join(ROOT, "config", "campagne.local.yaml")]) {
     if (!existsSync(path)) continue;
     const f = parse(readFileSync(path, "utf8")) as ConfigFile;
     for (const [k, v] of Object.entries(f.campagne ?? {})) campaign[k] = String(v);
@@ -88,7 +88,7 @@ export function loadConfig({ strict = true } = {}): Config {
   if (unfilled.length && strict) {
     throw new Error(
       "valeurs de gabarit non remplies (elles partiraient telles quelles aux "
-      + `maires) : ${unfilled.join(", ")} — voir config/campagne.toml ou les `
+      + `maires) : ${unfilled.join(", ")} — voir config/campagne.yaml ou les `
       + "variables PARAPHE_*");
   }
   return { campaign, batchSize, unfilled };

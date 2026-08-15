@@ -1,7 +1,7 @@
 {
   "_comment": [
     "Campaign key -> PARAPHE_* environment variable, read by the tests of BOTH",
-    "languages. The keys stay French: they name campagne.toml entries and the",
+    "languages. The keys stay French: they name campagne.yaml entries and the",
     "{placeholders} a campaign team edits by hand. The variables are English:",
     "they are read by whoever operates the service.",
     "",

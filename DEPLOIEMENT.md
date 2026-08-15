@@ -28,7 +28,7 @@ elle-même l'interface, il n'y a rien d'autre à installer.)
 
 ## Configuration au runtime (variables d'environnement)
 
-Toutes les valeurs de `config/campagne.toml` sont surchargeables par des
+Toutes les valeurs de `config/campagne.yaml` sont surchargeables par des
 variables `PARAPHE_*` — c'est la voie recommandée sur serveur (voir la liste
 complète et les exemples dans `.env.exemple`) :
 
@@ -73,8 +73,8 @@ perturber les autres.
 - Désactiver un compte prend effet à la requête suivante, sans attendre la
   déconnexion.
 
-Une variable absente = valeur du `campagne.toml` embarqué (ou de
-`config/campagne.local.toml`, ignoré par git, si vous préférez un fichier).
+Une variable absente = valeur du `campagne.yaml` embarqué (ou de
+`config/campagne.local.yaml`, ignoré par git, si vous préférez un fichier).
 
 Deux comportements distincts, volontairement :
 - un **secret** resté à la valeur d'exemple du dépôt (`PARAPHE_SECRET_KEY`,

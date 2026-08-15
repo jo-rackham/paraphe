@@ -27,7 +27,7 @@ export const RANKS: Record<string, string> = {
   no_signal: "Aucun signal connu",
 };
 
-// Keys of config/campagne.toml — French on purpose: the campaign team
+// Keys of config/campagne.yaml — French on purpose: the campaign team
 // edits that file themselves.
 export const CAMPAIGN_KEYS = [
   "candidat", "candidat_description", "candidat_description_longue",
@@ -246,7 +246,7 @@ export function fields(mayor: Mayor, cfg: Campaign, opts: Options = {}): Record<
     ville: clean(mayor.city),
     date: `${today.getDate()} ${MONTHS[today.getMonth()]} ${today.getFullYear()}`,
     // Configuration values go through the same filter as the volunteer's
-    // text. `config/campagne.toml` itself invites talking about
+    // text. `config/campagne.yaml` itself invites talking about
     // "{placeholders}": writing "équipe de campagne de {candidat}" is the
     // natural move, and the string went out verbatim to mayors.
     candidat: volunteerText(cfg.candidat),

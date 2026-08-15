@@ -12,7 +12,7 @@ d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
 /api proxyfié vers l'API.
 
 ## Outils de campagne
-- `config/campagne.toml` : candidat, signataire, contacts — À REMPLIR.
+- `config/campagne.yaml` : candidat, signataire, contacts — À REMPLIR.
 - `modeles/*.txt` : textes à trous (email/courrier/téléphone), éditables sans
   toucher au code ; les {placeholders} sont vérifiés (erreur explicite si
   inconnu). `modeles/*.md` = notes de stratégie par canal.
@@ -98,7 +98,7 @@ d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
   `PARAPHE_BASE_PATH` est le chemin de base Vite, à ne pas confondre avec
   `PARAPHE_BASE_DOMAIN` — d'où le suffixe.
   **Restent en français** : les chaînes affichées aux utilisateurs, les
-  {placeholders} des modèles, les clés de `campagne.toml`, les commentaires
+  {placeholders} des modèles, les clés de `campagne.yaml`, les commentaires
   de `chart/values.yaml` et `.env.exemple` (lus par l'opérateur de
   campagne), les noms des fichiers générés
   (`01_maires_cibles_prioritaires.csv`…), `rapport.md`, GUIDE.md et
@@ -360,8 +360,8 @@ Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
   aléatoire est tiré au premier démarrage et conservé en base. Les valeurs
   d'exemple du dépôt sont refusées au démarrage (elles sont publiques).
 - **Les valeurs réelles ne vont JAMAIS dans un fichier versionné** :
-  `.env` (compose) et `config/campagne.local.toml` (surcharge locale) sont
-  ignorés ; `docker-compose.yml` et `config/campagne.toml` sont des
+  `.env` (compose) et `config/campagne.local.yaml` (surcharge locale) sont
+  ignorés ; `docker-compose.yml` et `config/campagne.yaml` sont des
   gabarits publics.
 - L'import au démarrage est un UPSERT : les données (email, score, tags)
   sont rafraîchies, les colonnes de travail (volunteer, status, updated_at) jamais
