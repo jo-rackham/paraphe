@@ -321,7 +321,7 @@ function AdministrationSignIn({
           pour créer le premier accès.
         </p>
       )}
-      <form className="carte" onSubmit={submit}>
+      <form className="carte etroite" onSubmit={submit}>
         <Alerte message={error ? { tone: "erreur", text: error } : null} />
         <p>
           <label>

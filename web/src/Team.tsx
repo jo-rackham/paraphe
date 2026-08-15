@@ -415,7 +415,7 @@ function Connexion({
           PARAPHE_ADMIN_PASSWORD pour créer le premier accès.
         </p>
       )}
-      <form className="carte" onSubmit={submit}>
+      <form className="carte etroite" onSubmit={submit}>
         <Alerte message={error ? { tone: "erreur", text: error } : null} />
         <p>
           <label>
@@ -952,7 +952,22 @@ function ListeServeur({
           </p>
         )}
         {rows.length === 0 && !loading && (
-          <p className="gris">Aucun maire avec ces critères.</p>
+          <p className="gris">
+            Aucun maire avec ces critères.{" "}
+            <button
+              type="button"
+              className="lien"
+              onClick={() => {
+                setQ("");
+                setRank("has_endorsed");
+                setStatus("");
+                setDept("");
+                setDemocracy(false);
+              }}
+            >
+              Réinitialiser les filtres
+            </button>
+          </p>
         )}
       </div>
     </>

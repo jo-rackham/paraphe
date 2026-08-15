@@ -874,7 +874,20 @@ function Liste({
           ))}
         </TableMaires>
         {mayors.length === 0 && (
-          <p className="gris">Aucun maire avec ces critères.</p>
+          <p className="gris">
+            Aucun maire avec ces critères.{" "}
+            <button
+              type="button"
+              className="lien"
+              onClick={() => {
+                setQ("");
+                setRankFilter("has_endorsed");
+                setDeptFilter("");
+              }}
+            >
+              Réinitialiser les filtres
+            </button>
+          </p>
         )}
         {shown < mayors.length && (
           <p style={{ textAlign: "center" }}>

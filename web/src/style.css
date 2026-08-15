@@ -95,6 +95,8 @@ a { color: var(--lien); }
 .carte { background: var(--carte); border: 1px solid var(--trait);
          border-radius: .6rem; padding: 1rem 1.2rem; margin: .8rem 0;
          overflow-x: auto; }
+/* sign-in: two fields lost on a 64 rem line — a narrow centred card */
+.carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
 .chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
         font-size: .82rem; border: 1px solid rgba(0,0,0,.12); color: #141210; }
 table { border-collapse: collapse; width: 100%; }
