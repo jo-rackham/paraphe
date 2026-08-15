@@ -527,15 +527,17 @@ export function Alerte({
   // A success confirms and may leave on its own; an error is the only word
   // about a failed write and stays until acted on. The live region spoke
   // when the text arrived, so removing it later loses nothing. `onClose`
-  // goes through a ref: parents pass a fresh closure on every render, and
-  // depending on it would rearm the timer for ever.
+  // goes through a ref, and the timer is keyed on the message's CONTENT:
+  // parents pass fresh closures — and may pass fresh objects — on every
+  // render, and depending on either would rearm the timer for ever.
   const close = useRef(onClose);
   close.current = onClose;
+  const okKey = ok ? `${ok.tone}\n${ok.text}` : null;
   useEffect(() => {
-    if (!ok) return undefined;
+    if (okKey === null) return undefined;
     const timer = setTimeout(() => close.current?.(), 7000);
     return () => clearTimeout(timer);
-  }, [ok]);
+  }, [okKey]);
   const fermer = onClose && (
     <>
       {" "}
@@ -637,6 +639,21 @@ export interface CardDraft {
 
 const cardWho = (mayor: Mayor) =>
   `${mayor.insee_code}|${mayor.last_name}|${mayor.first_name}`;
+
+/**
+ * The ONE number a tel: link may dial, or "" for "render text only".
+ * Directory strings can hold two numbers ("04 … / 06 …"), an extension
+ * ("poste 25") or junk; stripped blindly they concatenate into a number
+ * nobody meant — and any ten-digit prefix of that is somebody's real
+ * phone. The first plausible run of digits is the number; outside 6-15
+ * digits (E.164 ceiling, short overseas floors) there is no link at all.
+ */
+const dialable = (phone: string): string => {
+  const run = phone.match(/\+?\d[\d\s.()-]*/)?.[0] ?? "";
+  const digits = run.replace(/[^+\d]/g, "");
+  const length = digits.replace("+", "").length;
+  return length >= 6 && length <= 15 ? digits : "";
+};
 
 export interface CardProps {
   mayor: Mayor;
@@ -833,14 +850,12 @@ export function Fiche({
         <p className="grand-tel">
           <Emoji>☎ </Emoji>
           <span className="sr-only">Téléphone : </span>
-          {mayor.phone ? (
-            // tel: carries only digits (and a leading +): the display
-            // keeps the printed spacing, the link is what a phone dials
-            <a href={`tel:${mayor.phone.replace(/[^+\d]/g, "")}`}>
-              {mayor.phone}
-            </a>
+          {/* the display keeps the printed string whole; the link exists
+              only when ONE dialable number could be read out of it */}
+          {mayor.phone && dialable(mayor.phone) ? (
+            <a href={`tel:${dialable(mayor.phone)}`}>{mayor.phone}</a>
           ) : (
-            "non renseigné"
+            mayor.phone || "non renseigné"
           )}
         </p>
         <p style={{ margin: ".2rem 0" }}>

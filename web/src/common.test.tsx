@@ -57,6 +57,17 @@ describe("Alerte", () => {
     act(() => vi.advanceTimersByTime(60_000));
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("a fresh message OBJECT with the same content does not rearm", () => {
+    // a caller building the message inline hands a new object every
+    // render; keyed on identity, the timer would never fire
+    const onClose = vi.fn();
+    for (let i = 0; i < 20; i++) {
+      show({ tone: "ok", text: "Enregistré." }, onClose);
+      act(() => vi.advanceTimersByTime(500));
+    }
+    expect(onClose).toHaveBeenCalled();
+  });
 });
 
 describe("Fiche", () => {
@@ -88,6 +99,32 @@ describe("Fiche", () => {
     const link = container.querySelector<HTMLAnchorElement>('a[href^="tel:"]');
     expect(link?.getAttribute("href")).toBe("tel:0479873264");
     expect(link?.textContent).toBe("04 79 87 32 64");
+  });
+
+  it("two numbers in the field: the link dials the FIRST, never both", () => {
+    // stripped blindly, "04… / 06…" concatenated into one twenty-digit
+    // string — any ten-digit prefix of which is somebody's real number
+    render({ ...MAYOR, phone: "04 79 87 32 64 / 06 12 34 56 78" });
+    const link = container.querySelector<HTMLAnchorElement>('a[href^="tel:"]');
+    expect(link?.getAttribute("href")).toBe("tel:0479873264");
+    expect(link?.textContent).toBe("04 79 87 32 64 / 06 12 34 56 78");
+  });
+
+  it("an extension is not part of the number", () => {
+    render({ ...MAYOR, phone: "04 79 87 32 64 poste 25" });
+    const link = container.querySelector<HTMLAnchorElement>('a[href^="tel:"]');
+    expect(link?.getAttribute("href")).toBe("tel:0479873264");
+  });
+
+  it("an international number keeps its plus", () => {
+    render({ ...MAYOR, phone: "+590 590 12 34 56" });
+    const link = container.querySelector<HTMLAnchorElement>('a[href^="tel:"]');
+    expect(link?.getAttribute("href")).toBe("tel:+590590123456");
+  });
+
+  it("junk that holds no plausible number is text, not a link", () => {
+    render({ ...MAYOR, phone: "   " });
+    expect(container.querySelector('a[href^="tel:"]')).toBeNull();
   });
 
   it("no phone, no link — the absence is written out", () => {

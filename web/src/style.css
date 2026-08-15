@@ -122,7 +122,11 @@ a { color: var(--lien); }
         white-space: nowrap; }
 .chip::before { content: ""; width: .55em; height: .55em;
                 border-radius: 50%; flex: none;
-                background: var(--pastille, var(--texte-sec)); }
+                background: var(--pastille, var(--texte-sec));
+                /* forced colors strip backgrounds: the dot went white on
+                   white. It is decorative (the label carries the state),
+                   but it may keep its hue for those users too */
+                forced-color-adjust: none; }
 .chip-gris { --pastille: var(--pastille-gris); }
 .chip-bleu { --pastille: var(--pastille-bleu); }
 .chip-indigo { --pastille: var(--pastille-indigo); }
@@ -210,7 +214,15 @@ html { scroll-padding-bottom: 8rem; }
   background: var(--carte); border: 1px solid var(--trait);
   border-radius: .6rem .6rem 0 0; box-shadow: 0 -3px 10px rgba(0,0,0,.07);
   padding: .5rem .8rem calc(.6rem + env(safe-area-inset-bottom, 0px));
-  margin-top: 1rem; }
+  /* one bar-height of flow gap above: the browser does not scroll a
+     PARTIALLY visible focused element, so without this headroom the last
+     rows of the email could never be brought out from under the bar */
+  margin-top: 10rem; }
+/* a viewport shorter than the fiche's own controls (400 % zoom, landscape
+   phone): pinning the bar would leave almost nothing else — back in flow */
+@media (max-height: 480px) {
+  .barre-statut { position: static; margin-top: 1rem; }
+}
 .barre-statut .champs { display: flex; flex-wrap: wrap; gap: .4rem .8rem;
   align-items: end; }
 .barre-statut label { font-size: .85rem; color: var(--texte-sec); }
@@ -218,16 +230,16 @@ html { scroll-padding-bottom: 8rem; }
   font-size: 1rem; color: var(--texte); margin-top: .15rem; }
 .barre-statut select { width: auto; max-width: 17rem; }
 .barre-statut .note { flex: 1; min-width: 12rem; }
-/* on a phone the bar must stay a sliver: status and save on one line, the
-   note folded to a single line that opens under the finger */
+/* on a phone the bar stays compact: status and save on one line, the note
+   on two lines below — a FIXED height, because growing it on focus shifted
+   fifty pixels of layout under the very finger that just tapped it */
 @media (max-width: 640px) {
   .barre-statut { padding-left: .6rem; padding-right: .6rem; }
   .barre-statut .champs { gap: .3rem .6rem; }
   .barre-statut select { flex: 1; max-width: none; width: 100%; }
   .barre-statut label:first-child { flex: 1; }
   .barre-statut .note { flex-basis: 100%; order: 3; }
-  .barre-statut textarea { height: 2.4rem; }
-  .barre-statut textarea:focus { height: 5.5rem; }
+  .barre-statut textarea { height: 3.4rem; }
 }
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
@@ -264,7 +276,9 @@ footer .officiel { border: 1px solid var(--trait);
     padding: .5rem .65rem; margin: .55rem 0; }
   table.maires td { display: block; border: 0; padding: 0; }
   table.maires td:nth-child(1) { grid-column: 1; grid-row: 1; }
-  table.maires td:nth-child(2) { grid-column: 2; grid-row: 2;
+  /* the department cell by its class, not its position: the markup
+     already names it */
+  table.maires td.departement { grid-column: 2; grid-row: 2;
     text-align: right; font-size: .85rem; color: var(--texte-sec); }
   table.maires td:nth-child(3) { grid-column: 1; grid-row: 2; }
   table.maires td:nth-child(4) { grid-column: 2; grid-row: 1;
