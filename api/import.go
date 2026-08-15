@@ -35,6 +35,27 @@ func importList(ctx context.Context, tx pgx.Tx, path string) error {
 			"expected. Truncated or missing file — run `task build`",
 			len(rows), path)
 	}
+	// …and a floor relative to what is ALREADY there, because the absolute
+	// one is 3 % of a real list. A CSV cut to 5,000 rows cleared it, and
+	// removeStale then deleted 29,813 mayors and flagged the cards the team
+	// had worked with « parrainage attribué à tort » — a statement about the
+	// crossing that nothing had re-run. A truncated file is not a correction,
+	// and telling a volunteer their work was wrong is the one mistake with no
+	// way back.
+	//
+	// Read BEFORE the upsert: after it, the new rows are already counted.
+	// A shrinking list is legitimate (the RNE loses mayors between
+	// elections), a list losing a tenth of itself in one restart is not.
+	var current int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM mayors").Scan(&current); err != nil {
+		return fmt.Errorf("counting the list in place: %w", err)
+	}
+	if floor := current - current/10; current > 0 && len(rows) < floor {
+		return fmt.Errorf("import refused: %s carries %d row(s) against %d "+
+			"already in the database. Losing more than a tenth of the list in "+
+			"one import is a truncated file, not a correction — check the "+
+			"build, then reimport", path, len(rows), current)
+	}
 
 	// A single instance imports: the next ones see the list is already
 	// there and release the lock at once. Without this, ten replicas would
