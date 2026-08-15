@@ -23,6 +23,9 @@
      grey read 1.32:1 against it. This tone reads 3.6:1 and stays for
      controls only — cards and table rules keep the light rule */
   --champ-trait: #8a8477;
+  /* cards float a hair off the page in light; in dark the border alone
+     carries the edge — a shadow there only muddies it */
+  --ombre: 0 1px 2px rgba(20, 18, 16, .06);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -33,6 +36,7 @@
     --focus: #ffd400;
     --piste: #332e22;
     --champ-trait: #6b6559;
+    --ombre: none;
   }
 }
 * { box-sizing: border-box; }
@@ -84,31 +88,40 @@ header .lien[aria-current] { background: var(--entete-hover);
   background: repeating-linear-gradient(-45deg,
     var(--noir) 0 9px, var(--jaune) 9px 18px); }
 
-main { max-width: 64rem; margin: 0 auto; padding: 1rem; }
-h1 { font-size: 1.5rem; }
+main { max-width: 64rem; margin: 0 auto; padding: 1rem 1rem 1.5rem; }
+/* the scale breathes with the viewport; the yellow rule is the identity */
+h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 1.9rem); line-height: 1.25;
+     margin: 1.1rem 0 .8rem; }
 h1::after { content: ""; display: block; width: 3.5rem; height: 4px;
-            margin-top: .35rem; background: var(--jaune); border-radius: 2px; }
-h2 { font-size: 1.15rem; margin-top: 1.6rem; }
+            margin-top: .4rem; background: var(--jaune); border-radius: 2px; }
+h2 { font-size: 1.25rem; margin-top: 1.7rem; line-height: 1.3; }
 a { color: var(--lien); }
 /* overflow-x: at 320 px (or 400 % zoom) a table scrolls inside its card
    instead of pushing the whole page sideways */
 .carte { background: var(--carte); border: 1px solid var(--trait);
-         border-radius: .6rem; padding: 1rem 1.2rem; margin: .8rem 0;
-         overflow-x: auto; }
+         border-radius: .6rem; padding: 1rem 1.2rem; margin: .9rem 0;
+         overflow-x: auto; box-shadow: var(--ombre); }
 /* sign-in: two fields lost on a 64 rem line — a narrow centred card */
 .carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
 .chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
         font-size: .82rem; border: 1px solid rgba(0,0,0,.12); color: #141210; }
 table { border-collapse: collapse; width: 100%; }
-td, th { padding: .45rem .5rem; border-bottom: 1px solid var(--trait);
+td, th { padding: .5rem .55rem; border-bottom: 1px solid var(--trait);
          text-align: left; vertical-align: top; }
-th { font-size: .85rem; text-transform: uppercase; letter-spacing: .04em;
-     color: var(--texte-sec); }
+th { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em;
+     color: var(--texte-sec); border-bottom-width: 2px; }
+/* a row under the pointer stands out just enough to aim the click */
+tbody tr:hover td { background: var(--fond); }
+tbody tr:last-child td { border-bottom: 0; }
 button, .bouton { background: var(--accent); color: var(--accent-txt); border: 0;
   border-bottom: 3px solid rgba(0,0,0,.35); padding: .55rem 1rem;
   border-radius: .45rem; font-size: 1rem; font-weight: 600; cursor: pointer;
   text-decoration: none; display: inline-block; }
 button:hover, .bouton:hover { background: var(--jaune-vif); }
+/* the press: the bottom border is the button's thickness, and clicking
+   compresses it — total height stays, the top edge dips one pixel */
+button:not(.lien):active:not(:disabled), .bouton:active {
+  transform: translateY(1px); border-bottom-width: 2px; }
 button.secondaire, .bouton.secondaire { background: var(--noir); color: #fff;
   border-bottom-color: var(--jaune); }
 /* text-align: a button centres its label, and a link-styled button that
@@ -132,8 +145,12 @@ label[for^="champ-"] { display: block; margin-bottom: .25rem; }
 form.enligne { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
 form.enligne > div { flex: 1; min-width: 12rem; }
 details { border: 1px solid var(--trait); border-radius: .6rem;
-          background: var(--carte); margin: .7rem 0; }
-details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600; }
+          background: var(--carte); margin: .7rem 0;
+          box-shadow: var(--ombre); }
+details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600;
+                  border-radius: .6rem; }
+details summary:hover { background: var(--fond); }
+details[open] summary { border-radius: .6rem .6rem 0 0; }
 details .dedans { padding: 0 1rem 1rem; }
 .gris { color: var(--texte-sec); font-size: .9rem; }
 /* deactivated account row: muted to the secondary grey, which still reads
