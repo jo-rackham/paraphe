@@ -301,16 +301,14 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			s.failure(w, err)
 			return
 		}
-		// the account is born INSIDE the created campaign: the instance
-		// scope cannot write there, and that is exactly the wanted default
-		if err := withOrgScope(ctx, s.tx(r), orgID, OrgInstance, func() error {
-			_, err := s.tx(r).Exec(ctx,
-				"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
-					"VALUES($1,$2,$3,$4,$5,$6,$7)",
-				orgID, requesterEmail, requesterName, hashed, RoleCoordination,
-				shortTimestamp(), accountOf(r).Email)
-			return err
-		}); err != nil {
+		// the account is born INSIDE the created campaign, which is what
+		// org_id names here: approval is the one place an instance
+		// administrator writes into a campaign, and it writes exactly one row
+		if _, err := s.tx(r).Exec(ctx,
+			"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
+				"VALUES($1,$2,$3,$4,$5,$6,$7)",
+			orgID, requesterEmail, requesterName, hashed, RoleCoordination,
+			shortTimestamp(), accountOf(r).Email); err != nil {
 			s.failure(w, err)
 			return
 		}

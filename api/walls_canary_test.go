@@ -23,11 +23,12 @@ import (
 // closed below, and each has its case in canaryCases.
 //
 // What it still cannot see: whether a predicate in a SUBQUERY constrains the
-// outer statement. That needs a real SQL parser; TestWallsHoldWithoutRLS is
-// what covers it, by running the application with RLS switched off.
+// outer statement. That needs a real SQL parser; TestNoCampaignSeesAnother
+// is what covers it, by exercising every route against two campaigns.
 
-// The list comes from multiorg.go, not from a copy: a table put under RLS
-// there is covered here the same day, without anyone remembering to.
+// The list comes from multiorg.go, not from a copy, and the database is
+// asked whether it is complete — TestEveryPerCampaignTableIsWalled. A table
+// carrying org_id and missing from it would be checked by nobody.
 func walledTablesUpper() []string {
 	out := make([]string, 0, len(walledTables))
 	for _, t := range walledTables {
@@ -308,8 +309,8 @@ func tableRef(table string) *regexp.Regexp {
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
-// destructiveRef: the commands row-level security does NOT cover. A policy is
-// never consulted for TRUNCATE; LOCK visits no row; DROP and ALTER are DDL,
+// destructiveRef: the commands no predicate can bound. TRUNCATE empties a
+// table whatever any WHERE says; LOCK visits no row; DROP and ALTER are DDL,
 // and `ALTER TABLE … DISABLE ROW LEVEL SECURITY` is how the wall comes down
 // in one statement. None of them can be bounded by a `WHERE org_id = $n`, so
 // no predicate could ever make them acceptable: naming a walled table at all
@@ -799,8 +800,8 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 							}
 							t.Errorf("%s: this reference to %s is not bounded to "+
 								"the campaign (%s.org_id = $n, at its own nesting "+
-								"level and outside any SET). A privileged database "+
-								"role would serve one campaign's work to another. "+
+								"level and outside any SET). It would serve one "+
+								"campaign's work to another. "+
 								"If the crossing is deliberate, add %q to "+
 								"crossesCampaigns:\n\t%s",
 								where, table, aliasOrTable(alias, table), print, st.SQL)
@@ -857,128 +858,6 @@ func TestEverySpellingOfAWalledTableIsSeen(t *testing.T) {
 	}
 }
 
-// setOrgScope declares which campaign the transaction speaks for, and RLS
-// takes its word for it. Called from a handler with a number the client chose,
-// it moves the whole request into ANOTHER campaign — and every other guard
-// here stays green while it happens: the SQL still reads `org_id = $1`, and
-// app.org_id agrees with it. The two walls were checking each other against
-// the same lie.
-//
-// Which campaign a request speaks for is decided in ONE place, from the Host
-// header, plus maintenance at startup. The list below is that decision.
-// literal: what the string SAYS, not how it is spelt in the source. Read
-// unquoted, `'\x61pp.org_id'` — the same setting, escaped — carried none of
-// the letters the canary was looking for.
-func literal(v *ast.BasicLit) string {
-	if s, err := strconv.Unquote(v.Value); err == nil {
-		return s
-	}
-	return v.Value
-}
-
-// joinedLiterals: every literal of a `+` chain, end to end.
-func joinedLiterals(e ast.Expr) string {
-	switch v := e.(type) {
-	case *ast.BinaryExpr:
-		return joinedLiterals(v.X) + joinedLiterals(v.Y)
-	case *ast.BasicLit:
-		return literal(v)
-	case *ast.ParenExpr:
-		return joinedLiterals(v.X)
-	}
-	return ""
-}
-
-// declaresScope: does this text SET the campaign the transaction speaks for?
-//
-// The commands are what is looked for, not the setting's name: `current_
-// setting('app.org_id')` READS it — the RLS policy is written in terms of it —
-// while set_config and SET LOCAL move a transaction from one campaign to
-// another. Naming the commands also closes the path where the setting's name
-// arrives as a parameter the canary cannot follow.
-func declaresScope(s string) bool {
-	// Whitespace collapsed FIRST: a tab after LOCAL, a newline between SET
-	// and LOCAL, a space before the parenthesis of set_config — PostgreSQL
-	// reads them all the same, and a byte-exact substring read none of them.
-	return scopeCommand.MatchString(
-		sqlSpaces.ReplaceAllString(strings.ToUpper(s), " "))
-}
-
-// SET without LOCAL or SESSION is the SESSION scope, which outlives the
-// transaction, and RESET unsets it: both move the campaign, and neither
-// spells "SET LOCAL".
-var scopeCommand = regexp.MustCompile(
-	`\bSET_CONFIG\s*\(|\b(?:SET|RESET)\s+(?:LOCAL\s+|SESSION\s+)?APP\s*\.\s*ORG_ID\b`)
-
-func TestOnlyTheScopeItselfDeclaresTheCampaign(t *testing.T) {
-	allowed := map[string]bool{
-		// resolves the campaign from the subdomain, and from nothing else
-		"scope.go:openScope": true,
-		// its own definition, and the helper that restores the previous scope
-		"multiorg.go:setOrgScope":  true,
-		"multiorg.go:withOrgScope": true,
-		// the import at startup, which crosses every campaign by design
-		"db.go:InitDatabase": true,
-	}
-
-	seen := map[string]bool{}
-	for name, file := range apiPackage(t) {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		// EVERY top-level declaration, not just the functions. Walking
-		// `file.Decls` for *ast.FuncDecl alone left every GenDecl unread, so
-		// `const orgIDKey = "app.org_id"` at package level, and a func literal
-		// assigned to a package-level var, both declared the campaign unseen.
-		//
-		// Attributed per declaration, and not by remembering the last function
-		// walked past: a package-level const written just below an ALLOWED
-		// function would have inherited its permission.
-		for _, decl := range file.Decls {
-			where := name + ":package"
-			if fn, ok := decl.(*ast.FuncDecl); ok {
-				where = name + ":" + fn.Name.Name
-			}
-			ast.Inspect(decl, func(n ast.Node) bool {
-				declares := false
-				switch v := n.(type) {
-				case *ast.Ident:
-					declares = v.Name == "setOrgScope"
-				case *ast.BasicLit:
-					// The helper can be bypassed by writing the statement out;
-					// the string is what PostgreSQL ends up reading.
-					declares = declaresScope(literal(v))
-				case *ast.BinaryExpr:
-					// …and split across a `+`, no single literal holds it:
-					// `"SET LOCAL " + "app." + "org_id = 0"` said the same thing
-					// and matched nothing.
-					declares = declaresScope(joinedLiterals(v))
-				}
-				if declares {
-					seen[where] = true
-					if !allowed[where] {
-						t.Errorf("%s declares the transaction's campaign. Only "+
-							"the scope may: from a handler, with a value the "+
-							"request carries, this walks into another campaign "+
-							"with every wall left standing — the SQL still names "+
-							"a campaign, and RLS still agrees with it. If this "+
-							"is deliberate, say so by name here.", where)
-					}
-				}
-				return true
-			})
-		}
-	}
-	// A permission that covers nothing is a claim about code that has moved,
-	// and the next function written under that name would inherit it.
-	for where := range allowed {
-		if !seen[where] {
-			t.Errorf("%s no longer declares the campaign — drop it from the "+
-				"list rather than leave a standing permission", where)
-		}
-	}
-}
-
 // The canary reads SQL out of the syntax tree. Written in a shape it cannot
 // resolve — a helper's return value, a %s placeholder holding the table name,
 // a range over a slice of statements — a query became INVISIBLE to it, and
@@ -990,7 +869,6 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		// DDL built by iterating over walledTables itself: the statements
 		// CREATE the policies rather than querying through them.
 		"multiorg.go:orgSchema": true,
-		"multiorg.go:enableRLS": true,
 		"db.go:schema":          true,
 		// Pass-through helpers: the statement is their PARAMETER, so it can
 		// never be read here — it is read at the call site, which is itself

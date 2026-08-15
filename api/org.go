@@ -17,11 +17,11 @@ import (
 // no base domain remains single-campaign, exactly as before.
 
 // Sentinel scopes. These are organisation identifiers that cannot exist in
-// the database (PostgreSQL identities start at 1), which lets the RLS
+// the database (PostgreSQL identities start at 1), which lets the
 // policies tell them apart without an extra column.
 const (
 	// OrgInstance: the domain apex — public landing page, campaign requests,
-	// moderation. Sees NO work row at all: the RLS policies let nothing
+	// moderation. Sees NO work row at all: no campaign row can match
 	// through for 0, deliberately — the notes carry people's names.
 	OrgInstance = 0
 	// OrgMaintenance: import and migrations, which must traverse every

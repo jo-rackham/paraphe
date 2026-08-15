@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Walls between campaigns.
@@ -24,46 +21,14 @@ import (
 // essential: without it, the owner of the tables (the account the
 // application connects with) walks past every policy.
 
-// Tables walled off per organisation. `mayors` is not among them: the list
+// Tables that carry per-campaign rows. `mayors` is not among them: the list
 // is public, identical for everyone, and read-only.
-var walledTables = []string{"assignments", "notes", "teams", "accounts"}
-
-// The policy lets only the current organisation through. `current_setting`
-// is called in "missing_ok" mode: with no setting, it returns NULL, the
-// comparison is NULL, hence false — no rows. A transaction that forgot to
-// declare itself sees nothing, instead of everything.
 //
-// The NULLIF is not decorative: a TRANSACTION-scoped setting does not go
-// back to "absent" when the transaction ends, it becomes the EMPTY STRING.
-// On a pool connection that has already served, the policy would therefore
-// cast an empty string to int and raise "invalid input syntax for type
-// integer" — a loud failure, but in the wrong place and with no apparent
-// relation to the cause.
-const currentScopeSQL = `NULLIF(current_setting('app.org_id', true), '')::int`
-
-const orgPolicy = `org_id = ` + currentScopeSQL +
-	` OR ` + currentScopeSQL + ` = ` + maintenanceSQL
-
-// -1 in SQL: maintenance (import, migrations) traverses the organisations.
-// No HTTP request can reach it — resolution only returns identifiers read
-// from the database (≥ 1) or OrgInstance (0).
-const maintenanceSQL = "-1"
-
-// 0 in SQL: the instance scope. The apex moderates campaigns — it creates
-// them on approval — while reading none of their work.
-const instanceSQL = "0"
-
-// `orgs` is deliberately NOT in walledTables, and it is not unwalled either.
-// It is the table that DEFINES the campaigns: resolving a subdomain reads it
-// BEFORE any campaign is known, so a wall over its reads would wall off the
-// very step that establishes the scope. Its rows are per-campaign data all
-// the same — the name, the campaign configuration, the suspension state — and
-// a campaign able to write another's would squat a rival candidate's name and
-// send mail under it. Hence: reads cross, writes do not.
-const orgsPrivileged = currentScopeSQL + ` IN (` + instanceSQL + `, ` +
-	maintenanceSQL + `)`
-
-const orgsOwnRow = `id = ` + currentScopeSQL + ` OR ` + orgsPrivileged
+// The wall over them is the application's: every query naming one of these
+// also names the campaign, and TestEveryQueryOnAWalledTableNamesTheCampaign
+// reads the package to prove it. This list is what that guard iterates, so a
+// new per-campaign table is covered the day it is added here.
+var walledTables = []string{"assignments", "notes", "teams", "accounts"}
 
 func orgSchema(ctx context.Context, tx pgx.Tx) error {
 	statements := []string{
@@ -93,7 +58,7 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			ts TEXT, decided_at TEXT, decided_by TEXT)`,
 		`CREATE INDEX IF NOT EXISTS hosting_requests_state ON hosting_requests(state, id DESC)`,
 		// The work columns move out of `mayors`: they are the only ones that
-		// belong to an organisation, hence the only ones under RLS.
+		// belong to an organisation, hence the only ones walled.
 		`CREATE TABLE IF NOT EXISTS assignments(
 			org_id INTEGER NOT NULL,
 			insee_code TEXT NOT NULL,
@@ -111,123 +76,6 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		}
 	}
 	return nil
-}
-
-// enableRLS sets the policies up. Idempotent: DROP POLICY IF EXISTS then
-// CREATE, because CREATE POLICY has no IF NOT EXISTS and the policy must be
-// able to evolve with a simple image update.
-func enableRLS(ctx context.Context, tx pgx.Tx) error {
-	for _, table := range walledTables {
-		statements := []string{
-			fmt.Sprintf("ALTER TABLE %s ENABLE ROW LEVEL SECURITY", table),
-			// FORCE: without it, the owner of the tables — that is, the
-			// account the application connects with — walks past every policy
-			// unnoticed, and the wall only protects against third parties.
-			fmt.Sprintf("ALTER TABLE %s FORCE ROW LEVEL SECURITY", table),
-			fmt.Sprintf("DROP POLICY IF EXISTS org_%s ON %s", table, table),
-			fmt.Sprintf("CREATE POLICY org_%s ON %s USING (%s) WITH CHECK (%s)",
-				table, table, orgPolicy, orgPolicy),
-		}
-		for _, s := range statements {
-			if _, err := tx.Exec(ctx, s); err != nil {
-				return fmt.Errorf("RLS on %s: %w", table, err)
-			}
-		}
-	}
-	// One policy per command, because `orgs` answers differently to each: a
-	// campaign reads every row (that is how a subdomain resolves) and writes
-	// only its own. With RLS on, a command with no policy is refused, so all
-	// four are spelt out.
-	for _, s := range []string{
-		"ALTER TABLE orgs ENABLE ROW LEVEL SECURITY",
-		"ALTER TABLE orgs FORCE ROW LEVEL SECURITY",
-		"DROP POLICY IF EXISTS orgs_resolve ON orgs",
-		"CREATE POLICY orgs_resolve ON orgs FOR SELECT USING (true)",
-		"DROP POLICY IF EXISTS orgs_own ON orgs",
-		fmt.Sprintf("CREATE POLICY orgs_own ON orgs FOR UPDATE USING (%s) "+
-			"WITH CHECK (%s)", orgsOwnRow, orgsOwnRow),
-		"DROP POLICY IF EXISTS orgs_create ON orgs",
-		fmt.Sprintf("CREATE POLICY orgs_create ON orgs FOR INSERT WITH CHECK (%s)",
-			orgsPrivileged),
-		"DROP POLICY IF EXISTS orgs_remove ON orgs",
-		fmt.Sprintf("CREATE POLICY orgs_remove ON orgs FOR DELETE USING (%s)",
-			orgsPrivileged),
-	} {
-		if _, err := tx.Exec(ctx, s); err != nil {
-			return fmt.Errorf("RLS on orgs: %w", err)
-		}
-	}
-	return nil
-}
-
-// VerifyWalling refuses a configuration under which the walls would not
-// apply.
-//
-// A SUPERUSER — and any BYPASSRLS role — walks through row-level security
-// policies, FORCE included. The application would then run exactly as if
-// RLS did not exist: queries return the right rows as long as their WHERE
-// clauses are correct, and the day one of them is wrong, one campaign's
-// work goes to another. Nothing would signal it — that is the silent
-// failure this whole mechanism exists to rule out, and it is the default
-// state: the official PostgreSQL image makes POSTGRES_USER a superuser.
-func VerifyWalling(ctx context.Context, pool *pgxpool.Pool) error {
-	var role string
-	var privileged bool
-	if err := pool.QueryRow(ctx,
-		"SELECT rolname, rolsuper OR rolbypassrls FROM pg_roles "+
-			"WHERE rolname = current_user").Scan(&role, &privileged); err != nil {
-		return fmt.Errorf("reading the connection role's privileges: %w", err)
-	}
-	if !privileged {
-		return nil
-	}
-	const remedy = "Create an unprivileged role and connect the application " +
-		"with it:\n" +
-		"  CREATE ROLE paraphe_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;\n" +
-		"  GRANT CREATE, USAGE ON SCHEMA public TO paraphe_app;\n" +
-		"then point PARAPHE_DATABASE_URL at that role. With CloudNativePG, " +
-		"the \"<cluster>-app\" secret already fits."
-	if BaseDomain() != "" {
-		return fmt.Errorf("the application connects with role %q, which is "+
-			"SUPERUSER or BYPASSRLS: the walls between campaigns would NOT "+
-			"apply, and nothing would signal it.\n%s", role, remedy)
-	}
-	log.Printf("WARNING: role %q walks through RLS policies (SUPERUSER or "+
-		"BYPASSRLS). Harmless while the instance hosts a single campaign, but "+
-		"fix it before hosting several.\n%s", role, remedy)
-	return nil
-}
-
-// setOrgScope declares the transaction's scope. The third argument of
-// set_config is `true`: the scope is the TRANSACTION, not the session —
-// with a connection pool, a session setting would outlive the request and
-// the next one would inherit the previous request's scope.
-func setOrgScope(ctx context.Context, tx pgx.Tx, org int) error {
-	// set_config expects text: the integer is converted here, not in the
-	// SQL, since pgx otherwise infers the parameter type from the function
-	// signature
-	if _, err := tx.Exec(ctx,
-		"SELECT set_config('app.org_id', $1, true)", strconv.Itoa(org)); err != nil {
-		return fmt.Errorf("declaring the scope (organisation %d): %w", org, err)
-	}
-	return nil
-}
-
-// withOrgScope runs a write inside ANOTHER campaign's scope, then restores
-// the request's own. A single caller needs it: approving a hosting request,
-// which creates the campaign and its holder's coordination account —
-// without it the organisation would exist with nobody able to enter. The
-// deviation is therefore explicit, bounded to one statement, and never
-// driven by client data: the scope is the organisation just created.
-func withOrgScope(ctx context.Context, tx pgx.Tx, org, restore int,
-	fn func() error) error {
-	if err := setOrgScope(ctx, tx, org); err != nil {
-		return err
-	}
-	if err := fn(); err != nil {
-		return err
-	}
-	return setOrgScope(ctx, tx, restore)
 }
 
 // ensureOrg creates or refreshes the bootstrap organisation from the file

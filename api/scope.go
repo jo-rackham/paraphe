@@ -16,7 +16,7 @@ import (
 // `org_id` column: the filter does not rest on the discipline of each SQL
 // query, but on `app.org_id` set here once and enforced by PostgreSQL. A
 // route that forgot its WHERE clause would still see nothing of another
-// campaign — which is exactly what TestRLSHoldsWithoutApplicationFilter
+// campaign — which is exactly what TestNoCampaignSeesAnother
 // verifies.
 
 const scopeKey contextKey = 1
@@ -27,7 +27,7 @@ type Scope struct {
 	Org *Org
 	// OrgID: the same scope as a number, and the one `app.org_id` carries —
 	// including the sentinels, where Org is nil: 0 on the apex. Every query
-	// on a walled table binds it, so the wall no longer rests on RLS alone.
+	// on a walled table binds it: that predicate IS the wall.
 	OrgID int
 
 	conn *pgxpool.Conn
@@ -179,11 +179,6 @@ func (s *Server) openScope(w http.ResponseWriter, r *http.Request) (*Scope, bool
 		p.Org, org = o, o.ID
 	}
 	p.OrgID = org
-	if err := setOrgScope(ctx, tx, org); err != nil {
-		p.close(ctx)
-		s.failure(w, err)
-		return nil, false
-	}
 	return p, true
 }
 

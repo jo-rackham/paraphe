@@ -7,34 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// privilegedPool: the same database, reached as the ADMINISTRATION role —
-// a superuser, so RLS does not apply to it. This is the configuration the
-// application refuses to start on in multi-campaign mode, and the one a
-// careless deployment lands in: the official PostgreSQL image makes
-// POSTGRES_USER a superuser.
-func privilegedPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("PARAPHE_TEST_DATABASE_URL"))
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-// The whole point of scoping every query: with RLS gone, the walls still
-// hold. Without this test, the application-level filters are a claim; the
-// only proof is to remove the database's wall and look.
-func TestWallsHoldWithoutRLS(t *testing.T) {
+// THE walling test. Every query on a per-campaign table names the campaign,
+// and this is what proves it end to end: two campaigns on one instance, one
+// of them signed in, every read and every write exercised, and NOTHING of the
+// neighbour coming back — neither a row, nor a count, nor a string.
+//
+// It used to run under a privileged role to neutralise row-level security and
+// show the application's own filters holding alone. There is no second wall
+// to neutralise any more: this one runs as production does, and what it
+// proves is the whole guarantee.
+func TestNoCampaignSeesAnother(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
 	seedMayors(t, s, 6, "01")
@@ -116,45 +104,6 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 		"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
 			"VALUES($1,$2,'Coordination A',$3,'coordination',true)", a, mine, hash)
 
-	// RLS OFF from here on.
-	s.pool = privilegedPool(t)
-
-	// Said out loud rather than inferred: if the role stopped being
-	// privileged, every assertion below would pass for the wrong reason.
-	var role string
-	var privileged bool
-	if err := s.pool.QueryRow(context.Background(),
-		"SELECT rolname, rolsuper OR rolbypassrls FROM pg_roles "+
-			"WHERE rolname = current_user").Scan(&role, &privileged); err != nil {
-		t.Fatal(err)
-	}
-	if !privileged {
-		t.Fatalf("role %q is neither SUPERUSER nor BYPASSRLS: RLS would still "+
-			"be doing the work, and this test would prove nothing", role)
-	}
-
-	// Witness. Without it this test would pass just as well with RLS still
-	// enforcing everything, and would prove nothing about the application.
-	ctx := context.Background()
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := setOrgScope(ctx, tx, a); err != nil {
-		t.Fatal(err)
-	}
-	var visible int
-	if err := tx.QueryRow(ctx,
-		"SELECT count(*) FROM assignments WHERE org_id <> $1", a).Scan(&visible); err != nil {
-		t.Fatal(err)
-	}
-	_ = tx.Rollback(ctx)
-	if visible == 0 {
-		t.Fatal("the privileged role still sees nothing of the neighbour: RLS " +
-			"is still applying, so this test proves nothing about the " +
-			"application's own filters")
-	}
-
 	c := clientOn(t, srv, testSlug+".paraphe.test")
 	if code := c.signIn(mine, "motdepasse-de-test-1234"); code != http.StatusOK {
 		t.Fatalf("sign-in on campaign A: %d", code)
@@ -174,6 +123,20 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 		if strings.Contains(body, "Homonyme chez B") {
 			t.Errorf("%s: the same address exists in both campaigns, and the "+
 				"neighbour's name is the one that came back", what)
+		}
+		// Everything else B holds that a route could hand over. Each of these
+		// was written by the setup and tested by nothing: a mutation putting
+		// B's candidate, B's personal note, B's name or B's slug into
+		// /api/config or /api/me passed the whole file.
+		for marker, what2 := range map[string]string{
+			neighbourCandidate: "candidate",
+			neighbourOwnNote:   "personal note",
+			"Other campaign":   "name",
+			"other":            "slug",
+		} {
+			if strings.Contains(body, marker) {
+				t.Errorf("%s: the neighbouring campaign's %s appears", what, what2)
+			}
 		}
 	}
 
@@ -224,10 +187,17 @@ func TestWallsHoldWithoutRLS(t *testing.T) {
 	}
 	// Three more writes on walled tables, none of them exercised before: a
 	// team, an account bearing an address that ALSO exists in B, and the
-	// campaign's own configuration — `orgs` carries no org_id, so RLS never
+	// campaign's own configuration — `orgs` carries no org_id, so nothing
 	// protected it and its WHERE clause is the only wall there is.
-	c.call(http.MethodPost, "/api/team/group",
-		map[string]any{"name": "Équipe de A", "departments": []string{"01"}})
+	// The code, asserted like every other probe here: refused, this handler
+	// writes nothing, and "the neighbour is untouched" then holds for a
+	// reason that has nothing to do with a wall. Discarded, a mutation that
+	// answered 400 to every request left the teams wall unexercised.
+	if code, rep := c.call(http.MethodPost, "/api/team/group",
+		map[string]any{"name": "Équipe de A",
+			"departments": []string{"01"}}); code != http.StatusCreated {
+		t.Fatalf("A can no longer create a team of its own: %d %v", code, rep)
+	}
 	// An address held by NEITHER campaign, and the code asserted. Aimed at
 	// the shared address, this answered 409 — the account already exists in
 	// A — so nothing was written and the count check that follows was

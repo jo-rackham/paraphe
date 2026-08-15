@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -71,10 +70,6 @@ func TestValidSlug(t *testing.T) {
 func createOrg(t *testing.T, s *Server, slug, name string) int {
 	t.Helper()
 	var id int
-	// `orgs` takes writes from a DECLARED scope only, and creating a campaign
-	// belongs to the instance or to maintenance. A pool connection that says
-	// nothing about who it speaks for is refused — as in production, where
-	// every path declares itself before writing.
 	asMaintenance(t, s.pool, func(tx pgx.Tx) {
 		if err := tx.QueryRow(context.Background(),
 			"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
@@ -86,177 +81,55 @@ func createOrg(t *testing.T, s *Server, slug, name string) int {
 	return id
 }
 
-// THE walling test: the tables are queried WITHOUT any application filter.
-// If the wall rested on the routes' WHERE clauses, this test would see
-// everything; it only sees the declared campaign because PostgreSQL does
-// the filtering.
-// A row every column of which is valid: what is left is the policy.
-var validInsertInto = map[string]string{
-	"assignments": "INSERT INTO assignments(org_id, insee_code, volunteer, status) " +
-		"VALUES($1,'01001','intrus@exemple.fr','email_sent')",
-	"notes": "INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts) " +
-		"VALUES($1,'01001','intrus@exemple.fr','email_sent','vu','2026-01-01T00:00')",
-	"teams": "INSERT INTO teams(org_id, name, departments) VALUES($1,'Intrus','01')",
-	"accounts": "INSERT INTO accounts(org_id, email, name, password_hash, role) " +
-		"VALUES($1,'intrus@exemple.fr','Intrus','x','volunteer')",
-}
-
-// `orgs` is the one per-campaign table every campaign may READ: resolving a
-// subdomain has to, before it knows which campaign it is in. That made it the
-// table nobody walled — it is not in walledTables, so neither RLS nor the SQL
-// canary looked at it, and its rows carry the campaign's name, its whole
-// configuration and its suspension state. A campaign able to write another's
-// would squat a rival candidate's name, which /api/config then serves to
-// anyone. Its WRITES are walled; only its reads cross.
-func TestACampaignCannotRewriteAnother(t *testing.T) {
-	s, _ := testServer(t)
-	a := orgID(t, s, testSlug)
-	b := createOrg(t, s, "other", "Other campaign")
-
-	// One probe per command: `orgs` has a policy for each, and a command no
-	// probe exercises has no wall that anyone would notice losing. DELETE was
-	// exactly that — opened wide, the whole suite stayed green.
-	walledOff(t, s, a, "renaming a neighbour",
-		"UPDATE orgs SET name=$1 WHERE id=$2", "PRIS PAR A", b)
-	walledOff(t, s, a, "deleting a neighbour",
-		"DELETE FROM orgs WHERE id=$1", b)
-	walledOff(t, s, a, "creating a campaign of its own",
-		"INSERT INTO orgs(slug, name, campaign, batch_size, state) "+
-			"VALUES('squatted','Squatted','{}'::jsonb,2,'active')")
-
-	// The witness. Without it, "A changed nothing" would also hold if A could
-	// write no orgs row at all, and every refusal above would be about a write
-	// that never had a chance to happen.
-	asOrg(t, s.pool, a, func(tx pgx.Tx) {
-		tag, err := tx.Exec(context.Background(),
-			"UPDATE orgs SET name=$1 WHERE id=$2", "A renamed itself", a)
-		if err != nil {
-			t.Fatalf("campaign A cannot write its own row (%v): every refusal "+
-				"above proves nothing", err)
-		}
-		if n := tag.RowsAffected(); n != 1 {
-			t.Fatalf("campaign A cannot write its OWN row either (%d rows): "+
-				"every refusal above proves nothing", n)
-		}
-	})
-
-	var name string
-	if err := s.pool.QueryRow(context.Background(),
-		"SELECT name FROM orgs WHERE id=$1", b).Scan(&name); err != nil {
-		t.Fatal(err)
-	}
-	if name != "Other campaign" {
-		t.Errorf("campaign B is now named %q", name)
-	}
-}
-
-// walledOff runs one write from inside campaign `org`, in a transaction of its
-// own because a refusal aborts it, and demands that the wall stop it ONE WAY
-// OR THE OTHER: no row matched, or PostgreSQL refused it outright.
+// walledTables says which tables carry per-campaign rows, and everything
+// downstream believes it: the canary checks those tables and no others, the
+// walls test counts those rows and no others. Until now it ALSO decided which
+// tables got a policy — so dropping a name from the list removed the wall and
+// the check that the wall existed, in one edit, in silence.
 //
-// The two are not interchangeable and the difference is the finding: a policy
-// weakened to `USING (true) WITH CHECK (<narrow>)` stops matching nothing and
-// starts raising instead. Read through a bare `t.Fatal(err)`, that regression
-// showed up as an infrastructure error at a line that names nothing, and the
-// assertion meant to catch it was never reached.
-func walledOff(t *testing.T, s *Server, org int, what, sql string, args ...any) {
-	t.Helper()
-	ctx := context.Background()
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // the write is meant to fail
-	if err := setOrgScope(ctx, tx, org); err != nil {
-		t.Fatal(err)
-	}
-	tag, err := tx.Exec(ctx, sql, args...)
-	if err != nil {
-		if !strings.Contains(err.Error(), "row-level security") {
-			t.Fatalf("%s: refused, but NOT by the wall — %v", what, err)
-		}
-		return
-	}
-	if n := tag.RowsAffected(); n != 0 {
-		t.Errorf("%s: campaign A reached %d row(s) it does not own", what, n)
-	}
-}
-
-func TestRLSHoldsWithoutApplicationFilter(t *testing.T) {
+// The database answers instead. A table with an `org_id` column carries rows
+// that belong to a campaign; there is no judgement to make and no second
+// place to keep in step.
+func TestEveryPerCampaignTableIsWalled(t *testing.T) {
 	s, _ := testServer(t)
-	seedMayors(t, s, 4, "01")
-	a := orgID(t, s, testSlug)
-	b := createOrg(t, s, "other", "Other campaign")
-
-	for _, org := range []int{a, b} {
-		execAsMaintenance(t, s,
-			"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
-				"VALUES($1,'01000',$2,'email_sent')", org, "who@org.fr")
-		execAsMaintenance(t, s,
-			"INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts) "+
-				"VALUES($1,'01000',$2,'email_sent','note interne','2026-01-01T00:00')",
-			org, "who@org.fr")
-		execAsMaintenance(t, s,
-			"INSERT INTO accounts(org_id, email, name, password_hash, role) "+
-				"VALUES($1,'commun@exemple.fr','Commun','x','volunteer')", org)
-		createTeamIn(t, s, org, "Nord", "01")
-	}
-
-	ctx := context.Background()
-	for _, table := range walledTables {
-		tx, err := s.pool.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := setOrgScope(ctx, tx, a); err != nil {
-			t.Fatal(err)
-		}
-		var total, elsewhere int
-		if err := tx.QueryRow(ctx,
-			"SELECT count(*), count(*) FILTER (WHERE org_id <> $1) FROM "+table,
-			a).Scan(&total, &elsewhere); err != nil {
-			t.Fatal(err)
-		}
-		if elsewhere != 0 {
-			t.Errorf("%s: %d row(s) of another campaign visible without an "+
-				"application filter", table, elsewhere)
-		}
-		if total == 0 {
-			t.Errorf("%s: the campaign no longer sees its own rows", table)
-		}
-
-		// Writing into the neighbour must fail, and it must be the POLICY
-		// that refuses. `INSERT INTO <table>(org_id)` alone violates the NOT
-		// NULL constraints of three of these four tables, so it failed
-		// whether or not the wall existed — the assertion was vacant
-		// everywhere except on `notes`.
-		_, err = tx.Exec(ctx, validInsertInto[table], b)
-		if err == nil {
-			t.Errorf("%s: a valid row was accepted into another campaign", table)
-		} else if !strings.Contains(err.Error(), "row-level security") &&
-			!strings.Contains(err.Error(), "violates row-level") {
-			t.Errorf("%s: refused, but not by the wall: %v", table, err)
-		}
-		tx.Rollback(ctx) //nolint:errcheck // test transaction
-	}
-
-	// and with no declared scope at all: nothing, rather than everything
-	tx, err := s.pool.Begin(ctx)
+	rows, err := s.pool.Query(context.Background(),
+		"SELECT table_name FROM information_schema.columns "+
+			"WHERE table_schema='public' AND column_name='org_id'")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // test transaction
-	var visible int
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM assignments").Scan(&visible); err != nil {
+	defer rows.Close()
+	found := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		found[name] = true
+	}
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if visible != 0 {
-		t.Errorf("a transaction without a scope sees %d work row(s): the "+
-			"default must be \"nothing\", not \"everything\"", visible)
+	if len(found) == 0 {
+		t.Fatal("no table carries an org_id column: the schema did not load, " +
+			"and this test would agree with any list at all")
+	}
+	declared := map[string]bool{}
+	for _, table := range walledTables {
+		declared[table] = true
+		if !found[table] {
+			t.Errorf("walledTables names %q, which carries no org_id column", table)
+		}
+	}
+	for table := range found {
+		if !declared[table] {
+			t.Errorf("%s carries an org_id column and is NOT in walledTables: "+
+				"no query on it is checked for naming the campaign, and nothing "+
+				"else would have said so", table)
+		}
 	}
 }
 
-// Two campaigns hosted side by side, reached through their subdomain.
 func TestTwoCampaignsCannotSeeEachOther(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)

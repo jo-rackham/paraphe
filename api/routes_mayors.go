@@ -27,7 +27,7 @@ const maxBatchRounds = 8
 // OUTER: a mayor my campaign did nothing with has no work row, and must
 // appear as available.
 //
-// Another campaign's `assignments` and `accounts` rows are invisible (RLS): the
+// Another campaign's `assignments` and `accounts` rows are never joined: the
 // outer join naturally renders them "free" here, which is exactly the
 // intended meaning — other campaigns' work does not exist for this one.
 //

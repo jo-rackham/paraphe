@@ -114,9 +114,6 @@ func run() error {
 	}
 	defer pool.Close()
 
-	if err := VerifyWalling(ctx, pool); err != nil {
-		return err
-	}
 	bootstrapSlug := strings.ToLower(strings.TrimSpace(
 		env("PARAPHE_ORG_SLUG", "campaign")))
 	if !ValidSlug(bootstrapSlug) {

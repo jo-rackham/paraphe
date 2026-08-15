@@ -72,7 +72,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	var active bool
 	// Bounded to the campaign being served: an address that exists in
 	// another campaign hosted here is, seen from here, unknown. Stated in the
-	// query AND enforced by RLS — either alone would do, which is the point.
+	// query, which is the one place the campaign is named.
 	err := s.tx(r).QueryRow(r.Context(),
 		"SELECT password_hash, active FROM accounts WHERE org_id=$1 AND email=$2",
 		scopeOrg(r), email).Scan(&stored, &active)

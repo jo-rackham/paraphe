@@ -160,9 +160,6 @@ func InitDatabase(ctx context.Context, pool *pgxpool.Pool, csvPath string,
 	// pg_advisory_unlock would raise and mask the real cause
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
 
-	if err := setOrgScope(ctx, tx, OrgMaintenance); err != nil {
-		return err
-	}
 	bootstrapOrg, err := schema(ctx, tx, cfg, bootstrapSlug)
 	if err != nil {
 		return err
@@ -257,9 +254,6 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 		if _, err := tx.Exec(ctx, s); err != nil {
 			return 0, fmt.Errorf("schema: %w", err)
 		}
-	}
-	if err := enableRLS(ctx, tx); err != nil {
-		return 0, err
 	}
 
 	// migration: a column added to the CSV (a new signal) must appear

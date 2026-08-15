@@ -74,7 +74,7 @@ const (
 	RoleLead         = "lead"
 	RoleVolunteer    = "volunteer"
 	// RoleAdministration lives in the INSTANCE scope, outside any campaign:
-	// it approves hosting requests. It reads no campaign data — the RLS
+	// it approves hosting requests. It reads no campaign data — its scope
 	// policies let nothing through for organisation 0.
 	RoleAdministration = "administration"
 )

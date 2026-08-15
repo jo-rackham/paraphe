@@ -33,7 +33,7 @@ import (
 // They cover what cannot be re-read from the code: concurrent allocation,
 // the wall between teams, the wall between campaigns, role escalation —
 // the class of defect that only shows under execution, against a real
-// database enforcing real row-level security.
+// database, under the role production connects with.
 
 const testSlug = "campaign"
 
@@ -49,7 +49,7 @@ func testConfig() *Config {
 
 // The tests' application role. It is UNPRIVILEGED, and that is the whole
 // point: the official PostgreSQL image makes the administration account a
-// superuser, and a superuser walks through RLS policies. Tests run under
+// superuser. Tests run under
 // that account would verify a walling that, in production, would only hold
 // through the routes' WHERE clauses.
 const (
@@ -137,18 +137,15 @@ func applicationPool(t *testing.T, adminDSN string) *pgxpool.Pool {
 	return pool
 }
 
-// asMaintenance opens a transaction in the scope that traverses campaigns.
-// The tests write into tables under RLS: without a declared scope,
-// PostgreSQL would refuse their inserts — which is exactly the guarantee
-// being sought, but makes seeding a test impossible otherwise.
+// asMaintenance opens a transaction for seeding, across campaigns.
 func asMaintenance(t *testing.T, pool *pgxpool.Pool, fn func(pgx.Tx)) {
 	t.Helper()
 	asOrg(t, pool, OrgMaintenance, fn)
 }
 
-// asOrg opens a transaction speaking for one campaign, which is what an HTTP
-// request does. Used to aim a query at a NEIGHBOUR from inside a campaign,
-// and see PostgreSQL refuse it.
+// asOrg opens a transaction for a fixture to write through. The campaign is
+// named by the rows themselves — org_id is a column, and every query in the
+// package says so — so there is nothing to declare here.
 func asOrg(t *testing.T, pool *pgxpool.Pool, org int, fn func(pgx.Tx)) {
 	t.Helper()
 	ctx := context.Background()
@@ -157,9 +154,6 @@ func asOrg(t *testing.T, pool *pgxpool.Pool, org int, fn func(pgx.Tx)) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
-	if err := setOrgScope(ctx, tx, org); err != nil {
-		t.Fatal(err)
-	}
 	fn(tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -176,8 +170,8 @@ func execAsMaintenance(t *testing.T, s *Server, sql string, args ...any) {
 }
 
 // scalar reads ONE value in the maintenance scope. The work tables are
-// under RLS: a read without a declared scope would return nothing, and the
-// assertion would draw the wrong conclusion.
+// per-campaign: a read that forgot to name one would draw the wrong
+// conclusion.
 func scalar[T any](t *testing.T, s *Server, sql string, args ...any) T {
 	t.Helper()
 	var v T
@@ -244,7 +238,7 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 }
 
 // test mayors: the score drives the allocation order, the rank drives the
-// message template. `mayors` is shared by every campaign and outside RLS:
+// message template. `mayors` is shared by every campaign:
 // it is written without a scope.
 func seedMayors(t *testing.T, s *Server, count int, dept string) {
 	t.Helper()
@@ -965,9 +959,6 @@ func withTx(t *testing.T, s *Server, fn func(pgx.Tx) error) error {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
-	if err := setOrgScope(ctx, tx, OrgMaintenance); err != nil {
-		t.Fatal(err)
-	}
 	if err := fn(tx); err != nil {
 		return err
 	}

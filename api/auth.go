@@ -42,7 +42,7 @@ func (c *Account) MyTeam() int {
 func (c *Account) Coordination() bool { return c != nil && c.Role == RoleCoordination }
 
 // Administration: instance administrator. Has NO power inside a campaign —
-// its organisation is the instance scope, which the RLS policies keep apart
+// its organisation is the instance scope, which owns no campaign row
 // from every campaign.
 func (c *Account) Administration() bool {
 	return c != nil && c.Role == RoleAdministration
@@ -88,7 +88,7 @@ func scoped(r *http.Request) *query {
 // outer-joined: a card with no work row has a NULL team, hence is free.
 //
 // This clause walls off the TEAMS of one campaign. The wall between
-// CAMPAIGNS depends on no clause at all: PostgreSQL enforces it with RLS.
+// CAMPAIGNS is the `org_id` predicate every query in this package carries.
 func teamScope(c *Account, q *query) string {
 	if c.Coordination() {
 		return "1=1"
@@ -99,7 +99,7 @@ func teamScope(c *Account, q *query) string {
 // readAccount re-reads the account from the database. Called on EVERY
 // request: that is what makes deactivation immediate, with no session table
 // and no denylist. The read goes through the request's transaction, hence
-// through RLS: it cannot return another campaign's account, even a
+// by its own predicate: it cannot return another campaign's account, even a
 // namesake.
 func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 	var c Account

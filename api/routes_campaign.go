@@ -73,11 +73,10 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The row edited is the one the SCOPE names, not the one this handler
-	// happens to hold: `id=$1` where $1 is what app.org_id carries, so the
-	// application and RLS cannot come to disagree about which campaign is
-	// being written. `orgs` is the one per-campaign table RLS lets everyone
-	// READ — resolving a subdomain requires it — so its writes are the place
-	// where the two walls must say the same thing.
+	// happens to hold: `id=$1`, bound by the constructor, so the row written
+	// is the one the request speaks for by construction. `orgs` is read by
+	// every campaign — resolving a subdomain requires it — which is why its
+	// WRITES are where naming the campaign matters most.
 	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
 		// The name follows the candidate: it is what /api/config returns as
