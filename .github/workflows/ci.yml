@@ -39,10 +39,17 @@ jobs:
       # same findings; and there is no third-party action to pin by commit,
       # hence no chance of pinning one to a commit that does not exist —
       # which a 40-hex string nobody resolves would look exactly like.
+      # The REPOSITORY is mounted, not api/: .golangci.yml lives at the root,
+      # and golangci-lint finds a configuration by walking up from its working
+      # directory — which stops at the mount point. Mounting api/ alone left
+      # the container with the DEFAULT rules, so the CI reported six findings
+      # the declared configuration excludes on purpose (errcheck and SA1019 in
+      # the guards, each with its reason written down). A linter enforcing
+      # something other than what the repository declares is worse than no
+      # linter: the clone is green and the CI is red, and neither is wrong.
       - name: Go
-        working-directory: api
         run: |
-          docker run --rm -v "$PWD:/app" -w /app \
+          docker run --rm -v "$PWD:/src" -w /src/api \
             golangci/golangci-lint:v2.12.2 golangci-lint run
 
       # api/vendor is committed so the image build downloads nothing. Left to

@@ -4,7 +4,13 @@
 // provide exactly the columns the API expects, everything is green here and
 // the published image dies at startup.
 
-import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -165,6 +171,44 @@ describe("the deployment files", () => {
       pinned,
       "no pinned action found: the check read nothing",
     ).toBeGreaterThan(10);
+  });
+
+  // A linter reads its configuration by walking UP from its working
+  // directory, and a container stops that walk at the mount point. Mounting
+  // api/ alone therefore ran golangci-lint with its DEFAULT rules while the
+  // repository declares its own: the clone was green, the CI red, and the
+  // release refused to publish over six findings .golangci.yml excludes on
+  // purpose. Whatever is mounted has to contain the configuration.
+  it("lint with the configuration the repository declares", () => {
+    const ci = readFileSync(
+      join(ROOT, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    const step = /- name: Go\n((?:.*\n)*?)(?=\n\s*(?:#|- name:))/.exec(ci);
+    expect(
+      step,
+      "the Go lint step is no longer where this test reads it",
+    ).toBeTruthy();
+    const text = step![1];
+    expect(text, "the step no longer runs golangci-lint").toContain(
+      "golangci-lint run",
+    );
+    // `working-directory: api` narrows $PWD to a directory that does not hold
+    // .golangci.yml, which is what broke it
+    expect(
+      text,
+      "the step narrows its directory below the one holding .golangci.yml",
+    ).not.toMatch(/working-directory:\s*api/);
+    const mount = /-v\s+"\$PWD:([^"]+)"/.exec(text);
+    expect(mount, "the step mounts nothing this test can read").toBeTruthy();
+    const workdir = /-w\s+(\S+)/.exec(text);
+    expect(workdir, "the step declares no working directory").toBeTruthy();
+    expect(
+      workdir![1].startsWith(mount![1]),
+      `the container works in ${workdir![1]}, outside the mount ${mount![1]}`,
+    ).toBe(true);
+    // and the configuration really is at the root, where the mount puts it
+    expect(existsSync(join(ROOT, ".golangci.yml"))).toBe(true);
   });
 
   // kubelet injects one legacy Docker-links variable per Service port into
