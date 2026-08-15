@@ -61,8 +61,17 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		// hosting request, carried onto the organisation at approval, and
 		// adjustable later by its coordination — discretion is strategic
 		// for a campaign preparing its announcement.
-		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT TRUE`,
-		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT TRUE`,
+		//
+		// The column arrives FALSE and only then defaults to TRUE. Rows that
+		// predate it were never shown the question, and NOT NULL DEFAULT TRUE
+		// answers it for them: a campaign hosted before the directory existed
+		// would be published by the very restart that upgrades the instance,
+		// without a word to it. Rows written afterwards still default to
+		// listed — both doors carry the choice.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE orgs ALTER COLUMN listed SET DEFAULT TRUE`,
+		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
 		// The work columns move out of `mayors`: they are the only ones that
 		// belong to an organisation, hence the only ones walled.
 		`CREATE TABLE IF NOT EXISTS assignments(
