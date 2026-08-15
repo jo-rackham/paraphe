@@ -272,10 +272,9 @@ tasks:
           -tAc "SELECT 1 FROM pg_database WHERE datname='paraphe_essai'" \
           | grep -q 1 || psql "${PARAPHE_TEST_ADMIN_DSN:-postgresql://paraphe:paraphe@127.0.0.1:5432/postgres}" \
           -c "CREATE DATABASE paraphe_essai"
-        # An UNPRIVILEGED role, because a superuser walks through the walls
-        # between campaigns: the application refuses to start on one in
-        # multi-campaign mode, so try-instance could not work at all. The
-        # official postgres image makes POSTGRES_USER a superuser.
+        # An unprivileged role, because that is what production connects
+        # with: the official postgres image makes POSTGRES_USER a superuser,
+        # and trying the instance under one would try something else.
         ADMIN="${PARAPHE_TEST_ADMIN_DSN:-postgresql://paraphe:paraphe@127.0.0.1:5432/postgres}"
         psql "$ADMIN" -tAc "SELECT 1 FROM pg_roles WHERE rolname='paraphe_essai'" \
           | grep -q 1 || psql "$ADMIN" -c \

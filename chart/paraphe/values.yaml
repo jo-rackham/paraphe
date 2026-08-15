@@ -70,10 +70,9 @@ postgres:
 #   - un certificat GÉNÉRIQUE : Let's Encrypt ne le délivre qu'en DNS-01
 #     (HTTP-01 ne sait pas signer un *), donc un Issuer cert-manager avec le
 #     jeton d'API de votre fournisseur DNS ;
-#   - un rôle PostgreSQL SANS privilège (ni SUPERUSER, ni BYPASSRLS) : un rôle
-#     privilégié traverse les politiques de cloisonnement, et l'application
-#     REFUSE de démarrer dans ce cas. Le secret « <cluster>-app » de
-#     CloudNativePG convient.
+#   - une base PostgreSQL : le secret « <cluster>-app » de CloudNativePG
+#     convient. Les privilèges du rôle n'ont aucune incidence sur le
+#     cloisonnement entre campagnes, qui est appliqué par les requêtes.
 instance:
   baseDomain: ""
   # Sous-domaine de la campagne décrite par `campagne:` ci-dessous. Sert aussi
