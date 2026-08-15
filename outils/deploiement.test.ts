@@ -97,6 +97,38 @@ describe("the synthetic dataset", () => {
 });
 
 describe("the deployment files", () => {
+  // A third-party action referenced by tag runs whatever that tag points at
+  // TODAY. Whoever owns the repository — or anyone who takes it over — can
+  // move it onto code that reads the workflow's secrets, and the run that
+  // does it looks exactly like the one before. A commit is immutable, so the
+  // reference is a commit, with the version in a comment for the reader.
+  //
+  // Globbed, not listed: a workflow added later would be invisible to a
+  // hardcoded list, and one unpinned reference is enough.
+  it("reference third-party actions by commit, never by tag", () => {
+    const workflows = readdirSync(join(ROOT, ".github", "workflows"))
+      .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+    expect(workflows.length, "no workflow found to check").toBeGreaterThan(0);
+    const floating: string[] = [];
+    let pinned = 0;
+    for (const name of workflows) {
+      const text = readFileSync(join(ROOT, ".github", "workflows", name), "utf8");
+      for (const line of text.split("\n")) {
+        const m = line.match(/^\s*(?:-\s*)?uses:\s*(\S+)/);
+        if (!m) continue;
+        const ref = m[1];
+        // A workflow of this repository, called by path: it is versioned
+        // with the file that calls it, so there is no tag to pin.
+        if (ref.startsWith("./")) continue;
+        if (/@[0-9a-f]{40}$/.test(ref)) pinned++;
+        else floating.push(`${name}: ${ref}`);
+      }
+    }
+    expect(floating, "these actions are referenced by a movable tag").toEqual([]);
+    expect(pinned, "no pinned action found: the check read nothing")
+      .toBeGreaterThan(10);
+  });
+
   // A ":" in an unquoted command makes YAML read the line as a mapping:
   // GitHub rejects the ENTIRE workflow, and without a remote nothing
   // signals it. The Taskfile paid exactly this trap, ci.yml too.
