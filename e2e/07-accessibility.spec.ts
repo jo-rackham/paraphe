@@ -247,9 +247,22 @@ test.describe
     test("instance apex: hosting request and moderation", async ({ page }) => {
       await page.goto(`${API_ORIGIN}/`);
       await expect(
-        page.getByRole("heading", { name: "Héberger une campagne" }),
+        page.getByRole("heading", {
+          name: "Chercher 500 parrainages, méthodiquement",
+        }),
       ).toBeVisible();
       await checkA11y(page, "instance:accueil");
+
+      // the hosting form, on its own view
+      await page
+        .getByRole("button", { name: "Héberger une campagne" })
+        .first()
+        .click();
+      await expect(
+        page.getByRole("heading", { name: "Héberger une campagne" }),
+      ).toBeVisible();
+      await checkA11y(page, "instance:demande");
+      await page.getByRole("button", { name: "Retour à l'accueil" }).click();
 
       await page.getByRole("button", { name: "Se connecter" }).click();
       await expect(
@@ -305,7 +318,9 @@ test.describe
       test("instance apex in dark", async ({ page }) => {
         await page.goto(`${API_ORIGIN}/`);
         await expect(
-          page.getByRole("heading", { name: "Héberger une campagne" }),
+          page.getByRole("heading", {
+            name: "Chercher 500 parrainages, méthodiquement",
+          }),
         ).toBeVisible();
         await checkA11y(page, "instance:accueil (sombre)");
       });

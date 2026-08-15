@@ -14,18 +14,21 @@ import { Demande } from "./InstanceRequest.tsx";
 import type { InstanceConfig, Me, Message } from "./types.ts";
 
 // The instance landing page — the domain apex, when several campaigns are
-// hosted. No work happens here: campaigns request their hosting, and the
-// administration answers.
+// hosted. No work happens here: the page explains the tool, lists the
+// hosted campaigns, and leads to the hosting request; the administration
+// signs in to moderate.
 //
 // The form is public and creates nothing. Without moderation, the first
 // abuse would be squatting a candidate's name, and the squatted campaign
 // would have no recourse since the subdomain would already be taken.
 
+type View = "accueil" | "demande" | "connexion";
+
 export default function Instance({ config }: { config: InstanceConfig }) {
   const [me, setMe] = useState<Me | null>(null);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
-  const [signingIn, setSigningIn] = useState(false);
+  const [view, setView] = useState<View>("accueil");
 
   useEffect(() => {
     (async () => {
@@ -47,25 +50,21 @@ export default function Instance({ config }: { config: InstanceConfig }) {
       await API.signOut();
     } finally {
       setMe(null);
-      setSigningIn(false);
+      setView("accueil");
     }
   };
 
   useViewFocus(
-    !ready
-      ? "chargement"
-      : me
-        ? "moderation"
-        : signingIn
-          ? "connexion"
-          : "accueil",
+    !ready ? "chargement" : me ? "moderation" : view,
     !ready
       ? null
       : me
         ? "Demandes d'hébergement"
-        : signingIn
+        : view === "connexion"
           ? "Administration de l'instance"
-          : "Héberger une campagne",
+          : view === "demande"
+            ? "Héberger une campagne"
+            : "Chercher 500 parrainages, méthodiquement",
   );
 
   return (
@@ -102,17 +101,21 @@ export default function Instance({ config }: { config: InstanceConfig }) {
           <Alerte message={message} onClose={() => setMessage(null)} />
           {!ready && <p role="status">Chargement…</p>}
           {ready && me && <Moderation onMessage={setMessage} />}
-          {ready && !me && !signingIn && (
+          {ready && !me && view === "accueil" && (
             <Accueil
               config={config}
-              onAdministration={() => setSigningIn(true)}
+              onDemande={() => setView("demande")}
+              onAdministration={() => setView("connexion")}
             />
           )}
-          {ready && !me && signingIn && (
+          {ready && !me && view === "demande" && (
+            <DemandeView config={config} onBack={() => setView("accueil")} />
+          )}
+          {ready && !me && view === "connexion" && (
             <AdministrationSignIn
               config={config}
               onSignedIn={setMe}
-              onBack={() => setSigningIn(false)}
+              onBack={() => setView("accueil")}
             />
           )}
         </main>
@@ -130,26 +133,83 @@ export default function Instance({ config }: { config: InstanceConfig }) {
 
 function Accueil({
   config,
+  onDemande,
   onAdministration,
 }: {
   config: InstanceConfig;
+  onDemande: () => void;
   onAdministration: () => void;
 }) {
   return (
     <>
-      <h1>Héberger une campagne</h1>
+      <h1>Chercher 500 parrainages, méthodiquement</h1>
       <p>
-        Cette instance héberge, pour plusieurs campagnes, l'outil de recherche
-        de parrainages d'élus. Chaque campagne reçoit son adresse (
-        <code>votre-campagne.{config.base_domain}</code>), ses équipes locales
-        et son suivi — invisibles des autres.
+        paraphe outille les campagnes présidentielles qui partent loin des
+        projecteurs. Son point de départ : les parrainages accordés en 2017 et
+        en 2022 aux candidats peu médiatisés — publiés par le Conseil
+        constitutionnel — croisés avec le Répertoire national des élus et
+        l'annuaire des mairies. De quoi savoir à qui parler d'abord, et comment
+        joindre sa mairie.
       </p>
-      <p className="alerte">
-        Les demandes sont <strong>examinées avant ouverture</strong>. C'est ce
-        qui empêche quelqu'un de prendre l'adresse d'une campagne qui n'est pas
-        la sienne.
+      <p>
+        <button type="button" onClick={onDemande}>
+          Héberger une campagne
+        </button>
       </p>
-      <Demande config={config} />
+
+      <h2>Ce que l'outil fait</h2>
+      <div className="carte">
+        <ul>
+          <li>
+            <strong>Prioriser</strong> — les 34 826 maires de France, chacun
+            avec son historique : priorité à ceux qui ont déjà parrainé une
+            candidature peu médiatisée, en 2017, en 2022, ou les deux.
+          </li>
+          <li>
+            <strong>Travailler à plusieurs</strong> — des équipes par
+            départements, des lots de fiches qu'on réserve pour ne jamais
+            contacter deux fois la même mairie, un suivi partagé : à contacter,
+            appelé, hésite, promis, signé.
+          </li>
+          <li>
+            <strong>Écrire juste</strong> — emails, courriers et arguments
+            d'appel générés depuis les modèles de la campagne, avec la touche
+            personnelle de chaque bénévole, fiche par fiche.
+          </li>
+          <li>
+            <strong>Cloisonner</strong> — chaque campagne sur sa propre adresse,
+            son travail invisible des autres. Seule son adresse peut apparaître
+            dans l'annuaire ci-dessous, et chaque campagne choisit d'y figurer
+            ou non.
+          </li>
+        </ul>
+      </div>
+
+      <h2>Comment ça marche</h2>
+      <div className="carte">
+        <ol>
+          <li>
+            Vous demandez l'ouverture d'une campagne : une adresse, un nom, un
+            mot d'explication.
+          </li>
+          <li>
+            L'administration de l'instance examine la demande — c'est ce qui
+            empêche quelqu'un de prendre l'adresse d'une campagne qui n'est pas
+            la sienne.
+          </li>
+          <li>
+            Acceptée, la campagne reçoit son accès de coordination : elle
+            remplit ses textes, ouvre ses équipes locales, et le travail
+            commence.
+          </li>
+        </ol>
+        <p>
+          <button type="button" onClick={onDemande}>
+            Demander l'ouverture d'une campagne
+          </button>
+        </p>
+      </div>
+
       <Annuaire />
       {config.browser_version_url && (
         <>
@@ -159,7 +219,7 @@ function Accueil({
             le même outil, sans inscription : les listes se chargent dans votre
             navigateur et rien ne quitte votre poste. Pour travailler à
             plusieurs et partager le suivi, demandez plutôt l'hébergement d'une
-            campagne ci-dessus.
+            campagne.
           </p>
         </>
       )}
@@ -173,9 +233,39 @@ function Accueil({
   );
 }
 
+function DemandeView({
+  config,
+  onBack,
+}: {
+  config: InstanceConfig;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <h1>Héberger une campagne</h1>
+      <p>
+        Chaque campagne reçoit son adresse (
+        <code>votre-campagne.{config.base_domain}</code>), ses équipes locales
+        et son suivi — le travail des unes est invisible des autres.
+      </p>
+      <p className="alerte">
+        Les demandes sont <strong>examinées avant ouverture</strong>. C'est ce
+        qui empêche quelqu'un de prendre l'adresse d'une campagne qui n'est pas
+        la sienne.
+      </p>
+      <Demande config={config} />
+      <p>
+        <button type="button" className="lien" onClick={onBack}>
+          Retour à l'accueil
+        </button>
+      </p>
+    </>
+  );
+}
+
 // The public directory: what this instance hosts, filtered as you type.
-// It says nothing a visitor could not learn one subdomain at a time — the
-// point is to make the campaigns findable, not to reveal them.
+// Only campaigns that chose to be listed appear — and none before its
+// coordination has named it (a template name is no identity to advertise).
 function Annuaire() {
   const [campaigns, setCampaigns] = useState<
     { slug: string; name: string }[] | null
@@ -210,7 +300,7 @@ function Annuaire() {
     return (
       <>
         <h2>Les campagnes hébergées</h2>
-        <p className="gris">Aucune campagne pour l'instant.</p>
+        <p className="gris">Aucune campagne référencée pour l'instant.</p>
       </>
     );
   }
@@ -271,7 +361,6 @@ function AdministrationSignIn({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
     setError(null);
     setSending(true);
     try {
@@ -319,7 +408,7 @@ function AdministrationSignIn({
             />
           </label>
         </p>
-        <button type="submit" aria-disabled={sending || undefined}>
+        <button type="submit" disabled={sending}>
           {sending ? "Connexion…" : "Se connecter"}
         </button>
       </form>

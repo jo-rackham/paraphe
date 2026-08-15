@@ -25,6 +25,16 @@ test.describe
       page,
     }) => {
       await page.goto(`${API_ORIGIN}/`);
+      // the landing explains the tool; the form lives on its own view
+      await expect(
+        page.getByRole("heading", {
+          name: "Chercher 500 parrainages, méthodiquement",
+        }),
+      ).toBeVisible();
+      await page
+        .getByRole("button", { name: "Héberger une campagne" })
+        .first()
+        .click();
       await expect(
         page.getByRole("heading", { name: "Héberger une campagne" }),
       ).toBeVisible();
@@ -55,6 +65,10 @@ test.describe
       page,
     }) => {
       await page.goto(`${API_ORIGIN}/`);
+      await page
+        .getByRole("button", { name: "Héberger une campagne" })
+        .first()
+        .click();
       await page.getByLabel("Adresse souhaitée").fill(SLUG);
       await page.getByLabel("Nom de la campagne").fill("Un autre qui la veut");
       await page.getByLabel("Votre nom").fill("Quelqu'un");
