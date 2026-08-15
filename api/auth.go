@@ -31,6 +31,14 @@ type Account struct {
 	TeamName     *string `json:"team_name"`
 }
 
+// Password hashes never leave the database: the selection is explicit,
+// never `SELECT *` — a newly added column must not travel to the browser
+// because nobody re-read the query. Shared by every account read, so the
+// promise lives in one place.
+const accountColumns = "c.email, c.name, c.role, c.team_id, c.active, " +
+	"COALESCE(c.personal_note,'') AS personal_note, COALESCE(c.created_at,'') AS created_at, " +
+	"COALESCE(c.created_by,'') AS created_by, g.name AS team"
+
 // MyTeam: 0 for an account without a team ("national" scope).
 func (c *Account) MyTeam() int {
 	if c == nil || c.TeamID == nil {
@@ -41,9 +49,8 @@ func (c *Account) MyTeam() int {
 
 func (c *Account) Coordination() bool { return c != nil && c.Role == RoleCoordination }
 
-// Administration: instance administrator. Has NO power inside a campaign —
-// its organisation is the instance scope, which owns no campaign row
-// from every campaign.
+// Administration: instance administrator. Has NO power inside a campaign:
+// its organisation is the instance scope, which owns no campaign row.
 func (c *Account) Administration() bool {
 	return c != nil && c.Role == RoleAdministration
 }
@@ -103,10 +110,8 @@ func teamScope(c *Account, q *query) string {
 func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 	var c Account
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT c.email, c.name, c.role, c.team_id, c.active, "+
-			"COALESCE(c.personal_note,''), COALESCE(c.created_at,''), "+
-			"COALESCE(c.created_by,''), g.name "+
-			"FROM accounts c LEFT JOIN teams g "+
+		"SELECT "+accountColumns+
+			" FROM accounts c LEFT JOIN teams g "+
 			"ON g.id = c.team_id AND g.org_id = c.org_id "+
 			"WHERE c.org_id=$1 AND c.email=$2 AND c.active", scopeOrg(r), email).
 		Scan(&c.Email, &c.Name, &c.Role, &c.TeamID, &c.Active, &c.PersonalNote,

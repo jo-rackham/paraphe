@@ -54,7 +54,7 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := strings.ToLower(strings.TrimSpace(d.Slug))
 	name := strings.TrimSpace(d.Name)
-	email := strings.ToLower(strings.TrimSpace(d.RequesterEmail))
+	email := normalizeEmail(d.RequesterEmail)
 	requester := strings.TrimSpace(d.RequesterName)
 
 	if !ValidSlug(slug) {

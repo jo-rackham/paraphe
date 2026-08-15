@@ -145,6 +145,16 @@ test.describe
       }
     });
 
+    test("phone width: the list's card layout keeps its semantics", async ({
+      page,
+    }) => {
+      // under 640 px the mayor rows lay out as grid cards, and a changed
+      // display is exactly what strips implicit table roles — scan there
+      await page.setViewportSize({ width: 375, height: 812 });
+      await openBrowserList(page);
+      await checkA11y(page, "browser:liste (375 px)");
+    });
+
     test.describe(() => {
       test.use({ colorScheme: "dark" });
       test("browser mode in dark: the hand-defined palette holds", async ({

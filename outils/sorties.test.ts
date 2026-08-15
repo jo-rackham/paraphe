@@ -11,15 +11,15 @@ import { describe, expect, it } from "vitest";
 
 import { parseRecords } from "../noyau/csv.ts";
 import { norm } from "../noyau/texte.ts";
+import { ROOT } from "./config.ts";
+import { compareIdentity } from "./matching.ts";
 import {
   checkCivilities,
   checkHeader,
-  compareIdentity,
   ENDORSEMENT_COLUMNS,
   loadEndorsements,
   RNE_COLUMNS,
-} from "./build.ts";
-import { ROOT } from "./config.ts";
+} from "./sources.ts";
 
 const TARGETS = join(ROOT, "out", "01_maires_cibles_prioritaires.csv");
 const built = existsSync(TARGETS);

@@ -16,9 +16,13 @@ pre-commit:
   exclude:
     - "api/vendor/**"
   jobs:
+    # The glob mirrors what biome.json actually covers (ts, tsx, mjs): a
+    # wider one here would promise a lint that never runs. No
+    # --no-errors-on-unmatched either — a staged source file that Biome's
+    # includes do not reach should fail the hook loudly, not pass unchecked.
     - name: biome
-      glob: "*.{ts,tsx,js,mjs,json}"
-      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      glob: "*.{ts,tsx,mjs}"
+      run: pnpm exec biome check --write {staged_files}
       stage_fixed: true
 
     - name: gofmt

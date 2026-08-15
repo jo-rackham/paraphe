@@ -65,12 +65,8 @@ linters:
         - -ST1020
         - -ST1021
         - -ST1022
-        # parser.ParseDir is deprecated in favour of go/packages, which
-        # lives in golang.org/x/tools — one direct dependency and its
-        # transitive tail, added to a test-only guard, in a module that
-        # keeps four. The canary reads one directory of one package, which
-        # is exactly what ParseDir does well.
-        - -SA1019
+        # SA1019 (deprecations) stays ON here: only the guards need an
+        # exception, and it is scoped to test files below.
 
   exclusions:
     rules:
@@ -81,6 +77,16 @@ linters:
         linters:
           - gosec
           - errcheck
+      # The guards read the package with parser.ParseDir, deprecated in
+      # favour of go/packages — which lives in golang.org/x/tools, one
+      # direct dependency and its transitive tail, added to a test-only
+      # guard, in a module that keeps four. ParseDir reads one directory of
+      # one package, which is exactly what the guards need. Production code
+      # keeps the deprecation check.
+      - path: _test\.go
+        text: "SA1019"
+        linters:
+          - staticcheck
 
 formatters:
   enable:

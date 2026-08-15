@@ -23,6 +23,14 @@
      grey read 1.32:1 against it. This tone reads 3.6:1 and stays for
      controls only — cards and table rules keep the light rule */
   --champ-trait: #8a8477;
+  /* cards float a hair off the page in light; in dark the border alone
+     carries the edge — a shadow there only muddies it */
+  --ombre: 0 1px 2px rgba(20, 18, 16, .06);
+  /* status dots, one hue per state, stepped per scheme */
+  --pastille-gris: #64748b; --pastille-bleu: #2563eb;
+  --pastille-indigo: #4f46e5; --pastille-ambre: #b45309;
+  --pastille-vert: #15803d; --pastille-vert-fort: #166534;
+  --pastille-orange: #c2410c; --pastille-rouge: #b91c1c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -33,6 +41,11 @@
     --focus: #ffd400;
     --piste: #332e22;
     --champ-trait: #6b6559;
+    --ombre: none;
+    --pastille-gris: #94a3b8; --pastille-bleu: #60a5fa;
+    --pastille-indigo: #a5b4fc; --pastille-ambre: #fbbf24;
+    --pastille-vert: #4ade80; --pastille-vert-fort: #86efac;
+    --pastille-orange: #fb923c; --pastille-rouge: #f87171;
   }
 }
 * { box-sizing: border-box; }
@@ -84,33 +97,70 @@ header .lien[aria-current] { background: var(--entete-hover);
   background: repeating-linear-gradient(-45deg,
     var(--noir) 0 9px, var(--jaune) 9px 18px); }
 
-main { max-width: 64rem; margin: 0 auto; padding: 1rem; }
-h1 { font-size: 1.5rem; }
+main { max-width: 64rem; margin: 0 auto; padding: 1rem 1rem 1.5rem; }
+/* the scale breathes with the viewport; the yellow rule is the identity */
+h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 1.9rem); line-height: 1.25;
+     margin: 1.1rem 0 .8rem; }
 h1::after { content: ""; display: block; width: 3.5rem; height: 4px;
-            margin-top: .35rem; background: var(--jaune); border-radius: 2px; }
-h2 { font-size: 1.15rem; margin-top: 1.6rem; }
+            margin-top: .4rem; background: var(--jaune); border-radius: 2px; }
+h2 { font-size: 1.25rem; margin-top: 1.7rem; line-height: 1.3; }
 a { color: var(--lien); }
 /* overflow-x: at 320 px (or 400 % zoom) a table scrolls inside its card
    instead of pushing the whole page sideways */
 .carte { background: var(--carte); border: 1px solid var(--trait);
-         border-radius: .6rem; padding: 1rem 1.2rem; margin: .8rem 0;
-         overflow-x: auto; }
-.chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
-        font-size: .82rem; border: 1px solid rgba(0,0,0,.12); color: #141210; }
+         border-radius: .6rem; padding: 1rem 1.2rem; margin: .9rem 0;
+         overflow-x: auto; box-shadow: var(--ombre); }
+/* sign-in: two fields lost on a 64 rem line — a narrow centred card */
+.carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
+/* Status chip: a dot in the status hue, a quiet border, the theme's own
+   text — the old hardcoded pastels forced light backgrounds onto the dark
+   scheme. The dot is decorative; the label alone carries the state. */
+.chip { display: inline-flex; align-items: center; gap: .35rem;
+        padding: .12rem .6rem .12rem .5rem; border-radius: 999px;
+        font-size: .82rem; border: 1px solid var(--trait);
+        background: var(--carte); color: var(--texte);
+        white-space: nowrap; }
+.chip::before { content: ""; width: .55em; height: .55em;
+                border-radius: 50%; flex: none;
+                background: var(--pastille, var(--texte-sec));
+                /* forced colors strip backgrounds: the dot went white on
+                   white. It is decorative (the label carries the state),
+                   but it may keep its hue for those users too */
+                forced-color-adjust: none; }
+.chip-gris { --pastille: var(--pastille-gris); }
+.chip-bleu { --pastille: var(--pastille-bleu); }
+.chip-indigo { --pastille: var(--pastille-indigo); }
+.chip-ambre { --pastille: var(--pastille-ambre); }
+.chip-vert { --pastille: var(--pastille-vert); }
+.chip-vert-fort { --pastille: var(--pastille-vert-fort); }
+.chip-orange { --pastille: var(--pastille-orange); }
+.chip-rouge { --pastille: var(--pastille-rouge); }
+.chip-encre { --pastille: var(--texte); }
+.chip-inconnu { background: var(--alerte-fond);
+                border-color: var(--alerte-trait); }
 table { border-collapse: collapse; width: 100%; }
-td, th { padding: .45rem .5rem; border-bottom: 1px solid var(--trait);
+td, th { padding: .5rem .55rem; border-bottom: 1px solid var(--trait);
          text-align: left; vertical-align: top; }
-th { font-size: .85rem; text-transform: uppercase; letter-spacing: .04em;
-     color: var(--texte-sec); }
+th { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em;
+     color: var(--texte-sec); border-bottom-width: 2px; }
+/* a row under the pointer stands out just enough to aim the click */
+tbody tr:hover td { background: var(--fond); }
+tbody tr:last-child td { border-bottom: 0; }
 button, .bouton { background: var(--accent); color: var(--accent-txt); border: 0;
   border-bottom: 3px solid rgba(0,0,0,.35); padding: .55rem 1rem;
   border-radius: .45rem; font-size: 1rem; font-weight: 600; cursor: pointer;
   text-decoration: none; display: inline-block; }
 button:hover, .bouton:hover { background: var(--jaune-vif); }
+/* the press: the bottom border is the button's thickness, and clicking
+   compresses it — total height stays, the top edge dips one pixel */
+button:not(.lien):active:not(:disabled), .bouton:active {
+  transform: translateY(1px); border-bottom-width: 2px; }
 button.secondaire, .bouton.secondaire { background: var(--noir); color: #fff;
   border-bottom-color: var(--jaune); }
+/* text-align: a button centres its label, and a link-styled button that
+   wraps (a long commune name on a phone) must read like a link */
 button.lien { background: none; border: 0; color: var(--lien); font: inherit;
-  padding: 0; cursor: pointer; text-decoration: underline; }
+  padding: 0; cursor: pointer; text-decoration: underline; text-align: left; }
 main button.lien { font-weight: inherit; }
 input[type=text], input[type=password], select, textarea {
   font: inherit; padding: .5rem .6rem; border: 1px solid var(--champ-trait);
@@ -128,8 +178,12 @@ label[for^="champ-"] { display: block; margin-bottom: .25rem; }
 form.enligne { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
 form.enligne > div { flex: 1; min-width: 12rem; }
 details { border: 1px solid var(--trait); border-radius: .6rem;
-          background: var(--carte); margin: .7rem 0; }
-details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600; }
+          background: var(--carte); margin: .7rem 0;
+          box-shadow: var(--ombre); }
+details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600;
+                  border-radius: .6rem; }
+details summary:hover { background: var(--fond); }
+details[open] summary { border-radius: .6rem .6rem 0 0; }
 details .dedans { padding: 0 1rem 1rem; }
 .gris { color: var(--texte-sec); font-size: .9rem; }
 /* deactivated account row: muted to the secondary grey, which still reads
@@ -144,13 +198,58 @@ tr.inactif td { color: var(--texte-sec); }
           border-bottom: 1px solid var(--trait); padding-bottom: .3rem; }
 .groupe:first-child { margin-top: 0; }
 .aide { display: block; margin-top: .25rem; }
+/* a field still holding the shipped template value: it LOOKS filled, and
+   the dashed border plus the line under it say it is not */
+input.exemple, textarea.exemple { border-style: dashed; }
 .grand-tel { font-size: 1.5rem; font-weight: 700; margin: .2rem 0; }
+/* why this mayor: the one line that justifies the whole card */
+.pourquoi { border-left: 4px solid var(--jaune); padding: .1rem .8rem;
+            margin: .1rem 0 .7rem; }
+/* The card's status bar: pinned to the viewport bottom until its place in
+   the flow is reached — recording a call must not require scrolling past
+   sixteen rows of email. scroll-padding keeps it from covering what the
+   keyboard focuses near the page bottom. */
+html { scroll-padding-bottom: 8rem; }
+.barre-statut { position: sticky; bottom: 0; z-index: 5;
+  background: var(--carte); border: 1px solid var(--trait);
+  border-radius: .6rem .6rem 0 0; box-shadow: 0 -3px 10px rgba(0,0,0,.07);
+  padding: .5rem .8rem calc(.6rem + env(safe-area-inset-bottom, 0px));
+  /* one bar-height of flow gap above: the browser does not scroll a
+     PARTIALLY visible focused element, so without this headroom the last
+     rows of the email could never be brought out from under the bar */
+  margin-top: 10rem; }
+/* a viewport shorter than the fiche's own controls (400 % zoom, landscape
+   phone): pinning the bar would leave almost nothing else — back in flow */
+@media (max-height: 480px) {
+  .barre-statut { position: static; margin-top: 1rem; }
+}
+.barre-statut .champs { display: flex; flex-wrap: wrap; gap: .4rem .8rem;
+  align-items: end; }
+.barre-statut label { font-size: .85rem; color: var(--texte-sec); }
+.barre-statut select, .barre-statut textarea { display: block;
+  font-size: 1rem; color: var(--texte); margin-top: .15rem; }
+.barre-statut select { width: auto; max-width: 17rem; }
+.barre-statut .note { flex: 1; min-width: 12rem; }
+/* on a phone the bar stays compact: status and save on one line, the note
+   on two lines below — a FIXED height, because growing it on focus shifted
+   fifty pixels of layout under the very finger that just tapped it */
+@media (max-width: 640px) {
+  .barre-statut { padding-left: .6rem; padding-right: .6rem; }
+  .barre-statut .champs { gap: .3rem .6rem; }
+  .barre-statut select { flex: 1; max-width: none; width: 100%; }
+  .barre-statut label:first-child { flex: 1; }
+  .barre-statut .note { flex-basis: 100%; order: 3; }
+  .barre-statut textarea { height: 3.4rem; }
+}
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);
           border-left: 5px solid var(--jaune); border-radius: .45rem;
-          padding: .6rem .9rem; }
+          padding: .5rem .8rem; }
 .alerte.erreur { border-left-color: var(--rouge); }
+/* stacked banners: the default 1em paragraph margins made three of them
+   fill a phone's first screen */
+p.alerte { margin: .55rem 0; }
 pre { white-space: pre-wrap; font: inherit; margin: 0; }
 pre.lettre { background: var(--fond); border: 1px solid var(--trait);
              border-radius: .45rem; padding: 1rem; }
@@ -160,7 +259,37 @@ footer .officiel { border: 1px solid var(--trait);
          border-left: 5px solid var(--rouge); border-radius: .45rem;
          padding: .5rem .8rem; }
 @media (max-width: 640px) { main { padding: .6rem } .marque .sous { display: none } }
-@media print { header, footer, .rayures, .tricolore, details summary { display: none } }
+
+/* Under 640 px a mayor row lays out as a stacked card: the four-column
+   table forced a horizontal scroll that hid the status. The explicit roles
+   in the markup (TableMaires) keep the semantics this display change
+   strips.
+      commune, elected official     status chip
+      signal                        department   */
+@media (max-width: 640px) {
+  table.maires, table.maires tbody { display: block; }
+  table.maires thead { position: absolute; width: 1px; height: 1px;
+    margin: -1px; overflow: hidden; clip-path: inset(50%); }
+  table.maires tr { display: grid; grid-template-columns: 1fr auto;
+    column-gap: .6rem; align-items: start;
+    border: 1px solid var(--trait); border-radius: .5rem;
+    padding: .5rem .65rem; margin: .55rem 0; }
+  table.maires td { display: block; border: 0; padding: 0; }
+  table.maires td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  /* the department cell by its class, not its position: the markup
+     already names it */
+  table.maires td.departement { grid-column: 2; grid-row: 2;
+    text-align: right; font-size: .85rem; color: var(--texte-sec); }
+  table.maires td:nth-child(3) { grid-column: 1; grid-row: 2; }
+  table.maires td:nth-child(4) { grid-column: 2; grid-row: 1;
+    text-align: right; }
+  /* the filters above the list: two per row instead of a full-width
+     stack — only free text keeps the whole line */
+  form.enligne > div { min-width: 0; flex: 1 1 45%; }
+  form.enligne > div:has(input[type="text"]) { flex-basis: 100%; }
+}
+@media print { header, footer, .rayures, .tricolore, details summary,
+               .barre-statut { display: none } }
 
 /* GUIDE.md rendu dans l'application : la même source que le dépôt. */
 .guide h1 { font-size: 1.5rem; }
@@ -173,6 +302,20 @@ footer .officiel { border: 1px solid var(--trait);
 .guide blockquote { margin: .8rem 0; padding: .1rem 0 .1rem .9rem;
                     border-left: 4px solid var(--jaune); color: var(--texte-sec); }
 .guide li { margin: .25rem 0; }
+
+/* Dashboard goal tiles: the number is the information, the bar is its
+   silhouette against the goal (fill/track pair held ≥3:1 by the e2e). */
+.tuiles { display: grid; gap: .6rem; margin: .8rem 0;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.tuile { border: 1px solid var(--trait); border-radius: .5rem;
+  padding: .6rem .75rem .7rem; }
+.tuile .valeur { margin: 0; font-size: 1.7rem; font-weight: 650;
+  line-height: 1.15; }
+.tuile .valeur .objectif { font-size: .95rem; font-weight: 400;
+  color: var(--texte-sec); }
+.tuile .libelle { margin: .1rem 0 .45rem; font-size: .85rem;
+  color: var(--texte-sec); }
+.tuile .jauge { height: 8px; margin-top: .35rem; }
 
 /* Téléchargement des listes : 2 Mo sans retour visuel, c'est un outil qui
    a l'air planté. */

@@ -430,7 +430,7 @@ var notAnAlias = map[string]bool{
 // meant a second query written into it inherited the exemption in silence,
 // which is exactly what the old comment promised would not happen.
 var crossesCampaigns = map[string]string{
-	// db.go:removeStale — the mayors row is SHARED. Deleting a target that
+	// import.go:removeStale — the mayors row is SHARED. Deleting a target that
 	// left the list must not strip another campaign of its history, so
 	// "already worked on" is asked across every campaign, from the
 	// maintenance scope, the only place that can.
@@ -1038,11 +1038,11 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		// one of queryCalls and judged there. They looked readable only
 		// because a package-level `sql` from another file leaked in; with
 		// that pollution gone, the promise has to be made explicitly.
-		"routes_mayors.go:rows":            true,
-		"routes_mayors.go:column":          true,
-		"routes_mayors.go:counters":        true,
-		"routes_mayors.go:orderedCounters": true,
-		"db.go:textColumn":                 true,
+		"queries.go:rows":            true,
+		"queries.go:column":          true,
+		"queries.go:counters":        true,
+		"queries.go:orderedCounters": true,
+		"import.go:textColumn":       true,
 		// Not SQL at all: valkey-go's Lua Exec, running the rate-limit
 		// counter script against Valkey. No PostgreSQL driver is in reach of
 		// that call, so there is no walled table it could touch.

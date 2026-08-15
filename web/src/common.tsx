@@ -17,16 +17,20 @@ import type { Campaign, Mayor, Message, Note } from "./types.ts";
 // there. Two copies of this screen would be two occasions to thank someone
 // for an endorsement they never made.
 
+// label + chip tone. The tone names a CSS class (`chip-<tone>`) whose dot
+// colour is declared per colour scheme — a hex here forced light-mode
+// pastels onto the dark theme. The dot is redundant with the label, which
+// alone carries the state.
 export const STATUSES: Record<string, [string, string]> = {
-  to_contact: ["À contacter", "#e2e8f0"],
-  email_sent: ["Email envoyé", "#bfdbfe"],
-  letter_sent: ["Courrier envoyé", "#c7d2fe"],
-  to_call_back: ["À rappeler", "#fde68a"],
-  promised: ["Promesse de présentation", "#bbf7d0"],
-  signed: ["A signé (publié par le CC)", "#86efac"],
-  promised_elsewhere: ["Déjà promis à un autre candidat", "#fed7aa"],
-  refused: ["Refus", "#fecaca"],
-  do_not_contact: ["Ne plus contacter", "#e5e5e5"],
+  to_contact: ["À contacter", "gris"],
+  email_sent: ["Email envoyé", "bleu"],
+  letter_sent: ["Courrier envoyé", "indigo"],
+  to_call_back: ["À rappeler", "ambre"],
+  promised: ["Promesse de présentation", "vert"],
+  signed: ["A signé (publié par le CC)", "vert-fort"],
+  promised_elsewhere: ["Déjà promis à un autre candidat", "orange"],
+  refused: ["Refus", "rouge"],
+  do_not_contact: ["Ne plus contacter", "encre"],
 };
 
 // The data model is English, the screen is French. Rendering a value as it
@@ -151,6 +155,87 @@ export const CAMPAIGN_FIELDS: CampaignField[] = [
 
 export const campaignLabel = (key: string): string =>
   CAMPAIGN_FIELDS.find((f) => f.key === key)?.label ?? key;
+
+/**
+ * The nine campaign fields, rendered once for both modes. A field still on
+ * its template value SAYS so, beside it: the shipped values look filled
+ * ("Prénom NOM"), and the banner alone never said which lines were the
+ * trap. The predicate is the engine's own `unfilledKeys` — the same
+ * normalisation that decides whether the mass mailing refuses to run.
+ *
+ * `groupe`: the heading level of the group titles — h2 right under the
+ * browser tab's h1, h3 under the team card's h2. The hierarchy has no
+ * level to skip.
+ */
+export function ChampsCampagne({
+  values,
+  onEdit,
+  groupe: Groupe,
+}: {
+  values: Record<string, string>;
+  onEdit: (key: string, value: string) => void;
+  groupe: "h2" | "h3";
+}) {
+  const unfilled = new Set(M.unfilledKeys(values));
+  return (
+    <>
+      {CAMPAIGN_FIELDS.map((f, i) => {
+        const example = unfilled.has(f.key);
+        const described =
+          [
+            f.hint ? `champ-${f.key}-aide` : "",
+            example ? `champ-${f.key}-exemple` : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined;
+        return (
+          <div key={f.key}>
+            {f.group !== CAMPAIGN_FIELDS[i - 1]?.group && (
+              <Groupe className="groupe">{f.group}</Groupe>
+            )}
+            <p>
+              {/* associated by id, not nested: a textarea nested in its
+                  label makes its own CONTENT part of the label's text */}
+              <label htmlFor={`champ-${f.key}`}>{f.label}</label>
+              {f.long ? (
+                <textarea
+                  id={`champ-${f.key}`}
+                  rows={3}
+                  placeholder={f.example}
+                  className={example ? "exemple" : undefined}
+                  aria-describedby={described}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => onEdit(f.key, e.target.value)}
+                />
+              ) : (
+                <input
+                  id={`champ-${f.key}`}
+                  type="text"
+                  placeholder={f.example}
+                  className={example ? "exemple" : undefined}
+                  aria-describedby={described}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => onEdit(f.key, e.target.value)}
+                />
+              )}
+              {example && (
+                <span className="gris aide" id={`champ-${f.key}-exemple`}>
+                  <strong>Valeur d'exemple</strong> — remplacez-la : elle
+                  partirait telle quelle dans les messages.
+                </span>
+              )}
+              {f.hint && (
+                <span className="gris aide" id={`champ-${f.key}-aide`}>
+                  {f.hint}
+                </span>
+              )}
+            </p>
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 /**
  * Decorative pictogram (emoji, arrow): hidden from assistive technology —
@@ -301,8 +386,7 @@ export function Chip({ status }: { status: string }) {
   if (!known) {
     return (
       <span
-        className="chip"
-        style={{ background: "#fef08a" }}
+        className="chip chip-inconnu"
         title="Statut inconnu de cette version de l'application"
       >
         {status} <Emoji>⚠</Emoji>
@@ -314,12 +398,88 @@ export function Chip({ status }: { status: string }) {
       </span>
     );
   }
-  const [label, colour] = known;
+  const [label, tone] = known;
+  return <span className={`chip chip-${tone}`}>{label}</span>;
+}
+
+/**
+ * One row of a mayor list, shared by the three mayor tables (browser list,
+ * server list, dashboard). Under 640 px the row lays out as a stacked card
+ * (`table.maires`), and a changed display strips the implicit table
+ * semantics — the explicit roles below keep them for assistive technology.
+ */
+export function LigneMaire({
+  m,
+  status,
+  volunteer,
+  onOpen,
+}: {
+  m: Mayor;
+  status?: string | null;
+  /** Team mode: who reserved the card, shown under its status. */
+  volunteer?: string | null;
+  onOpen: (m: Mayor) => void;
+}) {
+  // biome-ignore-start lint/a11y/noRedundantRoles: kept on purpose — display:grid at narrow widths strips the implicit roles
   return (
-    <span className="chip" style={{ background: colour }}>
-      {label}
-    </span>
+    <tr role="row">
+      <td role="cell">
+        <button type="button" className="lien" onClick={() => onOpen(m)}>
+          <strong>{m.commune}</strong>
+        </button>
+        <br />
+        <span className="gris">
+          {m.title} {m.first_name} {m.last_name}
+        </span>
+      </td>
+      <td role="cell" className="departement">
+        {m.department}
+      </td>
+      <td role="cell" className="gris">
+        {M.rank(m) === "has_endorsed"
+          ? `${m.recent_candidate} (${m.recent_year})`
+          : M.RANKS[M.rank(m)]}
+      </td>
+      <td role="cell">
+        <Chip status={status ?? "to_contact"} />
+        {volunteer && (
+          <>
+            <br />
+            <span className="gris">{volunteer}</span>
+          </>
+        )}
+      </td>
+    </tr>
   );
+  // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
+}
+
+/** The mayor table shell around `LigneMaire` rows — one copy of the four
+ * column headers, and of the roles that survive the card layout. */
+export function TableMaires({ children }: { children: ReactNode }) {
+  // biome-ignore-start lint/a11y/noRedundantRoles: kept on purpose — display changes at narrow widths strip the implicit roles
+  return (
+    <table className="maires" role="table">
+      <thead role="rowgroup">
+        <tr role="row">
+          <th scope="col" role="columnheader">
+            Commune
+          </th>
+          <th scope="col" role="columnheader">
+            Département
+          </th>
+          <th scope="col" role="columnheader">
+            Signal
+          </th>
+          <th scope="col" role="columnheader">
+            Statut
+          </th>
+        </tr>
+      </thead>
+      <tbody role="rowgroup">{children}</tbody>
+    </table>
+  );
+  // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
 }
 
 export function PiedDePage({
@@ -364,6 +524,20 @@ export function Alerte({
   // mutation. One paragraph per role, since a role must not change either.
   const error = message?.tone === "erreur" ? message : null;
   const ok = message && message.tone !== "erreur" ? message : null;
+  // A success confirms and may leave on its own; an error is the only word
+  // about a failed write and stays until acted on. The live region spoke
+  // when the text arrived, so removing it later loses nothing. `onClose`
+  // goes through a ref, and the timer is keyed on the message's CONTENT:
+  // parents pass fresh closures — and may pass fresh objects — on every
+  // render, and depending on either would rearm the timer for ever.
+  const close = useRef(onClose);
+  close.current = onClose;
+  const okKey = ok ? `${ok.tone}\n${ok.text}` : null;
+  useEffect(() => {
+    if (okKey === null) return undefined;
+    const timer = setTimeout(() => close.current?.(), 7000);
+    return () => clearTimeout(timer);
+  }, [okKey]);
   const fermer = onClose && (
     <>
       {" "}
@@ -465,6 +639,21 @@ export interface CardDraft {
 
 const cardWho = (mayor: Mayor) =>
   `${mayor.insee_code}|${mayor.last_name}|${mayor.first_name}`;
+
+/**
+ * The ONE number a tel: link may dial, or "" for "render text only".
+ * Directory strings can hold two numbers ("04 … / 06 …"), an extension
+ * ("poste 25") or junk; stripped blindly they concatenate into a number
+ * nobody meant — and any ten-digit prefix of that is somebody's real
+ * phone. The first plausible run of digits is the number; outside 6-15
+ * digits (E.164 ceiling, short overseas floors) there is no link at all.
+ */
+const dialable = (phone: string): string => {
+  const run = phone.match(/\+?\d[\d\s.()-]*/)?.[0] ?? "";
+  const digits = run.replace(/[^+\d]/g, "");
+  const length = digits.replace("+", "").length;
+  return length >= 6 && length <= 15 ? digits : "";
+};
 
 export interface CardProps {
   mayor: Mayor;
@@ -638,7 +827,7 @@ export function Fiche({
       {header}
 
       <div className="carte">
-        <p style={{ margin: ".2rem 0" }}>
+        <p className="pourquoi">
           <strong>Pourquoi cette personne :</strong>{" "}
           {rank === "has_endorsed" ? (
             `a parrainé ${
@@ -661,7 +850,13 @@ export function Fiche({
         <p className="grand-tel">
           <Emoji>☎ </Emoji>
           <span className="sr-only">Téléphone : </span>
-          {mayor.phone || "non renseigné"}
+          {/* the display keeps the printed string whole; the link exists
+              only when ONE dialable number could be read out of it */}
+          {mayor.phone && dialable(mayor.phone) ? (
+            <a href={`tel:${dialable(mayor.phone)}`}>{mayor.phone}</a>
+          ) : (
+            mayor.phone || "non renseigné"
+          )}
         </p>
         <p style={{ margin: ".2rem 0" }}>
           <strong>Ouverture :</strong>{" "}
@@ -778,12 +973,42 @@ export function Fiche({
         </>
       )}
 
-      <div className="carte">
-        <h2 style={{ marginTop: 0 }}>Après le contact</h2>
+      {notes.length > 0 && (
+        <div className="carte">
+          <h2 style={{ marginTop: 0 }}>Historique</h2>
+          {/* The history arrives newest first, in both modes: the server
+              orders by id DESC, the browser prepends. A plain index would
+              shift on every addition; the DISTANCE FROM THE OLDEST end is
+              what stays with a note as the list grows at the front. Two
+              notes can share a timestamp, so no field of the note itself
+              is unique. */}
+          {notes.map((n, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: reverse index — stable under prepend, and no field of a note is unique
+            <div className="note-item" key={notes.length - i}>
+              <span className="gris">
+                {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
+                {n.volunteer ? ` — ${n.volunteer}` : ""}
+              </span>
+              {n.note && (
+                <>
+                  <br />
+                  {n.note}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sticky: the outcome of a contact is recorded WHILE on the phone,
+          and these controls sat below sixteen rows of email. Last in the
+          flow, pinned to the viewport bottom until scrolled to — same
+          controls, same state, nothing is duplicated. */}
+      <section className="barre-statut" aria-label="Après le contact">
         <Alerte
           message={statusError ? { tone: "erreur", text: statusError } : null}
         />
-        <p>
+        <div className="champs">
           <label>
             Statut
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -794,50 +1019,24 @@ export function Fiche({
               ))}
             </select>
           </label>
-        </p>
-        <p>
-          <label>
+          <label className="note">
             Note
             <textarea
-              rows={3}
+              rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
           </label>
-        </p>
-        <button type="button" onClick={save} disabled={saving}>
-          {saving ? "Enregistrement…" : "Enregistrer"}
-        </button>{" "}
-        {/* always in the tree: a live region announces reliably only when
-            its CONTENT changes, not when it appears with it */}
-        <span role="status" className="gris">
-          {saved ? "Enregistré." : ""}
-        </span>
-        {notes.length > 0 && (
-          <>
-            <h2>Historique</h2>
-            {/* The history is append-only and rendered whole, in order:
-                nothing is inserted, removed or reordered, which is the case
-                the rule exists for. Two notes can share a timestamp, so the
-                index is the only key here that is actually unique. */}
-            {notes.map((n, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only, never reordered
-              <div className="note-item" key={i}>
-                <span className="gris">
-                  {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
-                  {n.volunteer ? ` — ${n.volunteer}` : ""}
-                </span>
-                {n.note && (
-                  <>
-                    <br />
-                    {n.note}
-                  </>
-                )}
-              </div>
-            ))}
-          </>
-        )}
-      </div>
+          <button type="button" onClick={save} disabled={saving}>
+            {saving ? "Enregistrement…" : "Enregistrer"}
+          </button>{" "}
+          {/* always in the tree: a live region announces reliably only when
+              its CONTENT changes, not when it appears with it */}
+          <span role="status" className="gris">
+            {saved ? "Enregistré." : ""}
+          </span>
+        </div>
+      </section>
     </>
   );
 }

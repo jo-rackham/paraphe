@@ -12,15 +12,14 @@ import (
 
 // Walls between campaigns.
 //
-// The wall IS the discipline of the queries: every statement touching a
-// walled table names its campaign, bound as $1 by `scoped` (auth.go). That
-// discipline is not left to memory — it is enforced by the canary
-// (TestEveryQueryOnAWalledTableNamesTheCampaign reads this package as an
-// AST and demands the org_id predicate per table alias) and demonstrated by
-// TestNoCampaignSeesAnother, which runs two campaigns on one instance and
-// checks that nothing of the neighbour comes back. Row-level security was
-// the second wall; it was removed on 15/08/2026 and must not be
-// reintroduced without reopening that decision (CLAUDE.md).
+// The wall IS the discipline of each query: every one touching a
+// per-campaign table names the campaign, bound as $1 by the single
+// constructor scoped(r). Row-level security was a second wall and was
+// removed — do not reintroduce it without reopening that decision. What
+// holds the remaining wall is a pair of tests:
+// TestEveryQueryOnAWalledTableNamesTheCampaign reads the package as an AST
+// and refuses a query that leaves a walled alias unbounded, and
+// TestNoCampaignSeesAnother runs two campaigns against every route.
 
 // Tables that carry per-campaign rows. `mayors` is not among them: the list
 // is public, identical for everyone, and read-only.

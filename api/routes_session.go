@@ -66,7 +66,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	if !readBody(w, r, &d) {
 		return
 	}
-	email := strings.ToLower(strings.TrimSpace(d.Email))
+	email := normalizeEmail(d.Email)
 
 	var stored string
 	var active bool
