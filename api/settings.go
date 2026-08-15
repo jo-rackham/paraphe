@@ -78,7 +78,7 @@ var Settings = []Setting{
 	{Key: "base_domain", Env: "PARAPHE_BASE_DOMAIN", Flag: "base-domain",
 		Help: "domain of the campaign subdomains; empty means a single campaign"},
 	{Key: "org_slug", Env: "PARAPHE_ORG_SLUG", Flag: "org-slug",
-		Default: "campaign", Help: "subdomain of the bootstrap campaign"},
+		Default: "campagne", Help: "subdomain of the bootstrap campaign"},
 	{Key: "source_url", Env: "PARAPHE_SOURCE_URL", Flag: "source-url",
 		Help: "public repository URL, shown in the footer"},
 	{Key: "browser_version_url", Env: "PARAPHE_BROWSER_VERSION_URL",

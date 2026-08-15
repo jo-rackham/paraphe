@@ -167,7 +167,13 @@ test.describe
       await page.getByLabel("Mot de passe").fill(volunteerPassword);
       await page.getByRole("button", { name: "Se connecter" }).click();
 
-      await expect(page.getByText("Ce compte a été désactivé")).toBeVisible();
+      // the SAME sentence a wrong password gets: reached only once the
+      // password verified, "deactivated" would confirm to whoever typed it
+      // that the credential is live — and a deactivated account is one an
+      // incident just took away from somebody
+      await expect(
+        page.getByText("Adresse ou mot de passe incorrect"),
+      ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "déconnexion" }),
       ).toHaveCount(0);

@@ -74,6 +74,13 @@ func releaseLock(ctx context.Context, c *pgxpool.Conn, key int) {
 	}
 }
 
+// minSecretKeyBytes: the floor a supplied session key must clear. The one
+// this file draws is 64 bytes and DEPLOYMENT.md asks operators for the same;
+// 32 is where a refusal stops being arguable, and it is what
+// `openssl rand -hex 16` — the shortest thing anybody pastes — already
+// exceeds.
+const minSecretKeyBytes = 32
+
 // SessionSecret: the cookie signing key. Never derived from a human
 // password — a captured cookie would allow breaking it offline. Either
 // provided by the environment, or drawn at random once and kept, so
@@ -84,6 +91,18 @@ func SessionSecret(ctx context.Context, pool *pgxpool.Pool) ([]byte, error) {
 		return nil, err
 	}
 	if provided != "" {
+		// A LENGTH floor, because the whole post-quantum argument below
+		// rests on the key and nothing else checked it. `PARAPHE_SECRET_KEY=x`
+		// started cleanly and signed every session with one byte: one
+		// captured cookie, an offline search of minutes, and the attacker
+		// mints a session for any account — verify() never reads the
+		// database. Refusing the five example values was not enough.
+		if len(provided) < minSecretKeyBytes {
+			return nil, fmt.Errorf("PARAPHE_SECRET_KEY is %d bytes long, and "+
+				"signs every session: %d at the very least, 64 random ones "+
+				"expected. Generate one: openssl rand -hex 64",
+				len(provided), minSecretKeyBytes)
+		}
 		return []byte(provided), nil
 	}
 

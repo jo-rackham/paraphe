@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -129,6 +130,26 @@ func TestExampleSecretsRefused(t *testing.T) {
 	got, err := UsableSecret("  vrai-secret-tiré-au-hasard  ", "PARAPHE_SECRET_KEY")
 	if err != nil || got != "vrai-secret-tiré-au-hasard" {
 		t.Errorf("legitimate secret refused or badly trimmed: %q %v", got, err)
+	}
+}
+
+// Refusing the five published values left every OTHER short string through,
+// and a session key is only worth its length: one captured cookie, an offline
+// search, and any account can be minted. The floor is checked before the pool
+// is ever touched, hence the nil one here.
+func TestShortSessionSecretsRefused(t *testing.T) {
+	for _, v := range []string{"x", "paraphe", "0123456789abcdef0123456789abcde"} {
+		t.Setenv("PARAPHE_SECRET_KEY", v)
+		if _, err := SessionSecret(context.Background(), nil); err == nil {
+			t.Errorf("a %d-byte session key was accepted: %q", len(v), v)
+		}
+	}
+	// exactly at the floor, and not a template value: accepted, and the pool
+	// is never reached
+	t.Setenv("PARAPHE_SECRET_KEY", "0123456789abcdef0123456789abcdef")
+	key, err := SessionSecret(context.Background(), nil)
+	if err != nil || len(key) != 32 {
+		t.Errorf("a key at the floor was refused: %d %v", len(key), err)
 	}
 }
 

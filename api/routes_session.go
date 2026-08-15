@@ -114,10 +114,16 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !active {
+		// The SAME answer as a wrong password, reached only once the
+		// password verified. Saying "deactivated" here confirmed to whoever
+		// typed it that the credential is live — in exactly the situation
+		// deactivation exists for, a phished account, where the person
+		// holding the correct password is the attacker. The distinction
+		// stays in the log, where the operator reads it and nobody else;
+		// a volunteer switched off by their own lead learns it from them.
 		s.securityEvent(r, slog.LevelInfo, "signin_refused_inactive",
 			"account", s.accountPseudonym(email))
-		errorJSON(w, http.StatusForbidden,
-			"Ce compte a été désactivé. Voyez votre référent.")
+		errorJSON(w, http.StatusUnauthorized, "Adresse ou mot de passe incorrect.")
 		return
 	}
 
@@ -127,9 +133,9 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if c == nil {
-		// deactivated between the two reads
-		errorJSON(w, http.StatusForbidden,
-			"Ce compte a été désactivé. Voyez votre référent.")
+		// deactivated between the two reads — same answer as above, for the
+		// same reason
+		errorJSON(w, http.StatusUnauthorized, "Adresse ou mot de passe incorrect.")
 		return
 	}
 	// Read BEFORE the upgrade below, because committing closes the

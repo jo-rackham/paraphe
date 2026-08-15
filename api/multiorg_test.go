@@ -301,6 +301,75 @@ func TestRequestThenApprovalCreatesCampaign(t *testing.T) {
 	}
 }
 
+// A request that pre-loads a candidate opens NOTHING under that name. The
+// moderation queue shows an administrator a name and an address; approving on
+// what one is shown must not write nine values one is not. Otherwise the
+// squat this whole queue exists to refuse walks in through its own form.
+func TestApprovalDoesNotCarryASubmittedIdentity(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, "admin@paraphe.test", "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+
+	apex := clientOn(t, srv, "paraphe.test")
+	code, rep := apex.call(http.MethodPost, "/api/request", map[string]any{
+		"slug": "verte", "name": "Alliance écologiste",
+		"requester_email": "porteur@exemple.fr", "requester_name": "Porteur",
+		"message": "projet local",
+		"campaign": map[string]any{
+			"candidat":      "Camille Exemple",
+			"signataire":    "Comité de soutien",
+			"contact_email": "candidat@exemple.fr",
+			"site":          "https://exemple.fr",
+		},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("request refused: %d %v", code, rep)
+	}
+
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("administration sign-in: %d", code)
+	}
+	code, queue := admin.call(http.MethodGet, "/api/admin/requests", nil)
+	if code != http.StatusOK {
+		t.Fatalf("moderation queue: %d %v", code, queue)
+	}
+	requests, _ := queue["requests"].([]any)
+	if len(requests) != 1 {
+		t.Fatalf("%d request(s) in the queue, 1 expected", len(requests))
+	}
+	// what the administrator is about to approve carries no identity to read
+	if _, shown := requests[0].(map[string]any)["campaign"]; shown {
+		t.Error("the queue returns a campaign the moderation screen never renders")
+	}
+	id := int64(requests[0].(map[string]any)["id"].(float64))
+	if code, dec := admin.call(http.MethodPost, "/api/admin/requests/"+itoa(id),
+		map[string]any{"decision": RequestAccepted}); code != http.StatusOK {
+		t.Fatalf("approval refused: %d %v", code, dec)
+	}
+
+	code, cfg := clientOn(t, srv, "verte.paraphe.test").
+		call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK {
+		t.Fatalf("the approved campaign does not answer: %d %v", code, cfg)
+	}
+	campaign, _ := cfg["campaign"].(map[string]any)
+	for _, k := range CampaignKeys {
+		if v, _ := campaign[k].(string); v != "" {
+			t.Errorf("the campaign opened with a submitted %s: %q", k, v)
+		}
+	}
+	// and coordination is told the nine values are its own to fill
+	unfilled, _ := cfg["unfilled"].([]any)
+	if len(unfilled) != len(CampaignKeys) {
+		t.Errorf("%d unfilled key(s) announced, %d expected",
+			len(unfilled), len(CampaignKeys))
+	}
+}
+
 // The administration can open a campaign without a request: the queue's own
 // ceiling message promises that door, and this is it.
 func TestDirectCreationOpensCampaign(t *testing.T) {

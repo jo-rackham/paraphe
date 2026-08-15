@@ -96,6 +96,7 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 	// single anonymous client write 89 MB in under four seconds, and
 	// nothing ever deletes a hosting request. A full disk takes down every
 	// campaign on the instance.
+	prefilled := false
 	for k, v := range d.Campaign {
 		if utf8.RuneCountInString(v) > maxCampaignRunes {
 			errorJSON(w, http.StatusBadRequest,
@@ -103,6 +104,17 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 					"2000 caractères.", k)
 			return
 		}
+		if strings.TrimSpace(v) != "" {
+			prefilled = true
+		}
+	}
+	// The public form does not fill these values, and approval no longer
+	// carries them into the campaign. A client that sends them anyway is
+	// trying to open a campaign under an identity nobody moderated: the
+	// attempt is inert, and it is said out loud.
+	if prefilled {
+		s.securityEvent(r, slog.LevelWarn, "hosting_request_prefilled",
+			"slug", slug)
 	}
 
 	// An already-taken slug is refused EARLY: the requester can pick
@@ -176,9 +188,11 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/admin/requests — the moderation queue, and the campaigns in place.
 func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
-	// the campaign configuration is NOT returned here: the moderation queue
-	// is read on an administration screen, which only needs the request's
-	// identity.
+	// the campaign configuration is NOT returned here, and approval does not
+	// carry it into the created campaign either: an administrator can only
+	// weigh what they are shown, and nine values they never see are nine
+	// values they cannot moderate. Coordination fills them in itself, on the
+	// screen that already says which ones are still empty.
 	//
 	// EVERY pending request, and only then the last decided ones. A single
 	// LIMIT over both would let 200 anonymous requests push a real
@@ -280,10 +294,9 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 	// same moment, and accepting twice would create two organisations for
 	// one subdomain — or fail on uniqueness, saying nothing useful.
 	var slug, name, state string
-	var campaign []byte
 	err = s.tx(r).QueryRow(ctx,
-		"SELECT slug, name, campaign::text, state FROM hosting_requests WHERE id=$1 "+
-			"FOR UPDATE", id).Scan(&slug, &name, &campaign, &state)
+		"SELECT slug, name, state FROM hosting_requests WHERE id=$1 "+
+			"FOR UPDATE", id).Scan(&slug, &name, &state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		errorJSON(w, http.StatusNotFound, "Aucune demande n'a l'identifiant %d.", id)
 		return
@@ -318,8 +331,19 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			s.failure(w, err)
 			return
 		}
+		// EMPTY, whatever the request carried: what the administrator
+		// approved is a name and an address, not an identity. Reading the
+		// submitted values back here would open a campaign under a candidate
+		// nobody moderated — the very squat this queue exists to refuse.
+		// Coordination fills the nine values itself, and until it does, every
+		// page says so and the mass mailing refuses to run.
+		blank, err := json.Marshal(completeCampaign(nil))
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
 		orgID, password, err := createCampaign(ctx, s.tx(r), slug, name,
-			campaign, requesterEmail, requesterName, accountOf(r).Email)
+			blank, requesterEmail, requesterName, accountOf(r).Email)
 		if err != nil {
 			s.failure(w, err)
 			return

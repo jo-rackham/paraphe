@@ -318,3 +318,42 @@ func TestSessionCookieIsProtected(t *testing.T) {
 		}
 	}
 }
+
+// A deactivated account answers sign-in EXACTLY as a wrong password does.
+// The branch is reached only once the password verified, so a distinct
+// answer confirmed the credential is live — to whoever holds it, which in
+// the situation deactivation exists for is the person the account was taken
+// away from. The decoy hash already bought this silence for "does this
+// address have an account"; the branch one step later gave it back.
+func TestDeactivatedSignInIsIndistinguishableFromAWrongPassword(t *testing.T) {
+	s, srv := testServer(t)
+	email := "ecartee@exemple.fr"
+	password := createAccount(t, s, email, RoleVolunteer, nil)
+	execAsMaintenance(t, s,
+		"UPDATE accounts SET active=FALSE WHERE email=$1", email)
+
+	answer := func(address, secret string) (int, string) {
+		c := newClient(t, srv)
+		code, body := c.call(http.MethodPost, "/api/session",
+			map[string]string{"email": address, "password": secret})
+		return code, body["error"].(string)
+	}
+
+	codeOff, wordsOff := answer(email, password)     // right password, off
+	codeWrong, wordsWrong := answer(email, "pas-ça") // wrong password
+	codeGhost, wordsGhost := answer("nul@part.fr", password)
+
+	if codeOff != http.StatusUnauthorized {
+		t.Errorf("a deactivated account answers %d where a wrong password "+
+			"answers 401: the difference says the password is the right one",
+			codeOff)
+	}
+	if wordsOff != wordsWrong || wordsOff != wordsGhost {
+		t.Errorf("three different sentences for one refusal:\n  deactivated: %q"+
+			"\n  wrong password: %q\n  no such account: %q",
+			wordsOff, wordsWrong, wordsGhost)
+	}
+	if codeWrong != http.StatusUnauthorized || codeGhost != http.StatusUnauthorized {
+		t.Errorf("wrong=%d ghost=%d, want 401 for both", codeWrong, codeGhost)
+	}
+}

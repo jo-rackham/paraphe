@@ -31,14 +31,18 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 	if err != nil {
 		return err
 	}
-	if email != "" && password != "" {
+	seeded := email != "" && password != ""
+	if seeded {
 		if err := seedAccount(ctx, tx, bootstrapOrg, email,
 			Get("admin_name"), password, RoleCoordination); err != nil {
 			return err
 		}
 		slog.Info("coordination account", "email", email)
-		return nil
 	}
+	// Asked WHATEVER the variables say. Seeding refreshes a password, it does
+	// not reactivate: an instance whose only coordination was switched off is
+	// unenterable even with both variables set, and that is precisely the
+	// state this refusal exists to catch.
 	var one int
 	err = tx.QueryRow(ctx,
 		"SELECT 1 FROM accounts WHERE org_id=$1 AND role='coordination' AND active",
@@ -49,6 +53,12 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 		// empty, and the application then came up, answered every request,
 		// and offered a sign-in form no password opens — with nothing in
 		// the logs. DEPLOYMENT.md promises the opposite.
+		if seeded {
+			return fmt.Errorf("the coordination account %q is deactivated, and "+
+				"it is the only one: nobody could sign in. Reactivate it from "+
+				"another coordination's session, or seed a different "+
+				"PARAPHE_ADMIN_EMAIL", email)
+		}
 		return fmt.Errorf("no coordination account, and none can be created: "+
 			"set PARAPHE_ADMIN_EMAIL and PARAPHE_ADMIN_PASSWORD (currently "+
 			"%q and %s). Without them nobody could ever sign in",
@@ -104,19 +114,38 @@ func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// seedAccount creates the account, or refreshes its password and role so the
+// operator can rotate PARAPHE_ADMIN_PASSWORD by restarting.
+//
+// It does NOT re-enable a deactivated account. Deactivation is the one lever
+// an incident leaves — a coordination switches off a phished account, and the
+// stolen password IS the environment value the pod would seed back. Restoring
+// `active` here meant the button held until the next rolling update, HPA
+// scale or database failover, and nothing said so.
 func seedAccount(ctx context.Context, tx pgx.Tx, org int,
 	email, name, password, role string) error {
 	hashed, err := HashPassword(password)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
+	// `active` defaults to TRUE, so a row that comes back inactive is one
+	// that already existed and was switched off deliberately.
+	var active bool
+	if err := tx.QueryRow(ctx,
 		"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
 			"VALUES($1,$2,$3,$4,$5,$6,'amorçage') "+
 			"ON CONFLICT(org_id, email) DO UPDATE SET password_hash=excluded.password_hash, "+
-			"role=excluded.role, active=TRUE",
-		org, email, name, hashed, role, shortTimestamp()); err != nil {
+			"role=excluded.role "+
+			"RETURNING active",
+		org, email, name, hashed, role, shortTimestamp()).
+		Scan(&active); err != nil {
 		return fmt.Errorf("seeding account %s (%s): %w", email, role, err)
+	}
+	if !active {
+		slog.Warn("the seeded account is DEACTIVATED and stays so; its password "+
+			"was refreshed but it opens nothing. Reactivate it from the "+
+			"interface, or drop the variables that seed it.",
+			"email", email, "role", role)
 	}
 	return nil
 }

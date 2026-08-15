@@ -902,9 +902,50 @@ func TestImportKeepsWhatTheTeamHasWorkedOn(t *testing.T) {
 	}
 }
 
+// The production shape: both variables set, as the chart wires them from a
+// Secret, and the seeded account deactivated during an incident. Seeding
+// refreshes its password — the operator may be rotating it — but must not
+// switch it back on: the stolen password IS the environment value, so a
+// rolling update would hand the account straight back. Startup then refuses,
+// because an instance nobody can enter is not a running instance.
+func TestSeedingDoesNotReactivateADeactivatedAccount(t *testing.T) {
+	pool := testDatabase(t)
+	t.Setenv("PARAPHE_ADMIN_EMAIL", "coord@exemple.fr")
+	t.Setenv("PARAPHE_ADMIN_PASSWORD", "mot-de-passe-d-amorçage")
+	ctx := context.Background()
+	org := orgOfSlug(t, pool, testSlug)
+	var err error
+	var active bool
+	asMaintenance(t, pool, func(tx pgx.Tx) {
+		if _, e := tx.Exec(ctx, "DELETE FROM accounts"); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := tx.Exec(ctx,
+			"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
+				"VALUES($1,'coord@exemple.fr','Coord','x','coordination',FALSE)",
+			org); e != nil {
+			t.Fatal(e)
+		}
+		err = bootstrap(ctx, tx, org)
+		if e := tx.QueryRow(ctx,
+			"SELECT active FROM accounts WHERE org_id=$1 AND email='coord@exemple.fr'",
+			org).Scan(&active); e != nil {
+			t.Fatal(e)
+		}
+	})
+	if active {
+		t.Error("seeding switched a deactivated account back on: the password " +
+			"an incident revoked opens the account again at the next restart")
+	}
+	if err == nil {
+		t.Error("started with a deactivated coordination and both variables " +
+			"set: the campaign is served and nobody can ever enter it")
+	}
+}
+
 // A campaign whose only coordination account has been DEACTIVATED is just
-// as unenterable as one with no account at all — no route reactivates it —
-// and the `active` half of the predicate goes untested.
+// as unenterable as one with no account at all, and the `active` half of the
+// predicate goes untested.
 func TestStartupRefusesADeactivatedCoordination(t *testing.T) {
 	pool := testDatabase(t)
 	t.Setenv("PARAPHE_ADMIN_EMAIL", "")
