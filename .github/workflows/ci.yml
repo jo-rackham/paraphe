@@ -11,11 +11,96 @@ on:
 permissions:
   contents: read
 
+# A run superseded by a newer push has nothing left to prove, except on main
+# where every commit's result is a record of its own.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  lint:
+    name: 🧹 lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: api/go.sum
+
+      - name: TypeScript, format and lint
+        run: pnpm exec biome check .
+
+      # The linters run from their own images rather than through wrapper
+      # actions. Two reasons, and the second is the one that matters: the
+      # version is the one devbox.json pins, so a clone and the CI report the
+      # same findings; and there is no third-party action to pin by commit,
+      # hence no chance of pinning one to a commit that does not exist —
+      # which a 40-hex string nobody resolves would look exactly like.
+      - name: Go
+        working-directory: api
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app \
+            golangci/golangci-lint:v2.12.2 golangci-lint run
+
+      # api/vendor is committed so the image build downloads nothing. Left to
+      # drift, the build compiles something other than what go.mod names, and
+      # nothing says so until a dependency's behaviour differs.
+      - name: The vendored modules match go.mod
+        working-directory: api
+        run: |
+          go mod vendor
+          if ! git diff --exit-code -- vendor go.mod go.sum; then
+            echo "::error::api/vendor has drifted from go.mod — run go mod vendor and commit"
+            exit 1
+          fi
+
+      - name: Workflows, shell scripts and Dockerfiles
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+          docker run --rm -i hadolint/hadolint:v2.14.0-alpine < api/Dockerfile
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # git ls-files respects .gitignore by construction, where a find
+          # needs one exclusion per directory anybody ever creates
+          git ls-files -z '*.sh' ':!:api/vendor' | xargs -0 -r shellcheck
+
+      # outils/deploiement.test.ts refuses an action referenced by a movable
+      # tag, and it checks the SHAPE: forty hexadecimal characters. It cannot
+      # check that the commit EXISTS, nor that the `# vX.Y.Z` beside it names
+      # the release that commit actually is — a plausible string satisfies it
+      # either way, and the run then fails on a reference nobody can resolve,
+      # or pins a version other than the one the comment promises. That needs
+      # the network, which is here and not in the suite.
+      - name: Every pinned action resolves, and to the version its comment names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bad=0
+          while read -r repo sha version; do
+            if ! gh api "repos/$repo/commits/$sha" --jq .sha >/dev/null 2>&1; then
+              echo "::error::$repo@$sha does not exist"
+              bad=1
+              continue
+            fi
+            tags=$(gh api "repos/$repo/tags" --paginate \
+              --jq ".[] | select(.commit.sha==\"$sha\") | .name" 2>/dev/null || true)
+            if [ -n "$version" ] && ! printf '%s\n' "$tags" | grep -qx "$version"; then
+              echo "::error::$repo@$sha is not $version (tags: ${tags:-none})"
+              bad=1
+            fi
+          done < <(grep -rhoE 'uses:[[:space:]]*[^./][^@]+@[0-9a-f]{40}([[:space:]]*#[[:space:]]*\S+)?' \
+                     .github/workflows .github/actions \
+                   | sed -E 's|uses:[[:space:]]*||; s|@| |; s|[[:space:]]*#[[:space:]]*| |')
+          exit $bad
+
   outils:
+    name: 🧪 tools
     # crossing of the open sources, mass mailing, and faithfulness of the
     # difflib port the targeted-mayor list depends on
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: outils
@@ -24,23 +109,16 @@ jobs:
     # release.yml goes through — must not depend on data.gouv.fr being up.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          # the pnpm store, keyed by the lockfile, cached by the tool
-          # that owns it rather than by setup-node
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Types
         run: pnpm exec tsc --noEmit
       - name: Tests
         run: pnpm exec vitest run
 
   api:
+    name: 🐹 api
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17-alpine
@@ -63,9 +141,11 @@ jobs:
           cache-dependency-path: api/go.sum
 
       - name: Format
+        # `*.go` and not `.`: the module is flat, and `.` walks vendor/,
+        # whose formatting belongs to other people.
         # single-quoted: the ':' in the message would make YAML read the
         # command as a mapping, and the whole workflow would be rejected
-        run: 'gofmt -l . | (! grep .) || (echo "gofmt : fichiers non formatés"; exit 1)'
+        run: 'gofmt -l ./*.go | (! grep .) || (echo "gofmt : fichiers non formatés"; exit 1)'
 
       - run: go vet ./...
 
@@ -78,22 +158,15 @@ jobs:
           PARAPHE_TEST_DATABASE_URL: postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe_test
 
   interface:
+    name: ⚛️ interface
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          # the pnpm store, keyed by the lockfile, cached by the tool
-          # that owns it rather than by setup-node
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Types
         run: pnpm exec tsc --noEmit
       - name: Tests du moteur de messages
@@ -105,11 +178,13 @@ jobs:
           PARAPHE_BASE_PATH: /
 
   e2e:
+    name: 🎭 journeys
     # The full journeys, in a browser: real database, real API, real built
     # interface. The only place where a JSON key renamed on one side and not
     # the other shows up — the unit suites stay green in that case, each
     # right on its own side.
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17-alpine
@@ -123,21 +198,12 @@ jobs:
           --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
+      - uses: ./.github/actions/setup
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache-dependency-path: api/go.sum
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          # the pnpm store, keyed by the lockfile, cached by the tool
-          # that owns it rather than by setup-node
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
 
-      - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
 
       - name: Parcours complets
@@ -155,8 +221,10 @@ jobs:
           retention-days: 7
 
   image:
+    name: 🐳 image
     # checks the image actually builds and starts, without publishing it
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17-alpine
@@ -172,8 +240,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          # 24: TypeScript type stripping is native, the tools run without
-          # compilation
           node-version: 24
 
       - name: Jeu de données minimal (les vraies sources ne sont pas versionnées)
@@ -181,7 +247,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Construire l'image de l'API
+      # Same cache scope as release.yml: a CI build warms what the
+      # publication then reuses, instead of the two building twice.
+      - name: Construire l'image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -189,69 +257,60 @@ jobs:
           platforms: linux/amd64
           push: false
           load: true
-          tags: paraphe-api:ci
+          tags: paraphe:ci
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
 
-      - name: Construire l'image de l'interface
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: web/Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: paraphe-web:ci
-
-      # The two images are checked TOGETHER, wired as they are deployed: the
-      # interface reached alone would serve its files whether or not an API
-      # exists behind it, and that is the failure nobody sees before opening
-      # a browser.
-      - name: Les deux images démarrent et se parlent
+      # --read-only and NO tmpfs: the application writes nothing, and the
+      # day it does this is where it shows, not on a cluster.
+      - name: L'image démarre, sert les pages et le JSON, sans rien écrire
         run: |
-          docker run -d --name paraphe-api --network host \
+          docker run -d --name paraphe --network host --read-only \
+            -e PARAPHE_HOST=127.0.0.1 \
             -e PARAPHE_ADMIN_EMAIL=ci@exemple.fr \
             -e PARAPHE_ADMIN_PASSWORD=ci-motdepasse \
             -e PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe \
-            paraphe-api:ci
-          docker run -d --name paraphe-web --network host \
-            -e PARAPHE_API_UPSTREAM=http://127.0.0.1:8047 \
-            paraphe-web:ci
+            paraphe:ci
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8080/api/config >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8047/api/config >/dev/null 2>&1; then
               echo "démarré au bout de ${i}s"; break
             fi
             if [ "$i" = 60 ]; then
-              echo "rien n'a répondu en 60 s"
-              docker logs paraphe-api; docker logs paraphe-web; exit 1
+              echo "rien n'a répondu en 60 s"; docker logs paraphe; exit 1
             fi
             sleep 1
           done
           # the liveness probe must not depend on the database
           curl -fsS http://127.0.0.1:8047/health | grep -q '"state":"ok"'
-          # the interface is served, and carries the marker that keeps it out
-          # of browser mode when /api/config has a bad minute
-          curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
-          curl -fsS http://127.0.0.1:8080/ | grep -q 'name="paraphe-mode" content="team"'
+          # the pages, and the marker that keeps a volunteer out of browser
+          # mode when /api/config has a bad minute
+          curl -fsS http://127.0.0.1:8047/ | grep -q 'id="root"'
+          curl -fsS http://127.0.0.1:8047/ | grep -q 'name="paraphe-mode" content="team"'
           # one page: a reload deep in the application renders it
-          curl -fsS http://127.0.0.1:8080/equipe | grep -q 'id="root"'
-          # sign-in works end to end, THROUGH the interface's proxy
-          curl -fsS -X POST http://127.0.0.1:8080/api/session \
+          curl -fsS http://127.0.0.1:8047/equipe | grep -q 'id="root"'
+          # the same process sets the page's security headers as the API's
+          curl -fsSI http://127.0.0.1:8047/ | grep -qi 'content-security-policy'
+          # the assets are precompressed, and served that way
+          js=$(curl -fsS http://127.0.0.1:8047/ | grep -oE '/assets/[^"]+\.js' | head -1)
+          curl -fsSI "http://127.0.0.1:8047$js" | grep -qi 'cache-control: public, max-age=31536000, immutable'
+          curl -fsS -H 'Accept-Encoding: br' -D- -o /dev/null \
+            "http://127.0.0.1:8047$js" | grep -qi 'content-encoding: br'
+          # sign-in works end to end
+          curl -fsS -X POST http://127.0.0.1:8047/api/session \
             -H 'Content-Type: application/json' \
             -d '{"email":"ci@exemple.fr","password":"ci-motdepasse"}' \
             | grep -q '"role":"coordination"'
           # and without a session, nothing gets out
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/mayors)" = 401
-          # the API image ships no interface: served from there, it would be
-          # a second copy nobody rebuilds
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8047/)" != 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8047/api/mayors)" = 401
 
-      - name: Journaux des conteneurs
+      - name: Journaux du conteneur
         if: always()
-        run: |
-          docker logs paraphe-api || true
-          docker logs paraphe-web || true
+        run: docker logs paraphe || true
 
   chart:
+    name: ⎈ chart
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -309,6 +368,12 @@ jobs:
           rendre sauvegarde --set postgres.cnpg.backup.enabled=true \
             --set postgres.cnpg.backup.s3CredentialsSecret=mes-cles
           grep -q "kind: Deployment" /tmp/defaut.yaml
+          # ONE application container, and no volume: nothing is written to
+          # disk, and a mount reappearing means something is again.
+          if [ "$(grep -c 'volumeMounts:' /tmp/defaut.yaml)" != 0 ]; then
+            echo "::error::a volume is mounted again — the application writes nothing"
+            exit 1
+          fi
           # CloudNativePG CRDs: kubeconform does not know them, skip them
           kubeconform -strict -summary \
             -ignore-missing-schemas -skip Cluster,ScheduledBackup \

@@ -1,0 +1,72 @@
+name: 📊 Lists
+
+# Downloading the four open sources and crossing them, in ONE place.
+#
+# donnees.yml and pages.yml both did it, with their own cache key and their
+# own copy of the commands — so the publication and the invariants could
+# cross the sources differently and nothing would say so.
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: Copy the built lists into web/public/donnees
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  croiser:
+    name: 🔀 cross the open sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache of the open sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: data/raw
+          key: sources-${{ github.run_id }}
+          restore-keys: sources-
+
+      - uses: ./.github/actions/setup
+
+      - name: Download and cross
+        run: |
+          bash outils/telecharger.sh
+          node outils/build.ts
+
+      - name: Invariants on the REAL outputs
+        working-directory: outils
+        run: pnpm exec vitest run
+        env:
+          # this job has crossed the sources, so it is the one where the
+          # suite standing aside must be a failure
+          PARAPHE_EXPECTED_OUTPUTS: "1"
+
+      - name: Publish the lists to the browser version
+        if: inputs.publish
+        run: |
+          mkdir -p web/public/donnees
+          cp out/01_maires_cibles_prioritaires.csv \
+             out/04_base_complete.csv web/public/donnees/
+          ls -la web/public/donnees/
+
+      - name: Keep the lists for the caller
+        if: inputs.publish
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: listes
+          path: web/public/donnees/
+          retention-days: 1
+
+      - name: The crossing report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rapport-croisement
+          path: out/rapport.md
+          retention-days: 30
+          if-no-files-found: ignore

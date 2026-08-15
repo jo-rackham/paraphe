@@ -1,4 +1,4 @@
-name: Release
+name: 📦 Release
 
 # Publishes the image and the chart to ghcr.io in OCI format.
 # Triggered by a `v*` tag (e.g. v1.0.0); the chart version and the image
@@ -25,11 +25,14 @@ jobs:
   # publishing without checking is exactly how an image that does not
   # start would reach production
   verifier:
+    name: ✅ the whole CI
     uses: ./.github/workflows/ci.yml
 
   publier:
+    name: 📦 publish the image and the chart
     needs: verifier
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -76,10 +79,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Two images, ONE tag. The interface and the API are deployed together
-      # and speak the same protocol version; a front on 0.3 talking to an API
-      # on 0.2 is the failure the single tag rules out.
-      - name: Construire et pousser l'image de l'API
+      # ONE image: it serves the pages and the JSON from one process, so
+      # there is no interface version and API version to keep in step. The
+      # cache scope is the one ci.yml warms, so this reuses what the
+      # verification just built instead of building it twice.
+      - name: Construire et pousser l'image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -87,31 +91,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}/api:${{ steps.v.outputs.version }}
-            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}/api:latest
+            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}:${{ steps.v.outputs.version }}
+            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ steps.v.outputs.version }}
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,mode=max,scope=api
-
-      - name: Construire et pousser l'image de l'interface
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: web/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}/web:${{ steps.v.outputs.version }}
-            ${{ env.REGISTRY }}/${{ steps.v.outputs.depot }}/web:latest
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.version=${{ steps.v.outputs.version }}
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
@@ -137,7 +124,7 @@ jobs:
           {
             echo "Image et chart publiés sous la même version, dérivée de ce tag."
             echo ""
-            echo "- Image — \`ghcr.io/$d:$v\` (amd64 + arm64)"
+            echo "- Image — \`ghcr.io/$d:$v\` (amd64)"
             echo "- Chart OCI — \`oci://ghcr.io/$d/charts/paraphe\`, version \`$v\`"
             echo "- Version navigateur — https://jo-rackham.github.io/paraphe/"
           } > notes.md

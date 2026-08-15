@@ -1,4 +1,4 @@
-name: Pages
+name: 🌐 Pages
 
 # Publishes the browser version on GitHub Pages, with the two lists built
 # from the open sources: the priority one (loaded by default) and the full
@@ -25,51 +25,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The same crossing as donnees.yml, and the same invariants: what gets
+  # published passes them BEFORE it leaves, not in a workflow beside this
+  # one whose red does not stop a deployment.
+  listes:
+    uses: ./.github/workflows/listes.yml
+    with:
+      publish: true
+
   construire:
+    name: 🏗️ build the browser version
+    needs: listes
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
 
-      - name: Cache des sources ouvertes
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Reprendre les listes croisées
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: data/raw
-          key: sources-${{ github.run_id }}
-          restore-keys: sources-
-
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          # the pnpm store, keyed by the lockfile, cached by the tool
-          # that owns it rather than by setup-node
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Construire les listes depuis les sources ouvertes
-        working-directory: .
-        run: |
-          bash outils/telecharger.sh
-          node outils/build.ts
-          mkdir -p web/public/donnees
-          cp out/01_maires_cibles_prioritaires.csv \
-             out/04_base_complete.csv web/public/donnees/
-          ls -la web/public/donnees/
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Invariants sur les listes qu'on publie
-        # donnees.yml les joue aussi, mais c'est un workflow SÉPARÉ : le
-        # voir rouge n'empêche pas celui-ci de déployer. Ce qu'on publie
-        # doit passer les invariants avant de partir, pas en parallèle.
-        working-directory: outils
-        run: pnpm exec vitest run
-        env:
-          PARAPHE_EXPECTED_OUTPUTS: "1"
+          name: listes
+          path: web/public/donnees
 
       - name: Tests du moteur de messages
         # the central invariant: never claim an endorsement from someone
@@ -93,7 +73,7 @@ jobs:
           # the team's work (nominative notes, accounts)
           for interdit in data.sqlite .env campagne.local.yaml suivi; do
             if find dist -iname "*$interdit*" | grep -q .; then
-              echo "fichier interdit publié : $interdit"; exit 1
+              echo "::error::fichier interdit publié : $interdit"; exit 1
             fi
           done
           test -s dist/donnees/01_maires_cibles_prioritaires.csv
@@ -106,8 +86,10 @@ jobs:
           path: web/dist
 
   deployer:
+    name: 🚀 deploy
     needs: construire
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deploiement.outputs.page_url }}

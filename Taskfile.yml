@@ -104,7 +104,7 @@ tasks:
     desc: Applique ce que les linters savent corriger seuls
     cmds:
       - pnpm exec biome check --write .
-      - gofmt -l -w api
+      - gofmt -l -w ./api/*.go
 
   lint-ts:
     desc: Biome sur noyau, outils, web et e2e (lint + format)
@@ -116,17 +116,20 @@ tasks:
     cmds: [golangci-lint run]
 
   lint-shell:
-    desc: shellcheck sur les scripts du dépôt
-    # -print0/-0 : un chemin peut contenir une espace, et `find | xargs`
-    # sans ça découpe le nom au lieu du fichier.
-    # api/vendor est du code tiers : on le construit, on ne le corrige pas.
+    desc: shellcheck sur les scripts suivis par git
+    # `git ls-files` et non `find` : il respecte .gitignore par construction,
+    # donc ni node_modules, ni .devbox, ni un worktree d'agent posé dans
+    # .claude — trois exclusions qu'un `find` oublie une par une. api/vendor
+    # est suivi, lui, et exclu explicitement : c'est du code tiers, on le
+    # construit, on ne le corrige pas.
+    # -z/-0 : un chemin peut contenir une espace.
     cmds:
-      - 'find . -name "*.sh" -not -path "./node_modules/*" -not -path "./.devbox/*" -not -path "./api/vendor/*" -print0 | xargs -0 -r shellcheck'
+      - "git ls-files -z '*.sh' ':!:api/vendor' | xargs -0 -r shellcheck"
 
   lint-docker:
-    desc: hadolint sur les Dockerfiles
+    desc: hadolint sur les Dockerfiles suivis
     cmds:
-      - 'find . -name "Dockerfile*" -not -path "./node_modules/*" -not -path "./api/vendor/*" -print0 | xargs -0 -r hadolint'
+      - "git ls-files -z 'Dockerfile*' '*/Dockerfile*' ':!:api/vendor' | xargs -0 -r hadolint"
 
   lint-vendor:
     desc: api/vendor est à jour avec go.mod (le build ne télécharge rien)
@@ -162,8 +165,10 @@ tasks:
     desc: Tests de l'API (l'intégration se saute sans PARAPHE_TEST_DATABASE_URL)
     dir: api
     cmds:
+      # `*.go` et non `.` : le module est plat, et `.` descend dans vendor/,
+      # dont le formatage appartient à d'autres
       # quoted: the ':' in the message would make YAML read the line as a mapping
-      - 'gofmt -l . | (! grep .) || (echo "gofmt a des fichiers à reformater"; exit 1)'
+      - 'gofmt -l ./*.go | (! grep .) || (echo "gofmt a des fichiers à reformater"; exit 1)'
       - go vet ./...
       - go test ./...
 

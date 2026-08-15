@@ -1,0 +1,22 @@
+name: Node, pnpm and the workspace
+description: >
+  The three steps that open every TypeScript job, in one place. They were
+  copied into four jobs across three workflows, which is four places for the
+  Node version to drift and three for the cache key to.
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        # the pnpm store, keyed by the lockfile, cached by the tool that owns
+        # it rather than by setup-node
+        cache: true
+        cache_dependency_path: pnpm-lock.yaml
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        # 24: TypeScript type stripping is native, the tools run without
+        # compilation
+        node-version: 24
+    - run: pnpm install --frozen-lockfile
+      shell: bash
