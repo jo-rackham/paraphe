@@ -24,9 +24,16 @@ d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
   (croisement des sources), `messages-masse.ts` (publipostage), `faux-jeu.ts`
   (jeu synthétique pour la CI), `telecharger.sh` (bash).
 - `api/` : **API JSON en Go** (pgx, `PARAPHE_DATABASE_URL` ; `task db` démarre
-  une base en local). Elle ne rend aucun HTML et ne génère aucun message :
-  elle sert l'interface construite (`web/dist`) et des données. Une seule
-  image, sans état, plusieurs instances devant la même base.
+  une base en local). Elle ne rend aucun HTML et ne génère aucun message.
+  Sans état : plusieurs instances devant la même base.
+  **Deux images, un seul tag** (`api/Dockerfile`, `web/Dockerfile`, amd64) :
+  `<dépôt>/web` sert les pages et relaie `/api` vers `<dépôt>/api`. En
+  Kubernetes, deux conteneurs du MÊME pod — le saut ne quitte pas le pod et
+  l'API n'a aucun port dans le Service. Le tag commun est ce qui interdit
+  une interface d'une version parlant à une API d'une autre.
+  En développement, `task api` sert encore `web/dist` lui-même ;
+  `PARAPHE_WEB_DIR` vide dit « pas d'interface ici », et c'est ce que pose
+  l'image.
 - `web/` : **interface React + TypeScript, trois modes**. `App.tsx` interroge
   `/api/config` au chargement : une API répond avec une campagne → mode
   équipe ; elle répond « instance » (apex d'une instance multi-campagnes) →
@@ -56,7 +63,7 @@ d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
   d'atterrissage après connexion). Inclut les règles d'envoi qui
   évitent le classement en spam (adresse perso par bénévole, 20-25/jour) et
   la cagnotte courrier via le mandataire financier.
-- `DEPLOIEMENT.md` + `Dockerfile` + `docker-compose.yml` : toute la config
+- `DEPLOIEMENT.md` + les deux `Dockerfile` + `docker-compose.yml` : toute la config
   de campagne est surchargeable au runtime par `PARAPHE_*` (candidat,
   descriptions, contacts, taille de lot, comptes, secret, HTTPS).
   Config au gabarit = refus de générer le publipostage, bandeau
@@ -177,11 +184,6 @@ d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
 - **Le CSV de Python finit ses lignes en CRLF** (`csv.writer`, dialecte
   excel). `noyau/csv.ts` fait pareil — sans quoi la comparaison octet pour
   octet ci-dessus était impossible.
-- **`current_setting('x', true)` ne rend NULL qu'avant le premier réglage.**
-  Un réglage posé à portée TRANSACTION redevient la **chaîne vide** — pas
-  « absent » — à la fin de la transaction. Sur une connexion de pool déjà
-  servie, la politique RLS évaluait donc `''::int` et levait « invalid input
-  syntax for type integer », loin de la cause. D'où le `NULLIF(…, '')`.
 - **`FOR UPDATE SKIP LOCKED` ne protège pas une ligne qui n'existe pas.**
   Le travail vivant désormais dans `assignments`, une fiche libre n'a AUCUNE
   ligne à verrouiller : l'attribution est l'INSERT lui-même, avec
@@ -296,6 +298,45 @@ sur un tour vert :
   en 10 s depuis un seul onglet, un déni de service auto-infligé.
 Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
 
+## Boucle adversariale sur le cloisonnement, 7 tours (14-15/08/2026)
+
+**67 défauts corrigés, AUCUN dans le produit.** Tous dans les garde-fous
+censés le prouver. C'est le résultat, et il vaut plus que la liste :
+
+- **Le canari SQL est une heuristique de regex** — pas d'analyseur, choix
+  mesuré et verrouillé. Sept tours lui ont trouvé **46 contournements**.
+  Depuis le retrait de RLS il est le seul mur : le tenir aiguisé n'est pas
+  optionnel.
+- **Trois motifs sont revenus à chaque tour**, et il faut les chercher par
+  leur nom :
+  1. *Un jeton « je n'ai pas su lire » compté comme une preuve* (`$?`, `$SUB`).
+     Un échec de lecture ne prouve rien : ou le code devient lisible, ou le
+     site est déclaré.
+  2. *Une écriture assérée par ce qui n'a PAS changé* — sonde à 415, codes
+     de retour jetés, sonde à 409, relecture d'une colonne sur trois,
+     politique qu'aucune sonde n'exerçait. Toujours asserter le code de
+     retour AVANT de conclure d'une absence, et se demander si le marqueur
+     serait ATTEIGNABLE sans le mur.
+  3. *Le canari et PostgreSQL lisant le même texte différemment* :
+     `NOT (org_id=$1)`, commentaires `/* imbriqués */`, `E'\'échappé'`,
+     `DO $$…$$`.
+- **Un garde-fou qui s'auto-vérifie ne garde rien.** `walledTables` décidait
+  à la fois ce qui était muré et ce que les tests contrôlaient. La base
+  répond désormais (`TestEveryPerCampaignTableIsWalled`). Chercher ce motif
+  ailleurs avant d'ajouter une liste.
+- **Un garde-fou qui PANIQUE n'examine rien après**, et ne rougit même pas
+  sur ce qu'il avait déjà trouvé. Un index de groupe hors bornes a suffi.
+- **Alterner les modèles entre les tours change ce qui est trouvé.** Le tour
+  7 (fable) a sorti 12 défauts sur un code que six tours d'opus venaient de
+  durcir, dont deux régressions du tour précédent.
+- Méthode, invariable : **muter le code et exiger que le test rougisse SUR
+  SON ASSERTION**. Rouge ailleurs, ou rouge sur un `t.Fatal(err)` générique,
+  ne prouve rien. Et vérifier par `grep -c` que la mutation s'est appliquée :
+  une édition qui ne prend pas rend le test vert et fait conclure à tort.
+- Piège d'outillage payé ici : **`git checkout <fichier>` sur un fichier non
+  commité** annule TOUT le travail en cours dessus, pas la seule mutation.
+  Sauvegarder par `cp` avant de muter.
+
 ## Multi-campagnes (une instance, plusieurs organisations)
 - `PARAPHE_BASE_DOMAIN` vide = **mono-campagne**, comportement d'origine :
   tout hôte sert la campagne d'amorçage. Renseigné = chaque campagne sur
@@ -307,27 +348,30 @@ Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
   `mayors` vers `assignments(org_id, insee_code, team_id, volunteer,
   status, updated_at)`. Dupliquer 34 826 lignes par campagne serait le
   mauvais choix.
-- **Le cloisonnement est dit DEUX FOIS, et chaque mur tient seul.**
-  1. PostgreSQL : `ENABLE` + `FORCE ROW LEVEL SECURITY` sur `assignments`,
-     `notes`, `teams`, `accounts`, politique sur `app.org_id`, posé par
-     `set_config(…, true)` — portée TRANSACTION — au début de chaque requête.
-     `TestRLSHoldsWithoutApplicationFilter` interroge les tables sans le
-     moindre filtre et vérifie qu'il ne sort rien.
-  2. L'application : **toute requête touchant une table cloisonnée nomme la
-     campagne** (`scopeOrg(r)`). `TestWallsHoldWithoutRLS` fait tourner
-     l'application sous un rôle **privilégié** — RLS neutralisé, avec un
-     témoin qui le prouve — et vérifie qu'aucune campagne ne voit celle d'à
-     côté.
-  Raison du doublon : RLS ne s'applique qu'à un rôle ni `SUPERUSER` ni
-  `BYPASSRLS`, et ce n'est **pas** le défaut (l'image PostgreSQL officielle
-  fait de `POSTGRES_USER` un superutilisateur). Un rôle privilégié dégrade
-  désormais de « aucun mur » à « un mur ».
-  Ce n'est pas une propriété qu'on tient à la discipline sur 30 sites :
-  `TestEveryQueryOnAWalledTableNamesTheCampaign` lit le paquet en AST et
-  exige, **par alias de table**, le prédicat `org_id` — un seul croisement
-  est exempté, `db.go:removeStale`, parce que la liste des maires est
-  commune et qu'y supprimer une ligne doit tenir compte de TOUTES les
-  campagnes.
+- **Le cloisonnement est UN mur : toute requête touchant une table
+  par-campagne nomme la campagne** (`scopeOrg(r)`, lié en `$1` par le
+  constructeur `scoped(r)`). RLS PostgreSQL a existé en second mur, puis a
+  été retiré : décision de Jo, le 15/08/2026. Ne pas le réintroduire sans
+  la rouvrir.
+  Ce n'est pas une propriété qu'on tient à la discipline sur 30 sites — deux
+  tests la portent, et ils sont désormais tout ce qu'il y a :
+  1. `TestEveryQueryOnAWalledTableNamesTheCampaign` lit le paquet en AST et
+     exige, **par alias de table**, le prédicat `org_id`. Un seul croisement
+     est exempté, `db.go:removeStale`, parce que la liste des maires est
+     commune et qu'y supprimer une ligne doit tenir compte de TOUTES les
+     campagnes. Il refuse aussi `TRUNCATE`, `LOCK`, `DROP`, `ALTER`, `COPY`
+     et les blocs `DO $$…$$` : aucun prédicat ne peut les borner.
+  2. `TestNoCampaignSeesAnother` fait tourner deux campagnes sur une
+     instance, exerce chaque route, et vérifie qu'aucune ligne, aucun
+     compteur et aucune chaîne de la voisine ne revient.
+  **Ce canari est une heuristique de regex, pas un analyseur SQL** (choix
+  mesuré, cf. plus bas), et sept tours de revue lui ont trouvé 46
+  contournements. C'est le prix du mur unique : le tenir aiguisé n'est pas
+  optionnel.
+  `walledTables` ne s'auto-vérifie plus : `TestEveryPerCampaignTableIsWalled`
+  demande à la base quelles tables portent une colonne `org_id` et exige que
+  la liste corresponde — sans quoi retirer un nom supprimait le mur et sa
+  preuve d'un seul geste.
   Dans `assignmentJoin`, le prédicat est dans la **condition de jointure**,
   jamais dans le `WHERE` : en `WHERE`, la jointure externe devient interne et
   tous les maires que personne n'a encore pris disparaissent.
@@ -367,25 +411,8 @@ Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
   sont rafraîchies, les colonnes de travail (volunteer, status, updated_at) jamais
   touchées ; une cible retirée du CSV est supprimée si intacte, signalée
   « RETIRÉ » si déjà travaillée. Schéma migré par ALTER TABLE.
-- **Le rôle PostgreSQL de l'application ne doit être ni superutilisateur ni
-  BYPASSRLS** : un rôle privilégié traverse RLS, `FORCE` compris, et
-  l'application tournerait comme si le cloisonnement n'existait pas. C'est le
-  défaut par défaut (l'image officielle fait de `POSTGRES_USER` un
-  superutilisateur), donc le démarrage le REFUSE en multi-campagnes et
-  l'avertit en mono. Les tests d'intégration créent exprès un rôle sans
-  privilège : joués sous le compte d'administration, ils vérifieraient un
-  cloisonnement qui n'existe pas en production.
-- **Limite ASSUMÉE : le rôle applicatif est PROPRIÉTAIRE des tables.** Un seul
-  rôle est provisionné, celui que CNPG génère, et l'application fait son propre
-  DDL au démarrage. `FORCE ROW LEVEL SECURITY` le fait obéir aux politiques sur
-  les lignes, mais un propriétaire garde `TRUNCATE` (aucune politique n'est
-  jamais consultée pour TRUNCATE), `LOCK`, `DROP TABLE` et `ALTER TABLE …
-  DISABLE ROW LEVEL SECURITY` — le mur tombe en une instruction. Ces droits ne
-  se révoquent pas, et un event trigger qui les refuserait exige un
-  superutilisateur, que CNPG ne donne pas : **il n'existe pas de demi-mesure
-  côté base**. Ce qui reste : `TestEveryQueryOnAWalledTableNamesTheCampaign`
-  refuse ces quatre verbes contre une table murée **dans le source**, donc le
-  chemin « quelqu'un l'écrit » est fermé ; le chemin « quelqu'un obtient du SQL
-  arbitraire » ne l'est que par l'absence d'injection. Séparer propriétaire et
-  applicatif est le seul vrai correctif, et il a été écarté pour ne provisionner
-  qu'un rôle.
+- **Un seul rôle PostgreSQL**, celui que CNPG génère, propriétaire des tables :
+  l'application fait son propre DDL au démarrage. Ses privilèges n'ont plus
+  d'incidence sur le cloisonnement depuis le retrait de RLS — le mur est dans
+  les requêtes, pas dans la base. Les tests d'intégration tournent tout de
+  même sous un rôle sans privilège : c'est ce que fait la production.

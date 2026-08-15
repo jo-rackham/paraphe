@@ -6,7 +6,7 @@
 cp .env.exemple .env            # puis remplir : secrets, mot de passe base,
                                 # identité de campagne
 task build                      # (re)génère la liste des maires embarquée
-docker compose up -d --build    # PostgreSQL + app sur :8047
+docker compose up -d --build    # PostgreSQL + les deux images, sur :8047
 ```
 
 L'application est **sans état** : comptes, affectations, statuts et notes
@@ -23,8 +23,14 @@ parrainages.mondomaine.fr {
 
 (Alternative sans domaine : tunnel `cloudflared` ou Tailscale Funnel pointé
 sur le port 8047. Alternative sans Docker : `task web-build` puis `task api`
-derrière le proxy, avec les mêmes variables d'environnement — l'API sert
-elle-même l'interface, il n'y a rien d'autre à installer.)
+derrière le proxy, avec les mêmes variables d'environnement — dans ce mode
+l'API sert elle-même l'interface et il n'y a rien d'autre à installer.)
+
+**Deux images, un seul tag.** `…/web` sert les pages et relaie `/api` vers
+`…/api`, qui ne répond que du JSON. Seule l'interface publie un port ; l'API
+est jointe à travers elle, sur le réseau interne. Les deux portent toujours
+la même version : une interface d'une version parlant à une API d'une autre
+est précisément la panne que ce tag commun évite.
 
 ## Configuration au runtime (variables d'environnement)
 
@@ -89,7 +95,7 @@ désactiver (dev en HTTP), laisser la variable **absente** — `0` l'active.
 
 ## Données et sauvegarde
 
-- La liste des maires est **dans l'image** (figée au build) ; le travail de
+- La liste des maires est **dans l'image de l'API** (figée au build) ; le travail de
   l'équipe (comptes, attributions, statuts, notes) est dans PostgreSQL.
   **C'est la seule donnée irremplaçable.** En Docker :
   `docker compose exec postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql`
@@ -128,54 +134,19 @@ Dès lors :
 **Laisser `PARAPHE_BASE_DOMAIN` vide reste le mode par défaut** : tout nom
 d'hôte sert alors l'unique campagne configurée, sans DNS particulier.
 
-### Rôle PostgreSQL — sans privilège, obligatoirement
+### Ce qui sépare deux campagnes
 
-La cloison entre campagnes est appliquée par PostgreSQL (`ROW LEVEL SECURITY`,
-en mode `FORCE`), pas par les clauses `WHERE` de l'application. Or **un
-superutilisateur — et tout rôle `BYPASSRLS` — traverse ces politiques sans les
-voir** : l'application tournerait comme si le cloisonnement n'existait pas, et
-la première clause fausse enverrait le travail d'une campagne chez une autre,
-sans un signe.
+Une seule chose : **toute requête sur une table par-campagne nomme la
+campagne**. Le prédicat `org_id` est lié en `$1` par un constructeur unique,
+et deux tests le tiennent — l'un lit le code source et exige le prédicat table
+par table, l'autre fait tourner deux campagnes sur une instance et vérifie que
+rien de la voisine ne revient.
 
-C'est le défaut par défaut : l'image officielle de PostgreSQL fait du compte
-`POSTGRES_USER` un superutilisateur. **L'application refuse donc de démarrer**
-en multi-campagnes si son rôle est privilégié (en mono-campagne, elle se
-contente de l'avertir). Créez un rôle dédié :
-
-```sql
-CREATE ROLE paraphe_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
-GRANT CREATE, USAGE ON SCHEMA public TO paraphe_app;
-```
-
-puis pointez `PARAPHE_DATABASE_URL` sur ce rôle. Avec CloudNativePG, le secret
-`<cluster>-app` généré par l'opérateur convient déjà : son rôle n'est pas
-superutilisateur.
-
-#### Ce que ce rôle peut encore faire, et pourquoi c'est assumé
-
-Ce rôle est **propriétaire** des tables — il faut bien que quelqu'un les crée,
-et l'application fait son propre schéma au démarrage. `FORCE ROW LEVEL
-SECURITY` le fait obéir aux politiques ligne à ligne, mais un propriétaire
-garde quatre pouvoirs qu'aucune politique ne borne :
-
-- `TRUNCATE` — une politique n'est **jamais** consultée pour TRUNCATE ;
-- `LOCK TABLE … ACCESS EXCLUSIVE` — ne visite aucune ligne ;
-- `DROP TABLE` ;
-- `ALTER TABLE … DISABLE ROW LEVEL SECURITY` — le mur tombe en une instruction.
-
-Ces droits ne se révoquent pas au propriétaire, et un event trigger qui les
-refuserait exige un superutilisateur, que CloudNativePG ne fournit pas. Le seul
-correctif réel serait deux rôles — un propriétaire pour le schéma, un rôle
-d'exécution qui ne reçoit que `SELECT, INSERT, UPDATE, DELETE` — au prix d'un
-second rôle à provisionner et d'une étape de migration séparée. **Choix
-assumé : un seul rôle.**
-
-Ce qui reste en face : la suite de tests refuse ces quatre verbes contre une
-table cloisonnée **dans le code source**, donc personne ne les écrit par
-inadvertance. Le risque résiduel est un attaquant capable d'exécuter du SQL
-arbitraire — exactement la situation où RLS devrait le contenir, et où il
-pourrait ici s'en affranchir. À rouvrir si l'instance héberge un jour des
-campagnes rivales.
+Il y a eu un second mur, `ROW LEVEL SECURITY` côté PostgreSQL. Il a été retiré
+le 15 août 2026. Conséquence pratique pour qui déploie : **les privilèges du
+rôle PostgreSQL n'ont plus d'incidence sur le cloisonnement**. Le rôle
+`<cluster>-app` de CloudNativePG convient, celui de l'image PostgreSQL
+officielle aussi. L'application ne refuse plus de démarrer là-dessus.
 
 ### Kubernetes + HAProxy Ingress
 

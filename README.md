@@ -94,10 +94,12 @@ reste :
 - `outils/` — **TypeScript exécuté par Node**, sans compilation
   (`node outils/build.ts`) : le croisement des sources ouvertes et le
   publipostage de masse.
-- `api/` — **Go** : l'API JSON de l'application d'équipe (une image de 30 Mo
-  avec l'interface dedans, sans état, plusieurs instances devant la même
-  base). Elle ne rend aucun HTML et ne génère aucun message.
-- `web/` — **React + Vite** : l'interface, dans ses deux modes.
+- `api/` — **Go** : l'API JSON de l'application d'équipe. Sans état :
+  plusieurs instances devant la même base. Elle ne rend aucun HTML et ne
+  génère aucun message.
+- `web/` — **React + Vite** : l'interface, dans ses deux modes. Elle a son
+  image, qui sert les pages et relaie `/api` vers celle de l'API — deux
+  images, toujours au même tag.
 - `outils/telecharger.sh` — du bash, parce que télécharger quatre fichiers ne
   mérite pas mieux.
 
