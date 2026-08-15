@@ -95,8 +95,26 @@ tasks:
   backup:
     desc: Sauvegarde la base de travail de l'équipe (dump PostgreSQL)
     cmds:
-      - docker compose exec -T postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql
+      # Écrit dans un .partiel puis renommé : `>` crée le fichier AVANT de
+      # lancer pg_dump, donc un échec laissait une sauvegarde de 0 octet
+      # portant la date du jour — la rotation la garde, et on ne s'en aperçoit
+      # qu'en restaurant.
+      - docker compose exec -T postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql.partiel
+      - test -s backup-$(date +%F).sql.partiel
+      - mv backup-$(date +%F).sql.partiel backup-$(date +%F).sql
       - echo "écrit dans backup-$(date +%F).sql"
+
+  restore:
+    desc: 'Restaure la base depuis un dump — ex : task restore -- backup-2026-08-15.sql'
+    cmds:
+      # L'API est arrêtée pendant la restauration : elle rejoue son schéma au
+      # démarrage et importerait la liste par-dessus une base à moitié écrite.
+      - docker compose stop paraphe
+      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'DROP DATABASE IF EXISTS paraphe'
+      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'CREATE DATABASE paraphe'
+      - docker compose exec -T postgres psql -U paraphe -d paraphe < {{.CLI_ARGS}}
+      - docker compose start paraphe
+      - echo "restauré depuis {{.CLI_ARGS}}"
 
   gh:
     desc: 'gh avec des identifiants isolés au dépôt — ex: task gh -- repo view'

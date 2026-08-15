@@ -114,6 +114,17 @@ the others.
   In Kubernetes, enable `postgres.cnpg.backup.*`: the chart then sets up WAL
   archiving **and** a daily `ScheduledBackup`. Both are needed — WAL archiving
   alone restores nothing.
+- **Restoring**, in Docker: `task restore -- backup-2026-08-15.sql`. It stops
+  the API first, recreates the database and replays the dump. Stopping the API
+  is not optional: it runs its own DDL and re-imports the list at startup, and
+  doing that over a half-written database is how a restore ends up worse than
+  the incident. In Kubernetes, restore through CloudNativePG (`Cluster`
+  `bootstrap.recovery`), never by piping a dump into a running cluster.
+- **A backup nobody has restored is a hypothesis.** `task backup` now writes a
+  `.partiel` and renames it only once the dump is non-empty — the shell's `>`
+  used to create the file before `pg_dump` ran, so a failure left a 0-byte
+  backup carrying today's date, which rotation keeps and only a restore
+  reveals.
 - Updating the list (a new `task build`): `docker compose up -d --build`
   re-imports as an UPSERT. Data (email, rank, score) is refreshed, work
   columns (volunteer, status, notes) are untouched. A target removed from the
