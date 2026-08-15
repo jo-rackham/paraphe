@@ -173,6 +173,27 @@ func TestAnEmptyValueCountsOnlyWhereItMeansSomething(t *testing.T) {
 		}
 	})
 
+	// The file layer counts the same way, and it has to: `web_dir: ""` under
+	// `server:` is what the flag and the variable already allow. Blankable
+	// applying to two layers out of three is a distinction nothing in the
+	// documentation draws, and the operator who hits the third has no way to
+	// know why theirs is ignored.
+	t.Run("the file layer counts too", func(t *testing.T) {
+		saveSettingsState(t)
+		t.Setenv("PARAPHE_WEB_DIR", "")
+		os.Unsetenv("PARAPHE_WEB_DIR")
+		dir := writeServerBlock(t, "server:\n  web_dir: \"\"\n"+
+			"  database_url: postgresql://settings:test@127.0.0.1:5432/unused\n")
+		if err := CheckSettings(dir); err != nil {
+			t.Fatalf("CheckSettings: %v", err)
+		}
+		if got := Get("web_dir"); got != "" {
+			t.Errorf("`web_dir: \"\"` in the file resolved to %q: the escape "+
+				"hatch works from the flag and the environment and not from "+
+				"the file, which nothing says", got)
+		}
+	})
+
 	t.Run("a typed empty flag counts too", func(t *testing.T) {
 		saveSettingsState(t)
 		t.Setenv("PARAPHE_WEB_DIR", "/quelque/part")

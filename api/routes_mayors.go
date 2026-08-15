@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -628,7 +628,7 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 // The HTTP header is already gone: no error can reach the client. The file
 // will arrive truncated — the operator must be able to know.
 func truncatedExport(err error) {
-	log.Printf("truncated CSV export: %v", err)
+	slog.Error("truncated CSV export", "error", err)
 }
 
 // loadMayor applies the team wall: a card reserved elsewhere is refused,

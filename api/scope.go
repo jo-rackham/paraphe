@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -87,7 +87,7 @@ func (p *Scope) close(ctx context.Context) {
 	if !p.committed {
 		// read-only, or interrupted write: rolling back is the right default
 		if err := p.Tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			log.Printf("transaction not rolled back: %v", err)
+			slog.Warn("transaction not rolled back", "error", err)
 		}
 	}
 	p.conn.Release()

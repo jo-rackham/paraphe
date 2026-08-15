@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -168,9 +168,9 @@ func LoadConfig(dir string) (*Config, error) {
 			return nil, fmt.Errorf("incomplete configuration (%s): %s",
 				where, strings.Join(missing, ", "))
 		}
-		log.Printf("no bootstrap campaign (%s): the instance will only host "+
+		slog.Warn("no bootstrap campaign: the instance will only host "+
 			"campaigns approved through the hosting request form",
-			strings.Join(missing, ", "))
+			"missing", strings.Join(missing, ", "))
 	}
 
 	cfg.Unfilled = UnfilledKeys(cfg.Campaign)

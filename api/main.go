@@ -164,6 +164,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// …and again after the file layer is loaded, below, because a
+	// `log_level:` written under `server:` is dead until then. Set up once,
+	// the flag worked and the file did not — the same shape a third time.
 
 	// The waiting flag answers before anything is resolved: an init
 	// container has a DSN and nothing else, and must not be refused for a
@@ -185,6 +188,9 @@ func run() error {
 	if err := CheckSettings(configDir); err != nil {
 		return fmt.Errorf("%w\nLocally, `task db` starts a disposable database", err)
 	}
+	// The file layer exists now: re-read the level, so `log_level:` under
+	// `server:` is a setting and not decoration.
+	setupLogging()
 	dsn := Get("database_url")
 	// non-strict on the app side: it stays explorable with the template
 	// configuration, but every page says so. The mass mailing, on the other
@@ -194,8 +200,8 @@ func run() error {
 		return err
 	}
 	if len(cfg.Unfilled) > 0 {
-		log.Printf("WARNING: configuration at template values (%s) — messages "+
-			"contain example values", strings.Join(cfg.Unfilled, ", "))
+		slog.Warn("configuration at template values — messages contain example values",
+			"keys", strings.Join(cfg.Unfilled, ", "))
 	}
 
 	pool, err := OpenDatabase(ctx, dsn)
@@ -215,8 +221,8 @@ func run() error {
 		return err
 	}
 	if base := BaseDomain(); base != "" {
-		log.Printf("multi-campaign instance on %s: each campaign at "+
-			"<campaign>.%s, landing page and moderation on %s", base, base, base)
+		slog.Info("multi-campaign instance: each campaign at <campaign>.<domain>, "+
+			"landing page and moderation on the apex", "domain", base)
 	}
 	secret, err := SessionSecret(ctx, pool)
 	if err != nil {
@@ -248,7 +254,7 @@ func run() error {
 	// pages here", which is what a developer has before the first
 	// `task web-build`.
 	if s.webDir == "" {
-		log.Print("no interface served (web_dir is empty): this process " +
+		slog.Info("no interface served (web_dir is empty): this process " +
 			"answers JSON only")
 	} else {
 		landingPage, err := markInterface(s.webDir)
@@ -308,13 +314,13 @@ func waitForDatabase(ctx context.Context, dsn string, timeout time.Duration) err
 		pool, err := OpenDatabase(ctx, dsn)
 		if err == nil {
 			pool.Close()
-			log.Print("database reachable")
+			slog.Info("database reachable")
 			return nil
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("database unreachable after %s: %w", timeout, err)
 		}
-		log.Printf("waiting for the database (attempt %d): %v", attempt, err)
+		slog.Info("waiting for the database", "attempt", attempt, "error", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -373,7 +379,7 @@ func (s *Server) router() chi.Router {
 	// /api/config would answer 404 and the pod would never become ready.
 	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.pool.Ping(r.Context()); err != nil {
-			log.Printf("readiness probe: database unreachable: %v", err)
+			slog.Error("readiness probe: database unreachable", "error", err)
 			errorJSON(w, http.StatusServiceUnavailable, "Base injoignable.")
 			return
 		}
@@ -644,12 +650,12 @@ func (s *Server) writePage(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
 		if _, err := w.Write(s.landingPageGz); err != nil {
-			log.Printf("landing page not served: %v", err)
+			slog.Error("landing page not served", "error", err)
 		}
 		return
 	}
 	if _, err := w.Write(s.landingPage); err != nil {
-		log.Printf("landing page not served: %v", err)
+		slog.Error("landing page not served", "error", err)
 	}
 }
 
@@ -662,7 +668,8 @@ func answerOnPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if p := recover(); p != nil {
-				log.Printf("panic serving %s %s: %v", r.Method, r.URL.Path, p)
+				slog.Error("panic serving a request",
+					"method", r.Method, "path", r.URL.Path, "panic", p)
 				// the handler may already have written: setting a status
 				// then is a no-op and logs, which is the lesser evil
 				errorJSON(w, http.StatusInternalServerError,

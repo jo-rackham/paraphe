@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"math"
 	"net"
@@ -77,7 +76,8 @@ func takeLock(ctx context.Context, c *pgxpool.Conn, key int) error {
 
 func releaseLock(ctx context.Context, c *pgxpool.Conn, key int) {
 	if _, err := c.Exec(ctx, "SELECT pg_advisory_unlock($1)", key); err != nil {
-		log.Printf("lock %d not released: %v (it will drop at disconnect)", key, err)
+		slog.Warn("lock not released (it will drop at disconnect)",
+			"lock", key, "error", err)
 	}
 }
 
@@ -287,7 +287,7 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 				fmt.Sprintf("ALTER TABLE mayors ADD COLUMN %s TEXT", c)); err != nil {
 				return 0, fmt.Errorf("adding column %s: %w", c, err)
 			}
-			log.Printf("schema: column %s added", c)
+			slog.Info("schema: column added", "column", c)
 		}
 	}
 	return bootstrapOrg, nil
@@ -329,7 +329,7 @@ func importList(ctx context.Context, tx pgx.Tx, path string) error {
 		return fmt.Errorf("reading the list digest: %w", err)
 	}
 	if stored == digest {
-		log.Printf("list unchanged (%d mayors), import skipped", len(rows))
+		slog.Info("list unchanged, import skipped", "mayors", len(rows))
 		return nil
 	}
 
@@ -491,8 +491,8 @@ func removeStale(ctx context.Context, tx pgx.Tx, rows []map[string]string) error
 			return fmt.Errorf("flagging removed targets: %w", err)
 		}
 	}
-	log.Printf("list updated: %d stale target(s) deleted, "+
-		"%d already worked on flagged", len(untouched), len(touched))
+	slog.Info("list updated", "stale_deleted", len(untouched),
+		"worked_on_flagged", len(touched))
 	return nil
 }
 
@@ -522,7 +522,7 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 			Get("admin_name"), password, RoleCoordination); err != nil {
 			return err
 		}
-		log.Printf("coordination account: %s", email)
+		slog.Info("coordination account", "email", email)
 		return nil
 	}
 	var one int
@@ -572,7 +572,7 @@ func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 				"SELECT 1 FROM accounts WHERE org_id=$1 AND role=$2 AND active",
 				OrgInstance, RoleAdministration).Scan(&one)
 			if errors.Is(err, pgx.ErrNoRows) {
-				log.Print("NO INSTANCE ADMINISTRATOR: campaign requests will " +
+				slog.Warn("NO INSTANCE ADMINISTRATOR: campaign requests will " +
 					"pile up with nobody able to approve them. Set " +
 					"PARAPHE_INSTANCE_ADMIN_EMAIL and " +
 					"PARAPHE_INSTANCE_ADMIN_PASSWORD.")
@@ -587,7 +587,7 @@ func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 		RoleAdministration); err != nil {
 		return err
 	}
-	log.Printf("instance administrator: %s", email)
+	slog.Info("instance administrator", "email", email)
 	return nil
 }
 

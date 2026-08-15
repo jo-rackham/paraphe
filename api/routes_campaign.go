@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -97,8 +97,8 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	// the apex lists the new one. Traced, so the rename is at least
 	// visible to whoever operates the instance.
 	if name := strings.TrimSpace(values["candidat"]); name != "" && name != org.Name {
-		log.Printf("campaign %q renamed itself from %q to %q",
-			org.Slug, org.Name, name)
+		slog.Info("campaign renamed itself",
+			"slug", org.Slug, "from", org.Name, "to", name)
 	}
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)

@@ -153,8 +153,16 @@ func Get(key string) string {
 				return v
 			}
 		}
-		if v := strings.TrimSpace(fromFile[s.Key]); v != "" {
-			return v
+		// The file layer counts as touched the same way, and it has to: an
+		// operator writing `web_dir: ""` under `server:` is doing exactly
+		// what the flag and the variable let them do, and falling through to
+		// the default there would make Blankable true of two layers out of
+		// three — a distinction nothing in the documentation draws.
+		if raw, set := fromFile[s.Key]; set {
+			v := strings.TrimSpace(raw)
+			if v != "" || s.Blankable {
+				return v
+			}
 		}
 		return s.Default
 	}

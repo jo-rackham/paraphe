@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
@@ -334,7 +334,7 @@ func replyJSON(w http.ResponseWriter, code int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		// the header is already gone: nothing more can be said to the
 		// client, but the operator must see it
-		log.Printf("truncated JSON response: %v", err)
+		slog.Error("truncated JSON response", "error", err)
 	}
 }
 
@@ -345,7 +345,7 @@ func errorJSON(w http.ResponseWriter, code int, format string, args ...any) {
 // failure: an internal error is logged in full and not narrated to the
 // client — the details of a SQL query have no business in a browser.
 func (s *Server) failure(w http.ResponseWriter, err error) {
-	log.Printf("internal error: %v", err)
+	slog.Error("internal error", "error", err)
 	errorJSON(w, http.StatusInternalServerError,
 		"Erreur interne. Si elle persiste, prévenez la coordination.")
 }
