@@ -190,40 +190,61 @@ func TestEveryReadOfAnAppendOnlyTableIsBounded(t *testing.T) {
 	appendOnly := []string{"NOTES", "HOSTING_REQUESTS"}
 	files := apiPackage(t)
 	values := stringValues(files)
+	selects := 0
+	// Per FUNCTION, through localScope, and not over the file with the
+	// package map: stringValues holds package bindings alone, so a query
+	// built in a local variable — which is most of them — resolves nowhere
+	// else. Read with the package map only, this walked the whole package
+	// and found almost nothing to check, in silence.
 	for name, file := range files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
+				continue
+			}
+			scoped := localScope(values, fn)
+			ast.Inspect(fn, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				for _, arg := range call.Args {
+					// SQL is case-insensitive; the canary must be too, or
+					// `select … from notes` walks straight past it
+					sql := strings.ToUpper(sqlText(arg, scoped))
+					if !strings.Contains(sql, "SELECT ") {
+						continue
+					}
+					selects++
+					for _, table := range appendOnly {
+						// FROM, JOIN or a comma list: the table is read the same
+						// way whichever keyword introduces it
+						named := regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`)
+						if !named.MatchString(sql) {
+							continue
+						}
+						if oneRow.MatchString(strings.TrimSpace(sql)) ||
+							strings.Contains(sql, "EXISTS(") ||
+							strings.Contains(sql, "WHERE ID=$1") {
+							continue
+						}
+						if !strings.Contains(sql, "LIMIT") {
+							t.Errorf("%s: a SELECT over %s carries no LIMIT — that "+
+								"table is only ever appended to:\n\t%s",
+								name, table, strings.TrimSpace(sql))
+						}
+					}
+				}
 				return true
-			}
-			for _, arg := range call.Args {
-				// SQL is case-insensitive; the canary must be too, or
-				// `select … from notes` walks straight past it
-				sql := strings.ToUpper(sqlText(arg, values))
-				if !strings.Contains(sql, "SELECT ") {
-					continue
-				}
-				for _, table := range appendOnly {
-					// FROM, JOIN or a comma list: the table is read the same
-					// way whichever keyword introduces it
-					named := regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`)
-					if !named.MatchString(sql) {
-						continue
-					}
-					if oneRow.MatchString(strings.TrimSpace(sql)) ||
-						strings.Contains(sql, "EXISTS(") ||
-						strings.Contains(sql, "WHERE ID=$1") {
-						continue
-					}
-					if !strings.Contains(sql, "LIMIT") {
-						t.Errorf("%s: a SELECT over %s carries no LIMIT — that "+
-							"table is only ever appended to:\n\t%s",
-							name, table, strings.TrimSpace(sql))
-					}
-				}
-			}
-			return true
-		})
+			})
+		}
+	}
+	// A floor, because every failure mode of this guard is silence: resolve
+	// nothing and it reports nothing, which reads exactly like a package
+	// where every read is bounded.
+	if selects < 20 {
+		t.Fatalf("only %d SELECT statements resolved: this guard is not "+
+			"reading the package, and would pass whatever it says", selects)
 	}
 }
 
