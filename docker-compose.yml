@@ -92,6 +92,14 @@ services:
       PARAPHE_DATABASE_URL: postgresql://paraphe:${PARAPHE_PG_PASSWORD}@postgres:5432/paraphe
       PARAPHE_VALKEY_URL: valkey://valkey:6379
       PARAPHE_VALKEY_PASSWORD: ${PARAPHE_VALKEY_PASSWORD}
+      # Same reason, and one this compose ALWAYS needs: the TLS proxy runs on
+      # the host and reaches the container through the Docker gateway, so
+      # every request arrives from that one address. Trusting nobody — the
+      # right default in the code, and the one the chart overrides too — then
+      # attributes the whole deployment to a single rate-limit bucket: sixty
+      # wrong passwords lock every volunteer out, and three hosting requests
+      # close the public form for the world.
+      PARAPHE_TRUSTED_PROXIES: "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
     ports:
       # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
       # compose on a public-IP VPS behind a TLS proxy, and "8047:8047" would

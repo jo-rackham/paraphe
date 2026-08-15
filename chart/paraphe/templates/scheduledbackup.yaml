@@ -1,3 +1,16 @@
+{{/*
+  Backup OFF is a decision, not a default to slide into. The database holds
+  the only irreplaceable thing this application has — accounts, statuses and
+  notes on elected officials — and with backup.enabled false there is
+  neither a base backup NOR WAL archiving: a lost volume loses everything.
+  NOTES.txt says so, and a GitOps install never shows NOTES.txt to anybody.
+  So the chart asks for the decision to be written down.
+*/}}
+{{- if and .Values.postgres.cnpg.enabled (not .Values.postgres.cnpg.backup.enabled) }}
+{{- if not .Values.postgres.cnpg.backup.acknowledgedDisabled }}
+{{- fail "postgres.cnpg.backup est désactivé : le travail des équipes (comptes, statuts, notes nominatives) n'existe que dans cette base, sans sauvegarde de base ni archivage WAL — un volume perdu est un travail perdu. Renseignez postgres.cnpg.backup.enabled=true et ses identifiants S3, ou posez explicitement postgres.cnpg.backup.acknowledgedDisabled=true si la durabilité est assurée ailleurs (Velero, snapshots du stockage)." }}
+{{- end }}
+{{- end }}
 {{- if and .Values.postgres.cnpg.enabled .Values.postgres.cnpg.backup.enabled }}
 {{- if not .Values.postgres.cnpg.backup.s3CredentialsSecret }}
 {{- fail "postgres.cnpg.backup.s3CredentialsSecret est obligatoire quand la sauvegarde est activée : sans identifiants, l'archivage WAL échoue en silence." }}

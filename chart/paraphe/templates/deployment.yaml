@@ -175,6 +175,10 @@ spec:
             # ingress, which lives on a cluster-private address
             - name: PARAPHE_TRUSTED_PROXIES
               value: {{ .Values.trustedProxies | quote }}
+            {{- if .Values.logLevel }}
+            - name: PARAPHE_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- end }}
             {{- if .Values.valkey.enabled }}
             - name: PARAPHE_VALKEY_URL
               value: "valkey+sentinel://{{ include "paraphe.nomValkey" . }}-sentinel:26379/{{ .Values.valkey.masterName }}"

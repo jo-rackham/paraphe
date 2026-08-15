@@ -41,6 +41,12 @@ postgres:
     # crée aussi un ScheduledBackup (sauvegarde de base récurrente).
     backup:
       enabled: false
+      # Désactivée, la sauvegarde doit être assumée : le chart REFUSE de
+      # s'installer tant que l'un des deux n'est pas posé. Sans elle il n'y
+      # a ni sauvegarde de base ni archivage WAL, et la base porte la seule
+      # donnée irremplaçable de l'application. Mettre à true seulement si la
+      # durabilité est assurée ailleurs (Velero, snapshots du stockage).
+      acknowledgedDisabled: false
       # cron à 6 champs de CloudNativePG (secondes en tête)
       schedule: "0 0 3 * * *"
       destinationPath: "s3://mon-bucket/paraphe"
@@ -121,13 +127,15 @@ secrets:
   # instance.baseDomain est renseigné : sans lui, les demandes d'hébergement
   # s'accumulent sans que personne puisse les valider.
   instanceAdminPassword: ""
-  # 64 octets aléatoires (openssl rand -hex 64). En HA, le poser
-  # explicitement : sinon la première instance démarrée en tire un et
-  # l'enregistre en base, ce qui fonctionne mais rend les sessions
-  # dépendantes de l'ordre de démarrage.
+  # 64 octets aléatoires (openssl rand -hex 64) — OBLIGATOIRE, l'application
+  # refuse en dessous de 32. Le chart ne le tire PAS au hasard : en rendu
+  # client (helm template, ArgoCD par défaut), il ne peut pas relire le
+  # Secret déjà en place et en tirerait un nouveau à chaque synchronisation,
+  # déconnectant tout le monde. Le poser explicitement, ou passer par
+  # existingSecret (ExternalSecret, SealedSecret, SOPS).
   secretKey: ""
-  # mot de passe de Valkey (compteurs du rate-limiting). Vide = tiré au
-  # hasard et conservé d'une mise à jour à l'autre.
+  # mot de passe de Valkey (compteurs du rate-limiting) — obligatoire dès
+  # que valkey.enabled, pour la même raison.
   valkeyPassword: ""
   # Nom d'un Secret existant. Il doit porter les clés suivantes — le chart
   # ne peut pas lire son contenu, et une clé manquante ne se voit qu'en
@@ -182,6 +190,11 @@ valkey:
 # défaut. Vide = ne croire personne : chaque requête est attribuée à son
 # pair TCP.
 trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+
+# -- Verbosité des logs (JSON sur stdout) : debug, info, warn ou error.
+# Vide = info. Les panics, les 500 et les vagues refusées sont journalisés
+# en warn ou au-dessus : les monter ne les fait pas disparaître.
+logLevel: ""
 
 # -- Lien « code source » affiché en pied de page (dépôt public, MIT)
 sourceUrl: "https://github.com/jo-rackham/paraphe"

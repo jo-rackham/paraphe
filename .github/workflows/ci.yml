@@ -376,7 +376,9 @@ jobs:
             nom=$1; shift
             helm template paraphe chart/paraphe \
               --set image.tag=ci --set secrets.adminPassword=x \
-              --set secrets.secretKey=y "$@" > "/tmp/$nom.yaml"
+              --set secrets.secretKey=y --set secrets.valkeyPassword=w \
+              --set postgres.cnpg.backup.acknowledgedDisabled=true \
+              "$@" > "/tmp/$nom.yaml"
             test -s "/tmp/$nom.yaml"
             echo "--- $nom : $(grep -c '^kind:' "/tmp/$nom.yaml") ressources"
           }
