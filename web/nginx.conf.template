@@ -1,3 +1,7 @@
+# The version in the Server header tells an attacker which advisories to
+# read, and answers nothing anyone needs.
+server_tokens off;
+
 server {
     listen 8080;
     server_name _;
@@ -19,17 +23,30 @@ server {
         proxy_http_version 1.1;
     }
 
+    # nginx does NOT inherit add_header into a block that declares one of its
+    # own, so the security headers are repeated wherever a Cache-Control is
+    # set. They must match `securityHeaders` in api/main.go, which no longer
+    # sees the pages; outils/deploiement.test.ts holds the two together.
+
     # Assets are content-hashed by the build: they can be kept for ever, and
     # index.html never, or a volunteer keeps an interface that no longer
     # matches the API.
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+        add_header X-Content-Type-Options "nosniff";
+        add_header Referrer-Policy "same-origin";
+        add_header Cross-Origin-Opener-Policy "same-origin";
     }
 
     # One page: a reload on /equipe must render the application, not 404.
     location / {
         try_files $uri $uri/ /index.html;
         add_header Cache-Control "no-store";
+        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+        add_header X-Content-Type-Options "nosniff";
+        add_header Referrer-Policy "same-origin";
+        add_header Cross-Origin-Opener-Policy "same-origin";
     }
 }
