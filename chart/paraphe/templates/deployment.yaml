@@ -157,6 +157,8 @@ spec:
             {{- end }}
             - name: PARAPHE_SOURCE_URL
               value: {{ .Values.sourceUrl | quote }}
+            - name: PARAPHE_BROWSER_VERSION_URL
+              value: {{ .Values.browserVersionUrl | quote }}
             - name: PARAPHE_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

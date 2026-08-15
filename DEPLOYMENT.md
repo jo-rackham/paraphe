@@ -49,6 +49,8 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | coordination account, created or refreshed at every start — **mandatory at first launch** |
 | `PARAPHE_SECRET_KEY` | session signing secret — `openssl rand -hex 64` |
 | `PARAPHE_SOURCE_URL` | public repository URL: shows "source code" in the footer |
+| `PARAPHE_BROWSER_VERSION_URL` | URL of the account-less browser version offered on the instance home page — defaults to the self-hosted `/navigateur/` when the image serves one; set to point elsewhere |
+| `PARAPHE_BROWSER_WEB_DIR` | build of the browser version served under `/navigateur/` (the image sets it; empty serves none) |
 | `PARAPHE_DATABASE_URL` | PostgreSQL DSN — **mandatory**, the app refuses to start without it |
 | `PARAPHE_HOST` / `PARAPHE_PORT` | listening interface and port |
 | `PARAPHE_BASE_DOMAIN` | domain of the campaign subdomains — **empty = a single campaign** (see below) |

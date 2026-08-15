@@ -126,6 +126,76 @@ func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 	s.serveFile(w, r, abs)
 }
 
+// The two lists the browser version works from, and the only files the
+// /navigateur/donnees/ mapping will serve: they are already in the image for
+// the import, so the second build does not carry a copy of 9 MB of CSV.
+var browserLists = map[string]bool{
+	"01_maires_cibles_prioritaires.csv": true,
+	"04_base_complete.csv":              true,
+}
+
+// serveBrowserVersion serves the second interface build under /navigateur/.
+//
+// Its index carries NO mode marker, and its /navigateur/api/* paths land
+// here, answered with HTML: exactly the two conditions under which the
+// interface decides "no API, so browser mode" — the same situation the
+// GitHub Pages publication is in, on this instance's own origin.
+func (s *Server) serveBrowserVersion(w http.ResponseWriter, r *http.Request) {
+	// no build configured: these paths belong to the ordinary interface
+	if s.browserDir == "" {
+		s.serveInterface(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		errorJSON(w, http.StatusMethodNotAllowed,
+			"Cette adresse ne répond qu'en lecture.")
+		return
+	}
+	path := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/navigateur"))
+	// the lists, served from the same files the startup import reads
+	if name, found := strings.CutPrefix(path, "/donnees/"); found {
+		if !browserLists[name] {
+			errorJSON(w, http.StatusNotFound, "Chemin inconnu.")
+			return
+		}
+		// revalidated, not pinned: 9 MB that change with each image, served
+		// 304 by Last-Modified the rest of the time
+		w.Header().Set("Cache-Control", "no-cache")
+		s.serveFile(w, r, filepath.Join(filepath.Dir(Get("csv")),
+			filepath.FromSlash(name)))
+		return
+	}
+	if path == "/" || path == "." || filepath.Ext(path) == "" {
+		path = "/index.html"
+	}
+	file := filepath.Join(s.browserDir, filepath.FromSlash(path))
+	root, err := filepath.Abs(s.browserDir)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	abs, err := filepath.Abs(file)
+	if err != nil || !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+		errorJSON(w, http.StatusNotFound, "Chemin inconnu.")
+		return
+	}
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		errorJSON(w, http.StatusNotFound,
+			"Version navigateur introuvable (%s).", path)
+		return
+	}
+	if strings.HasPrefix(path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		// index.html included: an old index names asset files that no
+		// longer exist after a deployment
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	s.serveFile(w, r, abs)
+}
+
 // encodings: the precompressed variants the build produces, best first. They
 // are built once at image build time rather than compressed per request:
 // brotli at quality 11 is far too slow to run on the fly, and it is what

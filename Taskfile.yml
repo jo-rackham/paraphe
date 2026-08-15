@@ -257,6 +257,16 @@ tasks:
       PARAPHE_BASE_PATH: '{{.PARAPHE_BASE_PATH | default "/"}}'
     cmds: [pnpm install, pnpm test, pnpm build]
 
+  web-build-navigateur:
+    desc: Construit la version navigateur (sans compte) dans web/dist-navigateur
+    dir: web
+    env:
+      # sous /navigateur/, ses appels /api tombent sur du HTML : c'est ce qui
+      # la fait basculer en mode navigateur (cf. PARAPHE_BROWSER_WEB_DIR)
+      PARAPHE_BASE_PATH: /navigateur/
+      PARAPHE_BASE_DOMAIN: '{{.PARAPHE_BASE_DOMAIN | default ""}}'
+    cmds: [pnpm install, pnpm build --outDir dist-navigateur]
+
   try-browser:
     desc: 'Essai local — version navigateur seule (http://127.0.0.1:5180)'
     # Serves the BUILT artefact as a plain directory, exactly as GitHub

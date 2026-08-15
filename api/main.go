@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -46,6 +47,10 @@ type Server struct {
 	decoyHash     string
 	now           func() time.Time
 	webDir        string
+	// browserDir: a second build of the same interface, served under
+	// /navigateur/ WITHOUT the mode marker — the account-less browser
+	// version, self-hosted (pages.go, serveBrowserVersion)
+	browserDir string
 	// proxies: the networks whose X-Forwarded-For is believed (clientip.go)
 	proxies trustedProxies
 	// limiter: the rate limiter — Valkey-backed when valkey_url is set,
@@ -228,6 +233,7 @@ func run() error {
 		decoyHash:     decoy,
 		now:           time.Now,
 		webDir:        Get("web_dir"),
+		browserDir:    Get("browser_web_dir"),
 		proxies:       proxies,
 		limiter:       newRateLimiter(secret, shared, time.Now),
 		logKey:        deriveKey(secret, "paraphe:log-pseudonyms:v1"),
@@ -255,6 +261,22 @@ func run() error {
 		s.landingPage = landingPage
 		if s.landingPageGz, err = gzipBytes(landingPage); err != nil {
 			return fmt.Errorf("compressing the landing page: %w", err)
+		}
+	}
+	// Same rule for the browser version: set and unreadable is a broken
+	// image, not a deployment shape. Its index must NOT carry the mode
+	// marker — the absence is what lets it fall into browser mode.
+	if s.browserDir != "" {
+		raw, err := os.ReadFile(filepath.Join(s.browserDir, "index.html"))
+		if err != nil {
+			return fmt.Errorf("browser version unreadable in %s: %w\n"+
+				"Build one with `task web-build-navigateur`, or set "+
+				"browser_web_dir empty to serve none", s.browserDir, err)
+		}
+		if strings.Contains(string(raw), `name="paraphe-mode"`) {
+			return fmt.Errorf("%s/index.html carries the mode marker: this "+
+				"build would never switch to browser mode. Point browser_web_dir "+
+				"at a build made for /navigateur/, not at web_dir", s.browserDir)
 		}
 	}
 

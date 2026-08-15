@@ -30,14 +30,22 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The account-less alternative, offered beside the hosting form: same
+	// tool, alone, nothing leaving the visitor's browser. When this image
+	// serves its own build, the link needs no configuration at all.
+	browserURL := strings.TrimSpace(Get("browser_version_url"))
+	if browserURL == "" && s.browserDir != "" {
+		browserURL = "/navigateur/"
+	}
 	org := orgOf(r)
 	if org == nil {
 		replyJSON(w, http.StatusOK, map[string]any{
-			"mode":          "instance",
-			"base_domain":   BaseDomain(),
-			"source_url":    s.cfg.SourceURL,
-			"no_account":    noAccount,
-			"campaign_keys": CampaignKeys,
+			"mode":                "instance",
+			"base_domain":         BaseDomain(),
+			"source_url":          s.cfg.SourceURL,
+			"browser_version_url": browserURL,
+			"no_account":          noAccount,
+			"campaign_keys":       CampaignKeys,
 		})
 		return
 	}

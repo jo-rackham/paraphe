@@ -186,6 +186,10 @@ trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 # -- Lien « code source » affiché en pied de page (dépôt public, MIT)
 sourceUrl: "https://github.com/jo-rackham/paraphe"
 
+# -- URL publique de la version navigateur (sans compte), proposée sur la
+# page d'accueil de l'instance en multi-campagnes. Vide : aucun lien.
+browserVersionUrl: ""
+
 service:
   type: ClusterIP
   port: 80

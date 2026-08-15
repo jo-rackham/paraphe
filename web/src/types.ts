@@ -73,6 +73,8 @@ export interface InstanceConfig {
   mode: "instance";
   base_domain: string;
   source_url: string;
+  // URL publique de la version navigateur (sans compte) — vide : pas de lien
+  browser_version_url: string;
   no_account: boolean;
   campaign_keys: string[];
 }

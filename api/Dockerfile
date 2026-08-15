@@ -35,6 +35,14 @@ ENV PARAPHE_BASE_PATH=/
 WORKDIR /src/web
 RUN pnpm build
 
+# The account-less browser version, second build of the same sources. Under
+# /navigateur/, its /api calls hit paths the server answers with HTML — the
+# exact condition that switches it to browser mode, same as on a static
+# host. The instance domain bakes the ?org= pre-fill; empty leaves it inert.
+ARG PARAPHE_BASE_DOMAIN=""
+RUN PARAPHE_BASE_PATH=/navigateur/ PARAPHE_BASE_DOMAIN="$PARAPHE_BASE_DOMAIN" \
+    pnpm build --outDir dist-navigateur
+
 # Precompressed variants, built ONCE here rather than per request: brotli at
 # quality 11 takes the bundle from 357 kB to 90, and is far too slow to run
 # on the fly. The server picks a variant from Accept-Encoding and falls back
@@ -43,7 +51,7 @@ RUN pnpm build
 # xargs' status, and the build ships uncompressed assets while looking green.
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 RUN apk add --no-cache brotli=~1.2 \
- && find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \
+ && find dist dist-navigateur -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \
       -o -name '*.svg' -o -name '*.json' -o -name '*.txt' \) \
       -size +1k -print0 \
     | tee /tmp/compressible | xargs -0 -r -n1 brotli -q 11 -k \
@@ -97,6 +105,8 @@ COPY --from=binary /paraphe-api /usr/local/bin/paraphe-api
 COPY config/ config/
 COPY modeles/ modeles/
 COPY --from=web /src/web/dist web/dist
+# the self-hosted browser version, served under /navigateur/ (no marker)
+COPY --from=web /src/web/dist-navigateur web/dist-navigateur
 
 # LAST, and alone in its layer: 9 MB of CSV that changes on its own schedule.
 # Above the binary, every code change would re-push it.
@@ -106,7 +116,8 @@ COPY out/04_base_complete.csv out/04_base_complete.csv
 COPY out/01_maires_cibles_prioritaires.csv out/01_maires_cibles_prioritaires.csv
 
 ENV PARAPHE_HOST=0.0.0.0 \
-    PARAPHE_PORT=8047
+    PARAPHE_PORT=8047 \
+    PARAPHE_BROWSER_WEB_DIR=web/dist-navigateur
 EXPOSE 8047
 
 USER 10001

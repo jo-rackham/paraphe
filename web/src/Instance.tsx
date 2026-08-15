@@ -148,6 +148,18 @@ function Accueil({
         la sienne.
       </p>
       <Demande config={config} />
+      {config.browser_version_url && (
+        <>
+          <h2>Essayer sans compte</h2>
+          <p>
+            La <a href={config.browser_version_url}>version navigateur</a> offre
+            le même outil, sans inscription : les listes se chargent dans votre
+            navigateur et rien ne quitte votre poste. Pour travailler à
+            plusieurs et partager le suivi, demandez plutôt l'hébergement d'une
+            campagne ci-dessus.
+          </p>
+        </>
+      )}
       <p className="gris">
         Vous administrez cette instance ?{" "}
         <button type="button" className="lien" onClick={onAdministration}>
