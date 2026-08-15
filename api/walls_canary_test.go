@@ -448,10 +448,35 @@ var readsNoWalledTable = map[string]string{}
 
 // Query calls whose SQL the canary must be able to read. A call it cannot
 // read is not a pass — see TestNoQueryIsInvisibleToTheCanary.
+// calledName: the name a call names, whichever way it is spelt. A METHOD
+// (`tx.Query`, `s.rows`) is a selector; a FREE FUNCTION (`textColumn`) is a
+// bare identifier. Reading only selectors let a package query helper be
+// called by its own name and carry SQL nobody resolved — invisible to the
+// test that hunts unreadable queries, and invisible to the walls canary
+// after it, which needs readable text before any rule can run.
+//
+// Named rather than inlined so the guard and the shape that pins it read the
+// SAME code: a check written twice is a check that can be weakened once.
+func calledName(call *ast.CallExpr) string {
+	switch fun := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		return fun.Sel.Name
+	case *ast.Ident:
+		return fun.Name
+	}
+	return ""
+}
+
 var queryCalls = map[string]bool{
 	"Query": true, "QueryRow": true, "Exec": true,
 	"rows": true, "column": true, "counters": true, "orderedCounters": true,
 	"textColumn": true,
+	// CopyFrom names its table as a pgx.Identifier, not as SQL: there is no
+	// statement for any rule to read, so it streams rows into whatever table
+	// it is given with nothing bounding the campaign. Declared here it can
+	// never be READ, which is the point — it lands among the invisible and
+	// has to be justified site by site.
+	"CopyFrom": true,
 }
 
 // localScope: the string bindings as seen INSIDE one function.
@@ -464,7 +489,6 @@ var queryCalls = map[string]bool{
 // build()` puts two names on the left, which the collector below ignores.
 func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	scoped := map[string]string{}
-	appended := map[string]bool{}
 	for k, v := range values {
 		scoped[k] = v
 	}
@@ -494,14 +518,6 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	// Resolving against the package map alone left the second unreadable, and
 	// an unreadable statement is one the canary passes over.
 	for range 3 {
-		// Reset EVERY pass. Carried across, the second pass re-ran the `:=`
-		// that precedes the `+=` — overwriting the accumulated text — and
-		// then skipped the `+=` itself as already applied. `sql := base`
-		// followed by `sql += " OR TRUE"` came out as `base` alone: the
-		// canary read a walled query while the driver ran an always-true
-		// disjunction. The map bounds the appending WITHIN a pass, which is
-		// all it was ever for.
-		clear(appended)
 		ast.Inspect(fn, func(n ast.Node) bool {
 			a, ok := n.(*ast.AssignStmt)
 			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
@@ -516,13 +532,18 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 				return true
 			}
 			if a.Tok.String() == "+=" {
-				// `+=` accumulates, so meeting the same statement twice in
-				// one pass would append its text twice and invent a query
-				// nobody wrote.
-				if !appended[id.Name] {
-					appended[id.Name] = true
-					scoped[id.Name] += txt
-				}
+				// `+=` accumulates. What must not happen twice is ONE
+				// statement being applied twice in one pass; ast.Inspect
+				// already visits each node exactly once, and the `:=` before
+				// them is replayed every pass, which resets the accumulator.
+				//
+				// Bounding by NAME instead conflated the two: `sql += a`
+				// followed by `sql += b` applied the first and dropped the
+				// second in silence. The canary read `base+a` while the
+				// driver ran `base+a+b` — so an `OR TRUE` written in the
+				// second one walked straight past `neutralised`, which
+				// exists for exactly that.
+				scoped[id.Name] += txt
 				return true
 			}
 			scoped[id.Name] = txt
@@ -1047,6 +1068,13 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		// counter script against Valkey. No PostgreSQL driver is in reach of
 		// that call, so there is no walled table it could touch.
 		"limiter_valkey.go:count": true,
+		// CopyFrom names its table as a pgx.Identifier: never SQL, never
+		// readable. This one streams the CSV into `import_maires`, the
+		// staging table the UPSERT then reads — common data, no org_id, no
+		// campaign to name. It ran invisible to every guard until CopyFrom
+		// was declared a query call; the promise is that this stays the
+		// ONLY one, and that its target stays unwalled.
+		"import.go:importList": true,
 	}
 
 	files := apiPackage(t)
@@ -1068,8 +1096,7 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 				if !ok {
 					return true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || !queryCalls[sel.Sel.Name] || len(call.Args) < 2 {
+				if !queryCalls[calledName(call)] || len(call.Args) < 2 {
 					return true
 				}
 				// Only the STATEMENT argument counts. Accepting any readable
@@ -1126,6 +1153,26 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 // campaign — with every other guard green, because the SQL still reads
 // `org_id=$1`. No canary that looks at SQL can see that; the constructor is
 // what carries the guarantee.
+// buildsAQuery: every way this package can produce a `query` builder.
+// `query{}` and `&query{}` are composite literals; `new(query)` is a call
+// expression and reads nothing like them. Kept beside the test that uses it
+// so a shape added here is a shape the guard sees.
+func buildsAQuery(n ast.Node) bool {
+	switch e := n.(type) {
+	case *ast.CompositeLit:
+		id, ok := e.Type.(*ast.Ident)
+		return ok && id.Name == "query"
+	case *ast.CallExpr:
+		fn, ok := e.Fun.(*ast.Ident)
+		if !ok || fn.Name != "new" || len(e.Args) != 1 {
+			return false
+		}
+		arg, ok := e.Args[0].(*ast.Ident)
+		return ok && arg.Name == "query"
+	}
+	return false
+}
+
 func TestTheCampaignIsBoundByTheConstructorAlone(t *testing.T) {
 	files := apiPackage(t)
 	var offenders []string
@@ -1140,12 +1187,12 @@ func TestTheCampaignIsBoundByTheConstructorAlone(t *testing.T) {
 				continue
 			}
 			ast.Inspect(fn, func(n ast.Node) bool {
-				lit, ok := n.(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				id, ok := lit.Type.(*ast.Ident)
-				if !ok || id.Name != "query" {
+				// `query{}` and `&query{}` are composite literals; `new(query)`
+				// is a CALL, and reading only the first shape let a builder be
+				// made that inherits nothing from scoped(r) — its first bound
+				// value becomes $1, so `WHERE org_id=$1` filters on whatever
+				// the caller happened to bind first.
+				if !buildsAQuery(n) {
 					return true
 				}
 				seen++

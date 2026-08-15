@@ -170,6 +170,38 @@ func stringValues(files map[string]*ast.File) map[string]string {
 			}
 		}
 	}
+	// A package binding REASSIGNED IN init() is not what its declaration
+	// says. Dead code reassigning one changes nothing and must be ignored
+	// — that is TestDeadCodeCannotDecideWhatTheCanaryReads — but init runs
+	// at startup, before the first request, and its value is the one the
+	// driver executes. Reading the declaration instead credited a query
+	// with a campaign predicate that production never carried.
+	//
+	// The name is DROPPED rather than relearned: which of the two texts
+	// wins is exactly what cannot be decided by reading, and a guess is
+	// how a hole gets declared compliant. Unresolvable, the call site
+	// becomes unreadable, and an unreadable site is a finding —
+	// TestNoQueryIsInvisibleToTheCanary says so and names it.
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Name.Name != "init" {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				a, ok := n.(*ast.AssignStmt)
+				if !ok || a.Tok == token.DEFINE {
+					return true // `:=` declares a local, it shadows nothing
+				}
+				for _, lhs := range a.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						delete(known, id.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
 	return known
 }
 

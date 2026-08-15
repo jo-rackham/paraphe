@@ -400,6 +400,243 @@ func handler() {
 	}
 }
 
+// R11. `query{}` and `&query{}` are composite literals. `new(query)` is a
+// CALL, and the constructor guard read only the first shape — so a builder
+// could be made that inherits nothing from scoped(r), and its first bound
+// value becomes $1. `WHERE org_id=$1` then filters on a team identifier
+// with every guard green: the same break scoped(r) exists to prevent.
+func TestNewQueryIsAQueryBuilderToo(t *testing.T) {
+	const src = `package main
+
+func bypass(r *http.Request) *query {
+	req := new(query)
+	req.p(r.URL.Query().Get("team"))
+	return req
+}
+
+func alsoBypass() *query { return &query{} }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "builder.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	found := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if buildsAQuery(n) {
+				found[fn.Name.Name] = true
+			}
+			return true
+		})
+	}
+	if !found["bypass"] {
+		t.Error("`new(query)` builds a query the constructor guard cannot see: " +
+			"$1 becomes whatever the caller binds first")
+	}
+	if !found["alsoBypass"] {
+		t.Error("the composite-literal shape is no longer recognised")
+	}
+}
+
+// R11. CopyFrom takes its table as a pgx.Identifier, so no argument of it is
+// ever SQL: `sqlStatements` summed the text of the arguments and found
+// nothing, and the call was not in queryCalls either. An entire pgx API
+// streamed rows into any table with no statement for any rule to read.
+func TestCopyFromIsAQueryCall(t *testing.T) {
+	if !queryCalls["CopyFrom"] {
+		t.Fatal("CopyFrom is not a query call: a write that names its table " +
+			"as an identifier reaches every table unseen")
+	}
+	// and it can never be READ, so a site using it has to be declared
+	const src = `package main
+
+func stream(ctx context.Context, tx pgx.Tx, rows [][]any) error {
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"accounts"},
+		[]string{"org_id", "email"}, pgx.CopyFromRows(rows))
+	return err
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "copy.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "stream" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("the fixture has no stream")
+	}
+	scoped := localScope(map[string]string{}, fn)
+	ast.Inspect(fn, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "CopyFrom" {
+			return true
+		}
+		for _, arg := range call.Args {
+			if txt := sqlText(arg, scoped); txt != "" &&
+				sqlVerb.MatchString(strings.ToUpper(txt)) {
+				t.Errorf("an argument of CopyFrom read as SQL (%q): the site "+
+					"would count as readable and escape declaration", txt)
+			}
+		}
+		return true
+	})
+}
+
+// R11. A METHOD and a FREE FUNCTION are different AST nodes. The invisible
+// -query test read only selectors, so a package helper called by its bare
+// name carried SQL nobody resolved: invisible to that test, and invisible to
+// the walls canary too, which needs readable text before it has a rule to
+// apply. Both spellings must reach the same check.
+func TestAFreeFunctionCallIsAQueryCallToo(t *testing.T) {
+	const src = `package main
+
+func viaMethod(ctx context.Context, tx pgx.Tx) { tx.Query(ctx, "SELECT 1") }
+func viaFreeFunction(ctx context.Context, tx pgx.Tx) { textColumn(ctx, tx, "SELECT 1") }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "calls.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if queryCalls[calledName(call)] {
+				seen[fn.Name.Name] = true
+			}
+			return true
+		})
+	}
+	if !seen["viaMethod"] {
+		t.Error("a method call is no longer recognised as a query call")
+	}
+	if !seen["viaFreeFunction"] {
+		t.Error("a query helper called by its bare name is invisible: its SQL " +
+			"is never read, so no rule ever runs on it")
+	}
+}
+
+// R11. The counterpart of the dead-code shape, and its opposite conclusion.
+// A package SQL binding reassigned in `init()` IS what the driver runs: init
+// executes at startup, before the first request. stringValues read the
+// DECLARATION, so a query could be declared with a campaign predicate and
+// shipped without one, with every guard green.
+//
+// The name is dropped rather than relearned — deciding which of the two
+// texts wins is exactly what reading cannot do — and the call site then
+// falls to TestNoQueryIsInvisibleToTheCanary, which names it.
+func TestInitCanNotDecideWhatTheCanaryReads(t *testing.T) {
+	const src = `package main
+
+// what the declaration says
+var poisoned = "SELECT email FROM accounts WHERE org_id=$1"
+
+// …and what actually runs, from the first request onwards
+func init() { poisoned = "SELECT email FROM accounts" }
+
+func handler() { run(poisoned) }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "init.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	got, present := stringValues(map[string]*ast.File{"init.go": file})["poisoned"]
+	if present {
+		t.Errorf("the canary reads %q for a binding init() reassigns: the "+
+			"declaration is not what the driver runs, and reading it credits "+
+			"the query with a predicate production never carried", got)
+	}
+	// the dead-code shape still resolves: only init is live
+	const dead = `package main
+
+var alsoPoisoned = "SELECT email FROM accounts"
+
+func neverCalled() { alsoPoisoned = "SELECT email FROM accounts WHERE org_id=$1" }
+
+func handler2() { run(alsoPoisoned) }
+`
+	deadFile, err := parser.ParseFile(fset, "dead.go", dead, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	if got := stringValues(map[string]*ast.File{
+		"dead.go": deadFile,
+	})["alsoPoisoned"]; got != "SELECT email FROM accounts" {
+		t.Errorf("dead code now decides what the canary reads, or the binding "+
+			"stopped being read at all: %q", got)
+	}
+}
+
+// R11. TWO `+=` on the same variable. The map bounding the appending was
+// keyed by NAME, not by statement, so the first was applied and every one
+// after it dropped in silence — while ast.Inspect already visits each node
+// exactly once per pass, which is all the bounding that was ever needed.
+// The canary read `base + a`; the driver ran `base + a + b`. An always-true
+// disjunction written in the second one therefore never reached
+// `neutralised`, the rule that exists to refuse it.
+func TestEveryAppendReachesTheCanary(t *testing.T) {
+	const src = `package main
+
+func handler() {
+	sql := "SELECT email FROM accounts WHERE org_id=$1"
+	sql += " AND role='volunteer'"
+	sql += " OR TRUE"
+	run(sql)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "appends.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "handler" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("the fixture has no handler")
+	}
+	got := strings.ToUpper(localScope(map[string]string{}, fn)["sql"])
+	if !strings.Contains(got, "ROLE=") && !strings.Contains(got, "ROLE ") {
+		t.Errorf("the first append is gone: %q", got)
+	}
+	if !strings.Contains(got, "OR TRUE") {
+		t.Errorf("every append after the first is dropped, so the canary reads "+
+			"a walled query the driver never runs:\n\tread: %q\n\truns: %s",
+			got, "…WHERE ORG_ID=$1 AND ROLE='VOLUNTEER' OR TRUE")
+	}
+	// …and the text is not counted twice by the resolution passes
+	if strings.Count(got, "OR TRUE") != 1 {
+		t.Errorf("the appended text is applied %d times: the canary reads a "+
+			"query nobody wrote (%q)", strings.Count(got, "OR TRUE"), got)
+	}
+}
+
 // …and the counterpart: what a function DOES write must still be read, or
 // every query built in a local variable becomes invisible — which is a hole
 // of its own, and the reason stringValues learned function bodies to begin
