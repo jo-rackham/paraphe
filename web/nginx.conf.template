@@ -6,6 +6,14 @@ server {
     listen 8080;
     server_name _;
 
+    # A redirect nginx builds itself carries this container's address and
+    # port — `http://host:8080/api/` — which is neither reachable from
+    # outside nor https. `/api` without its trailing slash would hand a
+    # client a broken, downgraded URL. Relative redirects keep the scheme,
+    # the host and the port the client actually used.
+    absolute_redirect off;
+    port_in_redirect off;
+
     root /usr/share/nginx/html;
     index index.html;
 
@@ -32,21 +40,22 @@ server {
     # index.html never, or a volunteer keeps an interface that no longer
     # matches the API.
     location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-        add_header X-Content-Type-Options "nosniff";
-        add_header Referrer-Policy "same-origin";
-        add_header Cross-Origin-Opener-Policy "same-origin";
+        # One Cache-Control, not two: `expires` emits one of its own, and a
+        # second add_header leaves two headers for a client to reconcile.
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "same-origin" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
     }
 
     # One page: a reload on /equipe must render the application, not 404.
     location / {
         try_files $uri $uri/ /index.html;
-        add_header Cache-Control "no-store";
-        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-        add_header X-Content-Type-Options "nosniff";
-        add_header Referrer-Policy "same-origin";
-        add_header Cross-Origin-Opener-Policy "same-origin";
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "same-origin" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
     }
 }

@@ -37,5 +37,9 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine
 ENV NGINX_ENVSUBST_FILTER=^PARAPHE_
 ENV PARAPHE_API_UPSTREAM=http://paraphe-api:8047
 COPY web/nginx.conf.template /etc/nginx/templates/default.conf.template
+# Runs before the template substitution, which nginx's entrypoint orders by
+# file name: an upstream carrying a `;` would be read as more directives.
+COPY --chmod=755 web/docker-entrypoint.d/05-check-upstream.sh \
+    /docker-entrypoint.d/05-check-upstream.sh
 COPY --from=build /src/web/dist /usr/share/nginx/html
 EXPOSE 8080
