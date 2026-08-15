@@ -143,6 +143,19 @@ func LoadConfig(dir string) (*Config, error) {
 	}
 	cfg.SourceURL = strings.TrimSpace(Get("source_url"))
 
+	// The base domain is a DNS name, and nothing checked it. `http://x.org`
+	// lost everything after its first colon and became the domain `http`;
+	// `x.org/path` and `.x.org` kept their punctuation. In all three the
+	// process starts, /health/db answers 200, Kubernetes marks the pod
+	// ready, traffic arrives — and every legitimate Host matches no campaign
+	// and answers 404. A blank screen behind a green probe is the failure
+	// this application refuses everywhere else it can.
+	if raw := strings.TrimSpace(Get("base_domain")); raw != "" {
+		if err := validBaseDomain(raw); err != nil {
+			return nil, err
+		}
+	}
+
 	var missing []string
 	for _, k := range CampaignKeys {
 		if strings.TrimSpace(cfg.Campaign[k]) == "" {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -62,6 +64,62 @@ type Org struct {
 // application.
 func BaseDomain() string {
 	return normaliseHost(Get("base_domain"))
+}
+
+// validBaseDomain: what an operator may set PARAPHE_BASE_DOMAIN to.
+//
+// normaliseHost exists for an incoming Host header, where a port is legal
+// and expected; applied to a SETTING it turned `http://example.org` into the
+// domain `http`, because the scheme's colon is the last one it finds. The
+// setting is a bare DNS name and has to be checked as one — a wrong value
+// here costs a whole instance, silently, behind a healthy probe.
+func validBaseDomain(raw string) error {
+	refuse := func(why string) error {
+		return fmt.Errorf("PARAPHE_BASE_DOMAIN = %q: %s. Give the bare domain "+
+			"campaigns are served under, without scheme, port or path — "+
+			"for instance paraphe.org", raw, why)
+	}
+	h := strings.ToLower(strings.TrimSpace(raw))
+	for _, bad := range []struct{ char, why string }{
+		{"://", "it carries a scheme"},
+		{"/", "it carries a path"},
+		{":", "it carries a port"},
+		{"?", "it carries a query"},
+		{"#", "it carries a fragment"},
+		{"@", "it carries a userinfo"},
+		{" ", "it contains a space"},
+	} {
+		if strings.Contains(h, bad.char) {
+			return refuse(bad.why)
+		}
+	}
+	h = strings.TrimSuffix(h, ".")
+	if h == "" {
+		return refuse("it is only punctuation")
+	}
+	// One label is legitimate: `*.localhost` resolves to the loopback in
+	// every browser, and it is what the end-to-end suite and a developer's
+	// instance mode run on. What is refused is punctuation, not brevity.
+	labels := strings.Split(h, ".")
+	// A DNS label, and NOT ValidSlug: that one also refuses reserved names,
+	// which are reserved as CAMPAIGN subdomains and say nothing about the
+	// domain above them.
+	for _, l := range labels {
+		if l == "" || len(l) > 63 ||
+			strings.HasPrefix(l, "-") || strings.HasSuffix(l, "-") {
+			return refuse(fmt.Sprintf("%q is not a DNS label", l))
+		}
+		for _, c := range l {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return refuse(fmt.Sprintf("%q is not a DNS label", l))
+			}
+		}
+	}
+	// An IP address is syntactically fine and cannot carry a subdomain.
+	if net.ParseIP(h) != nil {
+		return refuse("it is an IP address, which carries no subdomain")
+	}
+	return nil
 }
 
 // HostScope: what a Host header designates.
