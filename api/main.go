@@ -148,12 +148,23 @@ func run() error {
 		now:           time.Now,
 		webDir:        env("PARAPHE_WEB_DIR", "web/dist"),
 	}
-	if landingPage, err := markInterface(s.webDir); err != nil {
-		log.Printf("interface missing or unreadable in %s (%v): the API "+
-			"answers, but no page is served. Build with `task web-build`, or "+
-			"point PARAPHE_WEB_DIR elsewhere.", s.webDir, err)
-	} else {
-		s.landingPage = landingPage
+	// An EMPTY PARAPHE_WEB_DIR says there is no interface here on purpose:
+	// that is the deployed shape, where the interface is an image of its own
+	// serving the files and proxying /api back. Serving it from both would be
+	// a second copy nobody rebuilds. Unset, the default keeps `task api`
+	// serving a locally built web/dist, which is how development runs.
+	switch {
+	case s.webDir == "":
+		log.Print("no interface served here: the API answers JSON, and the " +
+			"interface image serves the pages")
+	default:
+		if landingPage, err := markInterface(s.webDir); err != nil {
+			log.Printf("interface missing or unreadable in %s (%v): the API "+
+				"answers, but no page is served. Build with `task web-build`, "+
+				"or point PARAPHE_WEB_DIR elsewhere.", s.webDir, err)
+		} else {
+			s.landingPage = landingPage
+		}
 	}
 
 	addr := env("PARAPHE_HOST", "127.0.0.1") + ":" + env("PARAPHE_PORT", "8047")

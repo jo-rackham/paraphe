@@ -1,7 +1,11 @@
 # -- Image publiée par la CI sur ghcr.io
 image:
+  # Deux images publiées sous ce préfixe : <repository>/api sert le JSON,
+  # <repository>/web sert les pages et relaie /api vers l'API. Elles portent
+  # TOUJOURS le même tag — une interface d'une version parlant à une API
+  # d'une autre est la panne que le tag unique évite.
   repository: ghcr.io/jo-rackham/paraphe
-  # laissé vide = appVersion du chart. Cette image n'existe sur ghcr.io
+  # laissé vide = appVersion du chart. Ces images n'existent sur ghcr.io
   # qu'une fois le tag git correspondant publié : pour installer depuis un
   # clone avant publication, poser un tag existant ici.
   tag: ""
@@ -202,6 +206,16 @@ securityContext:
 # « hard » exige STRICTEMENT plus de nœuds que de réplicas : avec autant de
 # nœuds que de réplicas, le pod supplémentaire du rolling update ne trouve
 # pas où se poser et la mise à jour reste bloquée.
+# -- Ressources du conteneur qui sert les pages. nginx sur des fichiers
+# statiques ne consomme presque rien ; ce qui compte est de ne pas le laisser
+# sans limite dans le même pod que l'API.
+webResources:
+  requests:
+    cpu: 10m
+    memory: 24Mi
+  limits:
+    memory: 64Mi
+
 podAntiAffinity: soft
 
 nodeSelector: {}

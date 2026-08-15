@@ -129,6 +129,29 @@ describe("the deployment files", () => {
       .toBeGreaterThan(10);
   });
 
+  // The interface picks its mode at load: an API answers /api/config → team
+  // mode, nothing answers → browser mode, everything in IndexedDB. This
+  // marker says "there IS an API here", so a passing failure of /api/config
+  // cannot silently drop a volunteer into browser mode and have them write
+  // their team's work to local storage.
+  //
+  // The API used to inject it while serving index.html. It serves nothing
+  // now, so the interface image stamps it at build time — the same string in
+  // two files, which is a divergence waiting to happen. Both are read here,
+  // and so is what the interface looks for.
+  it("stamp the mode marker the interface looks for", () => {
+    const marker = /<meta name="paraphe-mode" content="team">/;
+    for (const file of ["api/main.go", "web/Dockerfile"]) {
+      expect(readFileSync(join(ROOT, file), "utf8"),
+        `${file} no longer carries the marker the interface reads`)
+        .toMatch(marker);
+    }
+    // …and the interface still reads that attribute, under that name
+    const reader = readFileSync(join(ROOT, "web", "src", "api.ts"), "utf8");
+    expect(reader, "the interface no longer reads the marker the image stamps")
+      .toContain('meta[name="paraphe-mode"]');
+  });
+
   // A ":" in an unquoted command makes YAML read the line as a mapping:
   // GitHub rejects the ENTIRE workflow, and without a remote nothing
   // signals it. The Taskfile paid exactly this trap, ci.yml too.
@@ -240,7 +263,8 @@ describe("the deployment files", () => {
     // leftover produces a database or an image that does not exist,
     // invisible until deployment
     const watched = ["docker-compose.yml", ".github/workflows/ci.yml",
-      ".github/workflows/release.yml", "Dockerfile", ".env.exemple",
+      ".github/workflows/release.yml", "api/Dockerfile",
+      "web/Dockerfile", "web/nginx.conf.template", ".env.exemple",
       "chart/paraphe/values.yaml", "chart/paraphe/Chart.yaml"];
     // "parrainages" stays legitimate as a French word in comments; what is
     // hunted are the identifiers
@@ -271,7 +295,8 @@ describe("the deployment surfaces name real variables", () => {
   ];
   const READ_IN = [
     "api", "outils", "noyau", "web/src", "web/vite.config.ts",
-    "Taskfile.yml", ".github/workflows", "Dockerfile", "e2e",
+    "Taskfile.yml", ".github/workflows", "api/Dockerfile",
+    "web/Dockerfile", "web/nginx.conf.template", "e2e",
   ];
 
   const variables = (text: string): string[] =>

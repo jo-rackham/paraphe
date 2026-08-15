@@ -181,46 +181,74 @@ jobs:
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Construire l'image
+      - name: Construire l'image de l'API
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: api/Dockerfile
+          platforms: linux/amd64
           push: false
           load: true
-          tags: paraphe:ci
+          tags: paraphe-api:ci
 
-      - name: L'application démarre, sert l'API et l'interface
+      - name: Construire l'image de l'interface
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: web/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: paraphe-web:ci
+
+      # The two images are checked TOGETHER, wired as they are deployed: the
+      # interface reached alone would serve its files whether or not an API
+      # exists behind it, and that is the failure nobody sees before opening
+      # a browser.
+      - name: Les deux images démarrent et se parlent
         run: |
-          docker run -d --name paraphe-ci --network host \
+          docker run -d --name paraphe-api --network host \
             -e PARAPHE_ADMIN_EMAIL=ci@exemple.fr \
             -e PARAPHE_ADMIN_PASSWORD=ci-motdepasse \
             -e PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe \
-            paraphe:ci
+            paraphe-api:ci
+          docker run -d --name paraphe-web --network host \
+            -e PARAPHE_API_UPSTREAM=http://127.0.0.1:8047 \
+            paraphe-web:ci
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8047/api/config >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8080/api/config >/dev/null 2>&1; then
               echo "démarré au bout de ${i}s"; break
             fi
             if [ "$i" = 60 ]; then
-              echo "l'application n'a pas répondu en 60 s"; docker logs paraphe-ci; exit 1
+              echo "rien n'a répondu en 60 s"
+              docker logs paraphe-api; docker logs paraphe-web; exit 1
             fi
             sleep 1
           done
           # the liveness probe must not depend on the database
           curl -fsS http://127.0.0.1:8047/health | grep -q '"state":"ok"'
-          # the interface is embedded: without it the image serves a mute
-          # API, and nobody notices before opening a browser
-          curl -fsS http://127.0.0.1:8047/ | grep -q 'id="root"'
-          # sign-in works end to end
-          curl -fsS -X POST http://127.0.0.1:8047/api/session \
+          # the interface is served, and carries the marker that keeps it out
+          # of browser mode when /api/config has a bad minute
+          curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
+          curl -fsS http://127.0.0.1:8080/ | grep -q 'name="paraphe-mode" content="team"'
+          # one page: a reload deep in the application renders it
+          curl -fsS http://127.0.0.1:8080/equipe | grep -q 'id="root"'
+          # sign-in works end to end, THROUGH the interface's proxy
+          curl -fsS -X POST http://127.0.0.1:8080/api/session \
             -H 'Content-Type: application/json' \
             -d '{"email":"ci@exemple.fr","password":"ci-motdepasse"}' \
             | grep -q '"role":"coordination"'
           # and without a session, nothing gets out
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8047/api/mayors)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/mayors)" = 401
+          # the API image ships no interface: served from there, it would be
+          # a second copy nobody rebuilds
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8047/)" != 200
 
-      - name: Journaux du conteneur
+      - name: Journaux des conteneurs
         if: always()
-        run: docker logs paraphe-ci || true
+        run: |
+          docker logs paraphe-api || true
+          docker logs paraphe-web || true
 
   chart:
     runs-on: ubuntu-latest

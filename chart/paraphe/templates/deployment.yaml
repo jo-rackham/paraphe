@@ -52,7 +52,7 @@ spec:
         # without this wait, the instances restart in a loop while the
         # operator elects a primary — noisy and unreadable
         - name: attendre-la-base
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}/api:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           env:
@@ -65,12 +65,49 @@ spec:
           # the code that will use it, not by an approximate client
           args: ["-attendre-base", "120s"]
       containers:
-        - name: paraphe
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        # The interface, and the only port this pod publishes. It serves the
+        # pages and passes /api to the container beside it, which is why the
+        # API needs no port in the Service and no address of its own.
+        - name: web
+          image: "{{ .Values.image.repository }}/web:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
+              containerPort: 8080
+          env:
+            # same pod: the hop never leaves it, so the session cookie never
+            # crosses a network the cluster would have to be trusted on
+            - name: PARAPHE_API_UPSTREAM
+              value: http://127.0.0.1:8047
+          volumeMounts:
+            # read-only root: nginx writes its rendered config, its cache and
+            # its pid, and refuses to start without all three
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.webResources | nindent 12 }}
+
+        - name: api
+          image: "{{ .Values.image.repository }}/api:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: api
               containerPort: 8047
           env:
             - name: PARAPHE_DATABASE_URL
@@ -171,13 +208,13 @@ spec:
           startupProbe:
             httpGet:
               path: {{ .Values.probes.path }}
-              port: http
+              port: api
             periodSeconds: 2
             failureThreshold: {{ .Values.probes.startupFailureThreshold }}
           readinessProbe:
             httpGet:
               path: {{ .Values.probes.path }}
-              port: http
+              port: api
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -185,12 +222,16 @@ spec:
               # database, and killing a pod because the database hiccupped
               # turns 30 s of outage into CrashLoopBackOff
               path: {{ .Values.probes.livenessPath }}
-              port: http
+              port: api
             periodSeconds: 20
             failureThreshold: 3
           resources: {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          emptyDir: {}
+        - name: nginx-cache
           emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
