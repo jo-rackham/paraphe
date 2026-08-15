@@ -417,10 +417,19 @@ function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     <>
       <h1>Demandes d'hébergement</h1>
 
+      {/* The announcement is a PERSISTENT text-only region beside the
+          card, never the card itself: a live region is reliable only when
+          its content changes inside an existing node, and it must hold no
+          interactive control — status implies aria-atomic, so any rerender
+          would re-read the whole card, password included. */}
+      <span role="status" className="sr-only">
+        {opened
+          ? `La campagne ${opened.address} vient d'être ouverte. Le mot de ` +
+            "passe de coordination est affiché à l'écran."
+          : ""}
+      </span>
       {opened && (
-        // role="status": the one-time password is read out when the card
-        // appears — it is the only moment it exists
-        <div className="carte" role="status">
+        <div className="carte">
           <h2>Campagne ouverte : {opened.address}</h2>
           <p>
             Transmettez ces accès à {opened.coordination}. Le mot de passe n'est

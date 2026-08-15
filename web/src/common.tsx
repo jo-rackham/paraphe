@@ -191,7 +191,7 @@ export function NavOnglets({
           type="button"
           key={key}
           className="lien"
-          aria-current={tab === key ? "true" : undefined}
+          aria-current={tab === key ? "page" : undefined}
           onClick={() => onTab(key)}
         >
           {name}
@@ -221,6 +221,11 @@ export function useViewFocus(key: string, title: string | null) {
     const h = document.querySelector<HTMLElement>("main h1");
     if (h) {
       h.setAttribute("tabindex", "-1");
+      // dropped once focus moves on: the attribute would otherwise stick
+      // to an h1 reused across views, leaving it click-focusable for good
+      h.addEventListener("blur", () => h.removeAttribute("tabindex"), {
+        once: true,
+      });
       h.focus();
     }
   }, [key, title]);
@@ -351,22 +356,61 @@ export function Alerte({
   message?: Message | null;
   onClose?: () => void;
 }) {
-  if (!message) return null;
+  // Both regions live in the tree from the FIRST render, empty: assistive
+  // technology reliably announces what changes inside an existing live
+  // region, not a region inserted together with its text. The role sits on
+  // a span holding the text alone — the "fermer" button stays outside it,
+  // an interactive control inside a live region being re-read on every
+  // mutation. One paragraph per role, since a role must not change either.
+  const error = message?.tone === "erreur" ? message : null;
+  const ok = message && message.tone !== "erreur" ? message : null;
+  const fermer = onClose && (
+    <>
+      {" "}
+      <button type="button" className="lien" onClick={onClose}>
+        fermer
+      </button>
+    </>
+  );
   return (
-    // role, not aria-live on a permanent node: the paragraph is inserted
-    // with its text, and both roles announce an insertion — an error
-    // interrupts, a confirmation waits its turn
-    <p
-      role={message.tone === "erreur" ? "alert" : "status"}
-      className={message.tone === "erreur" ? "alerte erreur" : "alerte"}
-    >
-      {message.text}{" "}
-      {onClose && (
-        <button type="button" className="lien" onClick={onClose}>
-          fermer
-        </button>
-      )}
-    </p>
+    <>
+      <p className={error ? "alerte erreur" : "sr-only"}>
+        <span role="alert">{error?.text}</span>
+        {error && fermer}
+      </p>
+      <p className={ok ? "alerte" : "sr-only"}>
+        <span role="status">{ok?.text}</span>
+        {ok && fermer}
+      </p>
+    </>
+  );
+}
+
+/**
+ * "N affiché(s) sur T" — visible at once, SPOKEN only when the number
+ * settles: announced on every keystroke, a polite region turns a search
+ * into a stream of numbers.
+ */
+export function CompteurResultats({
+  shown,
+  total,
+}: {
+  shown: number;
+  total: number;
+}) {
+  const line = `${shown} affiché(s) sur ${total}.`;
+  const [announced, setAnnounced] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setAnnounced(line), 600);
+    return () => clearTimeout(timer);
+  }, [line]);
+  return (
+    <>
+      <p className="gris">{line}</p>
+      <span role="status" className="sr-only">
+        {announced}
+      </span>
+    </>
   );
 }
 

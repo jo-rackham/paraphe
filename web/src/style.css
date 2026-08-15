@@ -14,6 +14,15 @@
      3:1 WCAG floor for non-text indicators — olive is the palette's own
      dark yellow and reads 4.7:1 */
   --focus: #8a6d00;
+  /* the gauge track: the fill against the track IS the information, and
+     yellow on the card border grey read 1.24:1. Yellow on near-black reads
+     11:1 — and is the stripes' own pairing */
+  --piste: #141210;
+  /* field borders: the border is the only thing that says "a field is
+     here" (the field background equals the card's), and the card border
+     grey read 1.32:1 against it. This tone reads 3.6:1 and stays for
+     controls only — cards and table rules keep the light rule */
+  --champ-trait: #8a8477;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -22,6 +31,8 @@
     --alerte-fond: #3a3007; --alerte-trait: #8a6d00; --champ: #12100a;
     --lien: #ffd400;
     --focus: #ffd400;
+    --piste: #332e22;
+    --champ-trait: #6b6559;
   }
 }
 * { box-sizing: border-box; }
@@ -102,7 +113,7 @@ button.lien { background: none; border: 0; color: var(--lien); font: inherit;
   padding: 0; cursor: pointer; text-decoration: underline; }
 main button.lien { font-weight: inherit; }
 input[type=text], input[type=password], select, textarea {
-  font: inherit; padding: .5rem .6rem; border: 1px solid var(--trait);
+  font: inherit; padding: .5rem .6rem; border: 1px solid var(--champ-trait);
   border-radius: .45rem; width: 100%; background: var(--champ);
   color: var(--texte); }
 input:focus, select:focus, textarea:focus {
@@ -167,7 +178,7 @@ footer .officiel { border: 1px solid var(--trait);
    a l'air planté. */
 .chargement { border-left: 5px solid var(--jaune); }
 .jauge { height: 10px; margin-top: .5rem; border-radius: 5px;
-         background: var(--trait); overflow: hidden; }
+         background: var(--piste); overflow: hidden; }
 .jauge .barre { height: 100%; background: var(--jaune);
                 transition: width .2s linear; }
 .jauge .barre.indeterminee { width: 35%;

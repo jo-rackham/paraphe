@@ -11,6 +11,7 @@ import {
   CAMPAIGN_FIELDS,
   type CardDraft,
   Chip,
+  CompteurResultats,
   campaignLabel,
   Emoji,
   Fiche,
@@ -880,11 +881,7 @@ function ListeServeur({
         </p>
       )}
 
-      {/* role="status": the result of a filter change is spoken, the way
-          the eye catches the count settling */}
-      <p className="gris" role="status">
-        {rows.length} affiché(s) sur {total}.
-      </p>
+      <CompteurResultats shown={rows.length} total={total} />
       <div className="carte">
         <table>
           <thead>
@@ -1129,10 +1126,19 @@ function GestionEquipe({
         />
       )}
 
+      {/* The announcement is a PERSISTENT text-only region beside the
+          card, never the card itself: a live region is reliable only when
+          its content changes inside an existing node, and it must hold no
+          interactive control — status implies aria-atomic, so any rerender
+          would re-read the whole card, password included. */}
+      <span role="status" className="sr-only">
+        {created
+          ? `Un accès vient d'être créé pour ${created.name}. Le mot de ` +
+            "passe provisoire est affiché à l'écran, à transmettre de vive voix."
+          : ""}
+      </span>
       {created && (
-        // role="status": the one-time password is read out when the card
-        // appears — it is the only moment it exists
-        <div className="carte alerte" role="status">
+        <div className="carte alerte">
           <p>
             <strong>
               Accès créé pour {created.name} ({created.email}).

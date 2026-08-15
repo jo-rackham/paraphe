@@ -32,6 +32,34 @@ async function checkA11y(page: Page, screen: string) {
       v.nodes.map((n) => `    ${n.target.join(" ")}`).join("\n"),
   );
   expect(readable).toEqual([]);
+
+  // Axe does not enforce this one: an interactive control inside a live
+  // region is re-announced on every mutation (status implies aria-atomic),
+  // so the project's doctrine is text-only regions, controls beside them.
+  const interactive = await page
+    .locator(
+      '[role="alert"] button, [role="alert"] a, ' +
+        '[role="status"] button, [role="status"] a',
+    )
+    .count();
+  expect(interactive, `${screen}: interactive control in a live region`).toBe(
+    0,
+  );
+}
+
+/** WCAG relative luminance of a `#rrggbb` colour. */
+function luminance(hex: string): number {
+  const lin = (c: number) =>
+    c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+  const n = Number.parseInt(hex.slice(1), 16);
+  return (
+    0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  );
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
 }
 
 /** Browser mode's list, loaded — the state every journey starts from. */
@@ -80,13 +108,41 @@ test.describe
       // the active tab is stated, not only coloured
       await expect(
         page.getByRole("button", { name: "Les maires" }),
-      ).toHaveAttribute("aria-current", "true");
+      ).toHaveAttribute("aria-current", "page");
 
       // opening a card unmounts the clicked button: focus must land on the
       // new view's title, not fall back to the top of the document
       await page.locator("table button.lien").first().click();
       await expect(page.locator("main h1")).toBeFocused();
       await expect(page).toHaveTitle(/ — paraphe$/);
+    });
+
+    test("non-text contrast the scanner cannot see", async ({ page }) => {
+      // Axe checks text only. The gauge fill against its track and the
+      // field border against the field ARE the information (WCAG 1.4.11,
+      // 3:1) — read the palette variables and hold the floor, both schemes.
+      await openBrowserList(page);
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        const vars = await page.evaluate(() => {
+          const s = getComputedStyle(document.documentElement);
+          const v = (name: string) => s.getPropertyValue(name).trim();
+          return {
+            jaune: v("--jaune"),
+            piste: v("--piste"),
+            champ: v("--champ"),
+            champTrait: v("--champ-trait"),
+          };
+        });
+        expect(
+          contrast(vars.jaune, vars.piste),
+          `${scheme}: gauge fill vs track`,
+        ).toBeGreaterThanOrEqual(3);
+        expect(
+          contrast(vars.champTrait, vars.champ),
+          `${scheme}: field border vs field`,
+        ).toBeGreaterThanOrEqual(3);
+      }
     });
 
     test.describe(() => {

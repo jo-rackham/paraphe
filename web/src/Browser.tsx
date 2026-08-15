@@ -4,6 +4,7 @@ import {
   CAMPAIGN_FIELDS,
   type CardDraft,
   Chip,
+  CompteurResultats,
   campaignLabel,
   EMPTY_CFG,
   Emoji,
@@ -439,6 +440,14 @@ export default function Browser() {
             </p>
           )}
 
+          {/* persistent region: the start of a download is announced by a
+              text CHANGE here, not by the card mounting with its sentence —
+              completion is announced by the Alerte above */}
+          <span role="status" className="sr-only">
+            {download
+              ? `Téléchargement de la ${LISTS[download.key].name} en cours.`
+              : ""}
+          </span>
           {download && <Progression state={download} />}
 
           {tab === "liste" &&
@@ -622,11 +631,12 @@ function Progression({ state }: { state: DownloadState }) {
   const { key, received, total } = state;
   const pct = total ? Math.round((received / total) * 100) : null;
   return (
-    // the live region wraps ONLY the stable sentence: with the byte counter
-    // inside it, every received chunk queued one more announcement
+    // no live region here: the card mounts together with its sentence,
+    // which assistive technology may not announce. The announcement is the
+    // persistent sr-only region in Browser; this card is the visual.
     <div className="carte chargement">
       <p style={{ margin: 0 }}>
-        <strong role="status">Téléchargement de la {LISTS[key].name}…</strong>{" "}
+        <strong>Téléchargement de la {LISTS[key].name}…</strong>{" "}
         <span className="gris">
           {formatBytes(received)}
           {total ? ` sur ${formatBytes(total)}` : ""}
@@ -832,11 +842,10 @@ function Liste({
           conservé.
         </p>
       )}
-      {/* role="status": the result of a filter change is spoken, the way
-          the eye catches the count settling */}
-      <p className="gris" role="status">
-        {Math.min(shown, mayors.length)} affiché(s) sur {mayors.length}.
-      </p>
+      <CompteurResultats
+        shown={Math.min(shown, mayors.length)}
+        total={mayors.length}
+      />
       <div className="carte">
         <table>
           <thead>
