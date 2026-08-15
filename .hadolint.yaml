@@ -1,0 +1,10 @@
+# hadolint fails the build on a warning and reports the rest.
+#
+# Its default threshold includes `info`, and one of those is SC2016 —
+# "expressions don't expand in single quotes" — on a line where the single
+# quotes are the whole point: `xargs … sh -c '… "$1" …' _` needs the INNER
+# shell to expand $1, and double quotes would have the outer one do it,
+# against a variable that does not exist there. Silencing that rule alone
+# would hide the ones like it that are right; a threshold says what a build
+# is allowed to stop on.
+failure-threshold: warning

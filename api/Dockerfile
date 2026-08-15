@@ -48,7 +48,18 @@ RUN apk add --no-cache brotli=~1.2 \
       -size +1k -print0 \
     | tee /tmp/compressible | xargs -0 -r -n1 brotli -q 11 -k \
  && xargs -0 -r -n1 gzip -9 -k < /tmp/compressible \
- && test -f "$(find dist/assets -name '*.js' | head -1).br"
+ # EVERY file that was listed, not the first one an alphabetical `head`
+ # happens to return. A future chunk under 1 kB sorting first would have
+ # failed this build with a message pointing at compression, and a chunk
+ # that failed to compress while another succeeded would have passed it.
+ #
+ # `xargs` and not `while read -d ''`: busybox ash does support the latter,
+ # but nothing in this file should depend on which shell alpine ships, and
+ # a non-zero exit from any invocation here fails the build.
+ && xargs -0 -r -n1 sh -c \
+      'test -f "$1.br" && test -f "$1.gz" || { echo "no compressed variant for $1" >&2; exit 1; }' _ \
+      < /tmp/compressible \
+ && echo "compressed $(tr -cd '\0' < /tmp/compressible | wc -c) files"
 
 # ── the binary ───────────────────────────────────────────────────────────
 # Independent of the stage above: buildkit runs them in parallel, and a

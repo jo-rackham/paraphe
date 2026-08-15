@@ -196,8 +196,19 @@ func sqlTextMarked(expr ast.Expr, values map[string]string) string {
 		// that string. `assignmentJoin("$1")` read as its argument alone,
 		// and the join it builds — the wall of every mayor listing —
 		// vanished from what the canary examined.
+		//
+		// The body was learned with each parameter standing as `$ARGn`, and
+		// the caller's argument goes back where it belongs: a helper writing
+		// `"… org_id=" + placeholder` then reads as `… ORG_ID=$1` at the site
+		// that passes "$1", and as an unbounded predicate at a site that
+		// passes something else. Substituting nothing would judge every
+		// caller by the helper's shape rather than by what it was handed.
 		if id, ok := e.Fun.(*ast.Ident); ok {
 			if text, known := values[id.Name]; known && text != "" {
+				for i, arg := range e.Args {
+					text = strings.ReplaceAll(text, fmt.Sprintf("$ARG%d", i+1),
+						sqlTextMarked(arg, values))
+				}
 				return text
 			}
 		}

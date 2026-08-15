@@ -2,6 +2,11 @@ apiVersion: v2
 name: paraphe
 description: Outillage de recherche de parrainages d'élus — app d'équipe, données publiques
 type: application
+# `lifecycle.preStop.sleep` est GA en 1.30 et bêta en 1.29 : sans cette
+# borne, helm installe sur un cluster plus ancien et le drain n'existe
+# tout simplement pas — le pod reçoit SIGTERM pendant qu'on lui envoie
+# encore des requêtes, ce que le champ est là pour empêcher.
+kubeVersion: ">=1.29.0-0"
 version: 0.1.0
 appVersion: "0.1.0"
 home: https://github.com/jo-rackham/paraphe

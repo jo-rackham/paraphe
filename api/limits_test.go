@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -136,7 +137,34 @@ func stringValues(files map[string]*ast.File) map[string]string {
 				if !ok || len(ret.Results) != 1 {
 					continue
 				}
-				if text := sqlText(ret.Results[0], known); text != "" {
+				// The body is resolved with each PARAMETER standing for
+				// itself, `$ARG1` for the first and so on, and the call site
+				// puts the caller's argument back in its place.
+				//
+				// Resolved against the package map alone, a parameter is
+				// unknown and contributes NOTHING: `return "… org_id=" + ph`
+				// came out as `… ORG_ID=`, a predicate with an empty right
+				// side, and the canary refused a helper written the most
+				// natural way there is. A refusal costs what a hole costs —
+				// it sends the next author around the guard.
+				//
+				// `$ARGn` is not a shape orgPredicate accepts on its right,
+				// so a helper whose parameter is never substituted stays
+				// refused rather than passing on a marker.
+				scoped := map[string]string{}
+				for k, v := range known {
+					scoped[k] = v
+				}
+				position := 0
+				if fn.Type.Params != nil {
+					for _, field := range fn.Type.Params.List {
+						for _, name := range field.Names {
+							position++
+							scoped[name.Name] = fmt.Sprintf("$ARG%d", position)
+						}
+					}
+				}
+				if text := sqlText(ret.Results[0], scoped); text != "" {
 					known[fn.Name.Name] = text
 				}
 			}

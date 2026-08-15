@@ -82,6 +82,72 @@ func TestAHelperReturningSQLIsRead(t *testing.T) {
 	}
 }
 
+// A helper that builds its predicate from a PARAMETER is the most natural
+// way to compose a scoped query, and the canary refused it: resolved against
+// the package map, the parameter is unknown and contributes nothing, so
+// `"… org_id=" + placeholder` came out as `… ORG_ID=` — a predicate with an
+// empty right side. A refusal costs what a hole costs; it sends the next
+// author around the guard.
+//
+// The body is learned with each parameter standing as `$ARGn` and the call
+// site puts the argument back. Which means the caller is judged on what it
+// PASSES, not on the helper's shape: the same helper reads as walled at a
+// site handing it "$1", and unbounded at a site handing it something else.
+func TestAHelperIsJudgedOnWhatItsCallerPasses(t *testing.T) {
+	const src = `package main
+
+func scopedFilter(placeholder string) string {
+	return " FROM accounts WHERE org_id=" + placeholder
+}
+
+func walled()   { run("SELECT email" + scopedFilter("$1")) }
+func unwalled() { run("SELECT email" + scopedFilter("anything")) }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "helper.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	files := map[string]*ast.File{"helper.go": file}
+	values := stringValues(files)
+
+	if body := values["scopedFilter"]; !strings.Contains(body, "$ARG1") {
+		t.Fatalf("the parameter did not become a marker, so the predicate "+
+			"has no right-hand side: %q", body)
+	}
+
+	read := map[string]string{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		scoped := localScope(values, fn)
+		ast.Inspect(fn, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			for _, arg := range call.Args {
+				if txt := sqlTextMarked(arg, scoped); strings.Contains(txt, "ORG_ID") ||
+					strings.Contains(strings.ToUpper(txt), "ORG_ID") {
+					read[fn.Name.Name] = normaliseSQL(txt)
+				}
+			}
+			return true
+		})
+	}
+
+	if got := read["walled"]; !orgPredicate.MatchString(got) {
+		t.Errorf("a caller passing the placeholder is refused, which is the "+
+			"false positive:\n\t%s", got)
+	}
+	if got := read["unwalled"]; orgPredicate.MatchString(got) {
+		t.Errorf("a caller passing something that is NOT a placeholder reads "+
+			"as walled — the helper's shape vouched for it:\n\t%s", got)
+	}
+}
+
 // A rule that never runs guards nothing, and it passes its own unit test
 // while doing it. The main test drops any statement `sqlVerb` does not
 // recognise, BEFORE consulting the destructive rules — so the three verbs

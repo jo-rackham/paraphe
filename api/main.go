@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"mime"
@@ -30,6 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -528,6 +530,16 @@ func admitSignIn(next http.HandlerFunc) http.HandlerFunc {
 // and splitting the two once left every page without a Content-Security-
 // Policy while the API kept its own.
 func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
+	// A file answers a read, and nothing else. Left alone, a POST to
+	// /assets/index-a1b2.js returned 200 and the whole bundle — harmless in
+	// itself, since no CORS header lets another origin read it, but it makes
+	// a proxy log and a cache key say something that never happened.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		errorJSON(w, http.StatusMethodNotAllowed,
+			"Cette adresse ne répond qu'en lecture.")
+		return
+	}
 	path := filepath.Clean(r.URL.Path)
 	if path == "/" || filepath.Ext(path) == "" {
 		path = "/index.html"
@@ -606,7 +618,32 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, abs string) {
 		}
 		w.Header().Set("Content-Type", contentType(abs))
 		w.Header().Set("Content-Encoding", e.token)
-		http.ServeFile(w, r, variant)
+		// Content-Length, set here because net/http will not: serveContent
+		// leaves it out whenever a Content-Encoding is already present, and
+		// the response goes out chunked. Some caches decline to store a
+		// response with no length, which quietly undoes the
+		// `immutable, max-age=31536000` on the very files it is meant for.
+		//
+		// A byte range over an ENCODED body counts in encoded bytes, which
+		// is not what a client asking for one means; the assets are a few
+		// hundred kilobytes and nothing requests a range of them, so ranges
+		// are declined rather than half-supported.
+		f, err := os.Open(variant)
+		if err != nil {
+			// the variant vanished between the stat and here: serve the
+			// original rather than an empty 200
+			w.Header().Del("Content-Encoding")
+			break
+		}
+		defer f.Close() //nolint:errcheck // read-only
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		w.Header().Set("Accept-Ranges", "none")
+		if r.Method == http.MethodHead {
+			return
+		}
+		if _, err := io.Copy(w, f); err != nil {
+			slog.Error("asset not served", "path", r.URL.Path, "error", err)
+		}
 		return
 	}
 	http.ServeFile(w, r, abs)
@@ -615,6 +652,14 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, abs string) {
 // acceptsEncoding: does this Accept-Encoding name the token, other than to
 // refuse it? `gzip;q=0` is a client saying NOT gzip, and serving it gzip is
 // how a response arrives unreadable.
+//
+// Only q=0 refuses. A prefix test on "q=0.0" also caught `q=0.001`, which is
+// a client expressing a LOW preference and not a refusal, and every such
+// client — proxies and CDNs negotiating on behalf of others write them —
+// received 357 kB where 90 would have done. The value is parsed.
+//
+// The comparison on the token is case-insensitive because the header is:
+// `GZIP` and `Q=0` are as legal as the lowercase forms.
 func acceptsEncoding(header, token string) bool {
 	for _, part := range strings.Split(header, ",") {
 		fields := strings.Split(strings.TrimSpace(part), ";")
@@ -622,8 +667,14 @@ func acceptsEncoding(header, token string) bool {
 			continue
 		}
 		for _, p := range fields[1:] {
-			if q := strings.TrimSpace(p); strings.HasPrefix(q, "q=") &&
-				(q == "q=0" || strings.HasPrefix(q, "q=0.0")) {
+			key, value, ok := strings.Cut(strings.TrimSpace(p), "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "q") {
+				continue
+			}
+			// An unreadable q is not a refusal: RFC 9110 says a malformed
+			// parameter is ignored, and refusing here would silently drop
+			// compression for a client that asked for it clumsily.
+			if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q == 0 {
 				return false
 			}
 		}

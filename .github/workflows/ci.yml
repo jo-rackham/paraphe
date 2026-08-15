@@ -375,7 +375,11 @@ jobs:
             exit 1
           fi
           # CloudNativePG CRDs: kubeconform does not know them, skip them
+          # multi-campagnes included: it is the render that adds the
+          # wildcard Ingress, the instance administrator's env references and
+          # the third secret key — the most likely of the six to carry a
+          # misspelt field, and the one that was not validated.
           kubeconform -strict -summary \
             -ignore-missing-schemas -skip Cluster,ScheduledBackup \
-            /tmp/defaut.yaml /tmp/ingress.yaml /tmp/autoscaling.yaml \
-            /tmp/base-externe.yaml /tmp/sauvegarde.yaml
+            /tmp/defaut.yaml /tmp/ingress.yaml /tmp/multi-campagnes.yaml \
+            /tmp/autoscaling.yaml /tmp/base-externe.yaml /tmp/sauvegarde.yaml

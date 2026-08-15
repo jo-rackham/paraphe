@@ -238,24 +238,108 @@ func randomSalt(n int) (string, error) {
 	return b.String(), nil
 }
 
+// passwordWords: the alphabet a generated password is drawn from.
+//
+// French, because the password is read aloud to French volunteers, and ASCII
+// because it is then TYPED: a word whose accent has to be guessed from
+// speech is a word half the team gets wrong. Concrete nouns, no homophone
+// pairs, four to ten letters.
+//
+// The size is the point. Two words from a list of eight plus a two-digit
+// number is 8 × 8 × 90 = 5,760 possibilities — 12.5 bits. Measured on this
+// machine, one argon2id verification costs 39.5 ms and hashGate allows four
+// at once, so one instance answers ~100 attempts a second and three replicas
+// ~300: the whole space falls in NINETEEN SECONDS. The memory-hard hash
+// bought nothing, because there was nothing to search.
+var passwordWords = []string{
+	"abricot", "acacia", "acajou", "ajonc", "alouette", "alpage",
+	"amande", "ancre", "andouille", "anguille", "araignee", "arbuste",
+	"ardoise", "argile", "armoire", "arrosoir", "artichaut", "asperge",
+	"atelier", "aubepine", "aubergine", "aurore", "avalanche", "avoine",
+	"azalee", "balcon", "baleine", "bambou", "banquise", "barrage",
+	"basilic", "bassine", "bateau", "bergerie", "besace", "bidon",
+	"bijou", "biscuit", "bocage", "bouchon", "boulange", "bourgeon",
+	"boussole", "brindille", "brioche", "brouette", "bruyere", "buanderie",
+	"buisson", "bureau", "cabane", "cabriole", "cactus", "cagette",
+	"caillou", "calanque", "calice", "camion", "canard", "canape",
+	"cannelle", "capuche", "cardon", "carotte", "carriole", "cascade",
+	"casquette", "cerisier", "chalet", "chameau", "chandelle", "chapeau",
+	"charrue", "chataigne", "chaumiere", "chemin", "cheminee", "chevre",
+	"chicoree", "cigale", "citron", "clairiere", "clocher", "cloture",
+	"cocotte", "coquille", "corbeille", "cordage", "cornemuse", "coteau",
+	"coudrier", "couloir", "courgette", "couronne", "coussin", "coutelas",
+	"crabe", "cresson", "crevette", "croquis", "cuillere", "cuvette",
+	"cypres", "dahlia", "damier", "dauphin", "denivele", "digue",
+	"dolmen", "domaine", "dortoir", "douve", "dune", "eclair",
+	"ecluse", "ecorce", "ecureuil", "eglantine", "encrier", "enclume",
+	"epine", "erable", "escabeau", "escalier", "estuaire", "etable",
+	"etendard", "etoile", "etourneau", "falaise", "fanion", "faucille",
+	"fenetre", "fermette", "feuillage", "figuier", "filet", "flacon",
+	"flamant", "fontaine", "forge", "fougere", "foulard", "fourmi",
+	"framboise", "fresque", "frelon", "fromage", "fusain", "gabarit",
+	"galerie", "galet", "garrigue", "gaufre", "gazelle", "geranium",
+	"gibier", "girafe", "girouette", "glacier", "glycine", "goeland",
+	"gourde", "goutte", "grange", "grelot", "grenier", "grillon",
+	"groseille", "guepe", "guirlande", "hameau", "harpe", "hermine",
+	"heron", "hetre", "hibou", "horloge", "houblon", "huitre",
+	"ilot", "jachere", "jardin", "jasmin", "jonquille", "jumelle",
+	"laiton", "lampion", "lanterne", "lavande", "levrier", "libellule",
+	"lichen", "limace", "linotte", "lisiere", "lucarne", "lucine",
+	"luge", "lupin", "lutrin", "maillet", "manoir", "marbre",
+	"mariniere", "marmite", "marronnier", "martinet", "massif", "melange",
+	"menhir", "merisier", "meuniere", "mirabelle", "moineau", "moisson",
+	"molene", "moulin", "mousse", "muguet", "muraille", "myrtille",
+	"narcisse", "navette", "nenuphar", "niche", "noisette", "nougat",
+	"oeillet", "olivier", "ombrelle", "orchidee", "orge", "ortie",
+	"oseille", "otarie", "ourlet", "oursin", "paillasse", "palissade",
+	"panier", "papyrus", "parasol", "parterre", "pastel", "pavillon",
+	"pecheur", "pelican", "pendule", "pergola", "perruche", "pervenche",
+	"petale", "phalene", "phoque", "pigeon", "pinceau", "pintade",
+	"pipeau", "pirogue", "plateau", "poirier", "polder", "pommier",
+	"portail", "poterie", "poulie", "prairie", "primevere", "pupitre",
+	"quenelle", "quetsche", "radeau", "ramure", "ravin", "refuge",
+	"reglisse", "remorque", "renard", "renoncule", "rigole", "rivage",
+	"rocaille", "romarin", "roseau", "rotonde", "rouleau", "ruban",
+	"ruche", "sablier", "safran", "salamandre", "sarcelle", "sarrasin",
+	"sauterelle", "savane", "sentier", "sequoia", "serviette", "sillon",
+	"sirene", "sorbier", "sureau", "tamis", "tanche", "tariere",
+	"terrasse", "thuya", "tilleul", "tisane", "torrent", "tourbiere",
+	"tournesol", "tremble", "tresor", "troene", "truelle", "tulipe",
+	"tuyau", "vanille", "vasque",
+}
+
+// passwordWordCount: four words, drawn independently, plus a two-digit
+// number. 321⁴ × 90 ≈ 9.6 × 10¹¹, or 39.8 bits — the same 300 attempts a
+// second now need a century.
+//
+// Four and not more because it is read down a telephone line: "abricot-
+// clocher-tilleul-rivage-42" is already at the edge of what someone writes
+// down correctly the first time. The lever pulled here is the LIST, not the
+// count of tokens.
+//
+// No lockout after N failures, and that is a choice rather than an omission:
+// it needs state shared by every replica, it turns a public unauthenticated
+// route into a write path, and — the reason that settles it — an account
+// that locks is an account that EXISTS. This package goes to the trouble of
+// a decoy hash so a wrong address costs the same time as a wrong password;
+// a lockout would give that away in one request.
+const passwordWordCount = 4
+
 // ReadablePassword: can be passed on by voice, no ambiguous characters.
-// The words stay French: the password is read aloud to French volunteers.
 func ReadablePassword() (string, error) {
-	words := strings.Split(
-		"colline|rivage|tilleul|sillon|clocher|verger|prairie|falaise", "|")
-	a, err := randomInt(len(words))
-	if err != nil {
-		return "", err
-	}
-	b, err := randomInt(len(words))
-	if err != nil {
-		return "", err
+	parts := make([]string, 0, passwordWordCount+1)
+	for range passwordWordCount {
+		i, err := randomInt(len(passwordWords))
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, passwordWords[i])
 	}
 	n, err := randomInt(90)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s-%s-%d", words[a], words[b], n+10), nil
+	return fmt.Sprintf("%s-%d", strings.Join(parts, "-"), n+10), nil
 }
 
 func randomInt(n int) (int, error) {

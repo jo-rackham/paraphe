@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +161,61 @@ func TestUnreadableHashReturnsError(t *testing.T) {
 	}
 }
 
+// The SIZE of the space, not the variety of fifty draws.
+//
+// The test this replaces asked for 40 distinct passwords out of 50, which
+// two words from a list of eight satisfy without effort — and that space is
+// 5,760 wide. One argon2id verification costs ~40 ms and hashGate allows
+// four at once, so three replicas answer ~300 attempts a second: the whole
+// space fell in nineteen seconds. A guard that a broken generator passes is
+// not a guard.
+//
+// Computed from the declarations rather than restated, so shrinking the list
+// or dropping a word fails HERE and not in a report nobody runs.
+func TestGeneratedPasswordsAreWorthSearching(t *testing.T) {
+	space := math.Pow(float64(len(passwordWords)), passwordWordCount) * 90
+	bits := math.Log2(space)
+	// 300 attempts a second is what this deployment answers, measured.
+	const attemptsPerSecond = 300
+	years := space / attemptsPerSecond / (3600 * 24 * 365)
+
+	t.Logf("%d words, %d drawn, plus a two-digit number: %.2e (%.1f bits), "+
+		"%.0f years at %d attempts/s", len(passwordWords), passwordWordCount,
+		space, bits, years, attemptsPerSecond)
+
+	if bits < 38 {
+		t.Errorf("a generated password is worth %.1f bits, so the whole space "+
+			"falls in %.0f days at %d attempts a second. argon2id makes each "+
+			"attempt expensive; it cannot make a small space large",
+			bits, years*365, attemptsPerSecond)
+	}
+}
+
+// A duplicated word is a word drawn twice as often, and it shrinks the space
+// silently — the count stays right and the arithmetic above stays wrong.
+func TestThePasswordAlphabetHasNoRepeats(t *testing.T) {
+	seen := map[string]int{}
+	for _, w := range passwordWords {
+		seen[w]++
+	}
+	for w, n := range seen {
+		if n > 1 {
+			t.Errorf("%q appears %d times", w, n)
+		}
+	}
+	// ASCII and lowercase: the password is read aloud and then TYPED, and a
+	// word whose accent must be guessed from speech is a word half the team
+	// gets wrong.
+	for _, w := range passwordWords {
+		for _, r := range w {
+			if r < 'a' || r > 'z' {
+				t.Errorf("%q is not plain lowercase ASCII", w)
+				break
+			}
+		}
+	}
+}
+
 func TestReadablePassword(t *testing.T) {
 	seen := map[string]bool{}
 	for range 50 {
@@ -167,12 +223,13 @@ func TestReadablePassword(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(m) < 12 {
-			t.Errorf("password too short: %q", m)
+		if strings.Count(m, "-") != passwordWordCount {
+			t.Fatalf("password does not carry %d words and a number: %q",
+				passwordWordCount, m)
 		}
 		seen[m] = true
 	}
-	if len(seen) < 40 {
+	if len(seen) < 50 {
 		t.Errorf("only %d distinct passwords out of 50: suspicious draw",
 			len(seen))
 	}
