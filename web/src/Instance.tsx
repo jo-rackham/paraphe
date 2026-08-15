@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import * as API from "./api.ts";
 import {
   Alerte,
+  CompteurResultats,
   Hexagone,
   PiedDePage,
   RenderGuard,
@@ -325,11 +326,7 @@ function Annuaire() {
             />
           </label>
         </p>
-        {/* one node, updated in place: a live region announces reliably
-            only when its content changes inside an existing element */}
-        <p className="gris" role="status">
-          {shown.length}/{campaigns.length} campagne(s)
-        </p>
+        <CompteurResultats shown={shown.length} total={campaigns.length} />
         <ul>
           {shown.map((c) => (
             <li key={c.slug}>
@@ -361,6 +358,7 @@ function AdministrationSignIn({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return; // aria-disabled greys the button but keeps it live
     setError(null);
     setSending(true);
     try {
@@ -408,7 +406,7 @@ function AdministrationSignIn({
             />
           </label>
         </p>
-        <button type="submit" disabled={sending}>
+        <button type="submit" aria-disabled={sending || undefined}>
           {sending ? "Connexion…" : "Se connecter"}
         </button>
       </form>

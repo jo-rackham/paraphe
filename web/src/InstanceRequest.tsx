@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as API from "./api.ts";
-import { Alerte } from "./common.tsx";
+import { Alerte, rescueFocusAfterCommit } from "./common.tsx";
 import type { InstanceConfig } from "./types.ts";
 
 export function Demande({ config }: { config: InstanceConfig }) {
@@ -18,7 +18,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
     return (
       <div className="carte">
         <h2>Demande enregistrée</h2>
-        <p>{sent}</p>
+        <p role="status">{sent}</p>
       </div>
     );
   }
@@ -37,6 +37,10 @@ export function Demande({ config }: { config: InstanceConfig }) {
         message: pitch.trim(),
         listed,
       });
+      // the whole form — the pressed button included — is replaced by the
+      // confirmation: focus would fall to <body> and the next Tab restart
+      // at the skip link
+      rescueFocusAfterCommit();
       setSent(rep.message);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

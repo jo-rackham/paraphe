@@ -190,7 +190,10 @@ test.describe
       await expect(
         page.getByRole("link", { name: "Campagne ouverte en direct" }),
       ).toBeVisible();
-      await expect(page.getByText("1/2 campagne(s)")).toBeVisible();
+      // the shared counter: ONE node whose text settles 400 ms after the
+      // last keystroke, so a screen reader hears the result and not the
+      // stream of numbers on the way to it
+      await expect(page.getByText("1 affiché(s) sur 2.")).toBeVisible();
     });
 
     test("the instance administrator never sees a campaign's work", async ({

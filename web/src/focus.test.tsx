@@ -18,8 +18,9 @@ import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
 import { Alerte, RenderGuard, resetViewMemory } from "./common.tsx";
 import * as DB from "./db.ts";
+import Instance from "./Instance.tsx";
 import Team from "./Team.tsx";
-import type { Message, ServerConfig } from "./types.ts";
+import type { InstanceConfig, Message, ServerConfig } from "./types.ts";
 
 vi.mock("./db.ts", { spy: true });
 
@@ -36,6 +37,15 @@ const CONFIG: ServerConfig = {
   no_account: false,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
   ranks: [{ key: "has_endorsed", label: "A parrainé" }],
+};
+
+const INSTANCE_CONFIG: InstanceConfig = {
+  mode: "instance",
+  base_domain: "paraphe.test",
+  source_url: "",
+  browser_version_url: "",
+  no_account: false,
+  campaign_keys: CAMPAIGN_KEYS,
 };
 
 let container: HTMLDivElement;
@@ -193,6 +203,101 @@ describe("focus survives the control's own destruction", () => {
     // the list replaced the Accueil (the counter itself settles later —
     // it starts empty by doctrine)
     expect(container.textContent).toContain("Sainte-Fiction-1");
+    expect(document.activeElement?.id).toBe("contenu");
+  });
+
+  it("Administration: the apex sign-in obeys the same rule as every other submit", async () => {
+    vi.mocked(API.me).mockRejectedValueOnce(
+      Object.assign(new Error("non connecté"), { code: 401 }),
+    );
+    // never settles: the button stays busy for the assertion
+    vi.mocked(API.signIn).mockReturnValueOnce(new Promise<never>(() => {}));
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    // « Se connecter » names both the link to the sign-in and its submit
+    const versConnexion = [...container.querySelectorAll("button.lien")].find(
+      (b) => b.textContent?.includes("Se connecter"),
+    );
+    expect(versConnexion).toBeDefined();
+    await click(versConnexion as Element);
+    await flush();
+
+    const [email, password] = container.querySelectorAll("input");
+    const set = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      set?.call(email, "admin@exemple.fr");
+      email.dispatchEvent(new Event("input", { bubbles: true }));
+      set?.call(password, "mdp");
+      password.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const submit = container.querySelector(
+      "button[type=submit]",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      submit.focus();
+    });
+    await act(async () => {
+      submit.form?.requestSubmit(submit);
+    });
+    await flush();
+
+    expect(submit.textContent).toContain("Connexion…");
+    expect(submit.disabled).toBe(false);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(submit);
+  });
+
+  it("Demande: a request accepted replaces the whole form — focus is rescued", async () => {
+    vi.mocked(API.me).mockRejectedValueOnce(
+      Object.assign(new Error("non connecté"), { code: 401 }),
+    );
+    vi.mocked(API.requestCampaign).mockResolvedValueOnce({
+      id: 1,
+      slug: "ma-campagne",
+      message: "Demande enregistrée.",
+    });
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    const versDemande = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Demander"),
+    );
+    await click(versDemande as Element);
+    await flush();
+
+    const set = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      for (const input of container.querySelectorAll("input[required]")) {
+        set?.call(input, "ma-campagne");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    const submit = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Envoyer"),
+    ) as HTMLButtonElement;
+    await act(async () => {
+      submit.focus();
+    });
+    await act(async () => {
+      submit.form?.requestSubmit(submit);
+    });
+    // the rescue waits for React's commit, then checks again 60 ms later
+    for (const ms of [5, 40, 80]) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, ms));
+      });
+    }
+
+    expect(container.textContent).toContain("Demande enregistrée");
     expect(document.activeElement?.id).toBe("contenu");
   });
 
