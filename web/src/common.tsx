@@ -976,13 +976,15 @@ export function Fiche({
       {notes.length > 0 && (
         <div className="carte">
           <h2 style={{ marginTop: 0 }}>Historique</h2>
-          {/* The history is append-only and rendered whole, in order:
-              nothing is inserted, removed or reordered, which is the case
-              the rule exists for. Two notes can share a timestamp, so the
-              index is the only key here that is actually unique. */}
+          {/* The history arrives newest first, in both modes: the server
+              orders by id DESC, the browser prepends. A plain index would
+              shift on every addition; the DISTANCE FROM THE OLDEST end is
+              what stays with a note as the list grows at the front. Two
+              notes can share a timestamp, so no field of the note itself
+              is unique. */}
           {notes.map((n, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: append-only, never reordered
-            <div className="note-item" key={i}>
+            // biome-ignore lint/suspicious/noArrayIndexKey: reverse index — stable under prepend, and no field of a note is unique
+            <div className="note-item" key={notes.length - i}>
               <span className="gris">
                 {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
                 {n.volunteer ? ` — ${n.volunteer}` : ""}
