@@ -489,6 +489,8 @@ var queryCalls = map[string]bool{
 // build()` puts two names on the left, which the collector below ignores.
 func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	scoped := map[string]string{}
+	// one application per STATEMENT per pass
+	applied := map[ast.Node]bool{}
 	for k, v := range values {
 		scoped[k] = v
 	}
@@ -517,7 +519,26 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	// built from another — `base := "SELECT …"` then `sql := base + filter`.
 	// Resolving against the package map alone left the second unreadable, and
 	// an unreadable statement is one the canary passes over.
+	// Every name that `+=` accumulates into. Each pass must start it from
+	// nothing: the `:=` before it is replayed and resets it, but `var sql
+	// string`, a parameter or a multi-name `:=` leaves nothing to replay,
+	// and the text then piled up once per pass — the canary judged a
+	// statement three times over and refused a legitimate query.
+	accumulated := map[string]bool{}
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if a, ok := n.(*ast.AssignStmt); ok && a.Tok.String() == "+=" &&
+			len(a.Lhs) == 1 {
+			if id, ok := a.Lhs[0].(*ast.Ident); ok {
+				accumulated[id.Name] = true
+			}
+		}
+		return true
+	})
 	for range 3 {
+		clear(applied)
+		for name := range accumulated {
+			delete(scoped, name)
+		}
 		ast.Inspect(fn, func(n ast.Node) bool {
 			a, ok := n.(*ast.AssignStmt)
 			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
@@ -532,6 +553,16 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 				return true
 			}
 			if a.Tok.String() == "+=" {
+				// bounded per STATEMENT, not per name. Per name, a second
+				// `+=` on the same variable was dropped in silence; with no
+				// bound at all, a `+=` whose `:=` is not replayed each pass
+				// — `var sql string`, `sql, err := build()`, a parameter, a
+				// struct field — accumulated three times, and the canary
+				// then refused a legitimate query nobody wrote that way.
+				if applied[a] {
+					return true
+				}
+				applied[a] = true
 				// `+=` accumulates. What must not happen twice is ONE
 				// statement being applied twice in one pass; ast.Inspect
 				// already visits each node exactly once, and the `:=` before
@@ -1158,10 +1189,25 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 // expression and reads nothing like them. Kept beside the test that uses it
 // so a shape added here is a shape the guard sees.
 func buildsAQuery(n ast.Node) bool {
+	// `[]query{{…}}` and `map[string]query{…}` elide the element type on the
+	// INNER literal — its Type is nil — so reading only `query{…}` saw
+	// neither. The container is what names the type, and it is what is
+	// matched here.
+	namesQuery := func(e ast.Expr) bool {
+		id, ok := e.(*ast.Ident)
+		return ok && id.Name == "query"
+	}
 	switch e := n.(type) {
 	case *ast.CompositeLit:
-		id, ok := e.Type.(*ast.Ident)
-		return ok && id.Name == "query"
+		switch t := e.Type.(type) {
+		case *ast.Ident:
+			return t.Name == "query"
+		case *ast.ArrayType: // []query{…} and [N]query{…}
+			return namesQuery(t.Elt)
+		case *ast.MapType: // map[K]query{…}
+			return namesQuery(t.Value)
+		}
+		return false
 	case *ast.CallExpr:
 		fn, ok := e.Fun.(*ast.Ident)
 		if !ok || fn.Name != "new" || len(e.Args) != 1 {
