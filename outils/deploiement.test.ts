@@ -224,7 +224,14 @@ describe("the deployment files", () => {
     for (const name of readdirSync(templates).filter((f) =>
       f.endsWith(".yaml"),
     )) {
-      const text = readFileSync(join(templates, name), "utf8");
+      // Comments are STRIPPED first. A search for the setting's text found
+      // it in `# TODO: enableServiceLinks: false`, so deleting the field and
+      // leaving a comment behind kept the guard green — the repository's own
+      // rule, paid twice already: mutate by DELETION, never by commenting.
+      const text = readFileSync(join(templates, name), "utf8").replace(
+        /^[^\S\n]*#.*$/gm,
+        "",
+      );
       // a pod template of OUR making: `spec.template.spec`. CNPG's Cluster
       // draws its own pods and takes no such field.
       for (const doc of text.split(/^---$/m)) {
@@ -254,11 +261,23 @@ describe("the deployment files", () => {
       join(ROOT, "chart", "paraphe", "Chart.yaml"),
       "utf8",
     );
+    // Comments stripped: a single legal comment line between `preStop:` and
+    // `sleep:` broke the adjacency, the gate returned, and the whole check
+    // was skipped in silence — a guard that examines nothing is worse than
+    // none, because it reads as green.
     const deployment = readFileSync(
       join(ROOT, "chart", "paraphe", "templates", "deployment.yaml"),
       "utf8",
-    );
-    if (!/preStop:\s*\n\s*sleep:/.test(deployment)) return; // no sleep, no floor
+    ).replace(/^[^\S\n]*#.*$/gm, "");
+    // …and the absence of the field is asserted, never assumed: `return`
+    // here used to mean "nothing to check", which is what a reformatting
+    // turned into "nothing was checked".
+    const hasSleep = /preStop:\s*(?:\n\s*)+sleep:/.test(deployment);
+    expect(
+      hasSleep,
+      "the Deployment no longer drains through preStop.sleep: drop the " +
+        "kubeVersion floor with it, knowingly, or put the field back",
+    ).toBe(true);
     const floor = /^kubeVersion:\s*">=(\d+)\.(\d+)\./m.exec(chart);
     expect(floor, "the chart declares no kubeVersion floor").toBeTruthy();
     const [major, minor] = [Number(floor![1]), Number(floor![2])];
