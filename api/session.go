@@ -160,7 +160,16 @@ func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, bool) {
 	return s.verify(c.Value, now)
 }
 
+// maxToken bounds what is hashed. HMAC-SHA512 runs over the whole cookie
+// BEFORE anything is parsed, and a cookie is up to 4 kB per browser but
+// nothing stops a scripted client sending a megabyte of them: the signature
+// check would then be the amplifier. A real token is under 400 bytes.
+const maxToken = 4096
+
 func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
+	if len(token) > maxToken {
+		return "", 0, false
+	}
 	// Exactly three segments. Counting "at least three" is how a fourth one
 	// gets ignored, and a JWS with a fourth segment is not a JWS.
 	parts := strings.Split(token, ".")
@@ -191,6 +200,14 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
 	if err := dec.Decode(&cl); err != nil {
 		return "", 0, false
 	}
+	// A second document after the claims is not part of them. Decode stops
+	// at the end of the first value and says nothing about what follows, so
+	// `{...}{"iss":"elsewhere"}` passed with the first object read and the
+	// second ignored — DisallowUnknownFields guards the inside of the
+	// object, not what comes after it.
+	if dec.More() {
+		return "", 0, false
+	}
 
 	if cl.Iss != jwtIssuer || cl.Sub == "" {
 		return "", 0, false
@@ -198,7 +215,12 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
 	if cl.Exp == 0 || now.Unix() >= cl.Exp {
 		return "", 0, false
 	}
-	if cl.Iat == 0 || time.Unix(cl.Iat, 0).After(now.Add(jwtSkew)) {
+	// Bounded on BOTH sides. `iat` at MaxInt64 overflows time.Unix into a
+	// date in the past, so the "not in the future" check passed and the
+	// token read as issued long ago. A token issued before its own expiry
+	// is the only shape that means anything.
+	if cl.Iat <= 0 || cl.Iat >= cl.Exp ||
+		time.Unix(cl.Iat, 0).After(now.Add(jwtSkew)) {
 		return "", 0, false
 	}
 	org, err := strconv.Atoi(cl.Aud)

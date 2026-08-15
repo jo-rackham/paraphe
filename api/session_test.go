@@ -175,12 +175,49 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 		// a claim this code does not know was minted by something else
 		"an unknown claim": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
 			ok(`,"role":"coordination"`), []byte(key)),
+		// DisallowUnknownFields guards the INSIDE of the object; Decode
+		// stops at the end of the first value and says nothing about what
+		// follows it
+		"a second document after the claims": jwt(t,
+			`{"alg":"HS512","typ":"JWT"}`,
+			ok("")+`{"iss":"ailleurs"}`, []byte(key)),
+		// time.Unix overflows on MaxInt64 into a date in the PAST, so the
+		// "not issued in the future" check passed
+		"issued at the end of time": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
+			`{"iss":"paraphe","sub":"marie@exemple.fr","aud":"1","exp":`+
+				strconv.FormatInt(exp, 10)+`,"iat":9223372036854775807}`, []byte(key)),
+		"issued after its own expiry": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
+			`{"iss":"paraphe","sub":"marie@exemple.fr","aud":"1","exp":`+
+				strconv.FormatInt(exp, 10)+`,"iat":`+
+				strconv.FormatInt(exp+1, 10)+`}`, []byte(key)),
+		"issued at zero": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
+			`{"iss":"paraphe","sub":"marie@exemple.fr","aud":"1","exp":`+
+				strconv.FormatInt(exp, 10)+`,"iat":0}`, []byte(key)),
 		"claims are not an object": jwt(t,
 			`{"alg":"HS512","typ":"JWT"}`, `"marie@exemple.fr"`, []byte(key)),
 	} {
 		if _, _, accepted := s.verify(token, t0); accepted {
 			t.Errorf("%s: token accepted", name)
 		}
+	}
+}
+
+// The signature runs over the WHOLE cookie before anything is parsed, so an
+// unbounded one makes the verification the amplifier. A browser caps a
+// cookie at about 4 kB; a scripted client caps nothing.
+func TestSessionRefusesAnOversizedToken(t *testing.T) {
+	s := NewSessions([]byte("test key"))
+	t0 := time.Unix(1786000000, 0)
+	token, err := s.mint("marie@exemple.fr", 1, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(token) > maxToken/4 {
+		t.Errorf("a real token is %d bytes, close to the %d-byte bound: the "+
+			"bound is no longer generous", len(token), maxToken)
+	}
+	if _, _, ok := s.verify(token+strings.Repeat("A", maxToken), t0); ok {
+		t.Error("a megabyte of padding was hashed and read")
 	}
 }
 

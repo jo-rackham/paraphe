@@ -124,8 +124,13 @@ func run() error {
 	// container has a DSN and nothing else, and must not be refused for a
 	// setting it does not need.
 	if *waitFlag > 0 {
-		return waitForDatabase(ctx, strings.TrimSpace(
-			os.Getenv("PARAPHE_DATABASE_URL")), *waitFlag)
+		// Get and not os.Getenv: the whole point of the settings table is
+		// that a flag beats the environment, and reading the variable
+		// directly here made `-database-url` silently do nothing in the one
+		// mode where an operator is most likely to type it by hand. The
+		// file layer is not loaded yet, so this resolves flag > env >
+		// default — which is exactly what an init container has.
+		return waitForDatabase(ctx, Get("database_url"), *waitFlag)
 	}
 	// Resolved ONCE, and the same value locates the server block and the
 	// campaign. Read twice, `-config-dir` moved one and not the other: the

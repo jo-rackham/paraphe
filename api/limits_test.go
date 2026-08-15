@@ -115,6 +115,32 @@ func stringValues(files map[string]*ast.File) map[string]string {
 				}
 			}
 		}
+		// …and a FUNCTION whose whole body is `return <string>` is a binding
+		// too, under its own name.
+		//
+		// Without this, `assignmentJoin("$1")` read as `"$1"` — the argument
+		// and nothing else. That call carries the most-used join in the
+		// package, `FROM mayors m LEFT JOIN assignments t ON … AND t.org_id
+		// = …`, and the canary saw a statement with no FROM clause at all:
+		// no walled table, no rule, silence. Deleting the org_id condition
+		// from the join would have gone entirely unnoticed, and that
+		// condition IS the wall for every screen that lists mayors.
+		for _, file := range files {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil || len(fn.Body.List) != 1 ||
+					fn.Recv != nil {
+					continue
+				}
+				ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+				if !ok || len(ret.Results) != 1 {
+					continue
+				}
+				if text := sqlText(ret.Results[0], known); text != "" {
+					known[fn.Name.Name] = text
+				}
+			}
+		}
 	}
 	return known
 }

@@ -43,9 +43,15 @@ var (
 	// A predicate whose RIGHT-hand side is bounded. The equality alone is not
 	// enough: `org_id = org_id`, `org_id = COALESCE($1, org_id)` and
 	// `org_id = ANY(SELECT id FROM orgs)` all mean "every campaign".
+	//
+	// `\bORG_ID\b`, and the word boundary is not decoration: without the
+	// leading one, `WHERE parent_org_id = $1` matched on its tail and read
+	// as an unqualified campaign predicate — a column that names a parent
+	// row, vouching for the wall. orgIDWord, three declarations below, has
+	// always had it.
 	orgPredicate = regexp.MustCompile(
-		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID(?:::[A-Z]+)?\s*=\s*` +
-			`(\$SUB\d+|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
+		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?\bORG_ID\b(?:::[A-Z]+)?\s*=\s*` +
+			`(\$SUB\d+|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?\bORG_ID\b)`)
 	// Predicates that are always true, whatever else the statement says.
 	neutralised = regexp.MustCompile(`\bOR\s+(TRUE|1\s*=\s*1)\b`)
 	// A statement whose TABLE is a format verb: which table it reads cannot
@@ -81,8 +87,16 @@ var (
 	// What makes a resolved string a statement rather than a value. Session
 	// commands count: `SET lock_timeout` reads no table, but it IS the
 	// statement of its call.
+	//
+	// It is also the GATE of the main test, so every verb the rules below
+	// know must be here: destructiveRef learned REINDEX, CLUSTER and REVOKE
+	// and this pattern had not, so those three statements were dropped
+	// before the rule that exists for them ever ran. The rule passed its own
+	// unit test and guarded nothing. TestEveryDestructiveVerbReachesTheRules
+	// ties the two together.
 	sqlVerb = regexp.MustCompile(
-		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP|GRANT|TRUNCATE)\b`)
+		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP` +
+			`|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO)\b`)
 )
 
 // normaliseSQL: what the canary reads. Comments and string literals are
@@ -178,6 +192,15 @@ func sqlTextMarked(expr ast.Expr, values map[string]string) string {
 	case *ast.ParenExpr:
 		return sqlTextMarked(e.X, values)
 	case *ast.CallExpr:
+		// A call to a package function whose whole body returns a string IS
+		// that string. `assignmentJoin("$1")` read as its argument alone,
+		// and the join it builds — the wall of every mayor listing —
+		// vanished from what the canary examined.
+		if id, ok := e.Fun.(*ast.Ident); ok {
+			if text, known := values[id.Name]; known && text != "" {
+				return text
+			}
+		}
 		// fmt.Sprintf and friends: the format string plus its arguments is
 		// as close to the statement as source can get.
 		var out string
@@ -460,6 +483,14 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	// Resolving against the package map alone left the second unreadable, and
 	// an unreadable statement is one the canary passes over.
 	for range 3 {
+		// Reset EVERY pass. Carried across, the second pass re-ran the `:=`
+		// that precedes the `+=` — overwriting the accumulated text — and
+		// then skipped the `+=` itself as already applied. `sql := base`
+		// followed by `sql += " OR TRUE"` came out as `base` alone: the
+		// canary read a walled query while the driver ran an always-true
+		// disjunction. The map bounds the appending WITHIN a pass, which is
+		// all it was ever for.
+		clear(appended)
 		ast.Inspect(fn, func(n ast.Node) bool {
 			a, ok := n.(*ast.AssignStmt)
 			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
@@ -474,9 +505,9 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 				return true
 			}
 			if a.Tok.String() == "+=" {
-				// `+=` accumulates, so a second pass over the same statement
-				// would append its text twice and invent a query nobody
-				// wrote. Applied once, on the first pass only.
+				// `+=` accumulates, so meeting the same statement twice in
+				// one pass would append its text twice and invent a query
+				// nobody wrote.
 				if !appended[id.Name] {
 					appended[id.Name] = true
 					scoped[id.Name] += txt
