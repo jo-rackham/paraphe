@@ -13,6 +13,12 @@ spec:
   {{- with .Values.postgres.cnpg.imageName }}
   imageName: {{ . | quote }}
   {{- end }}
+  {{- with .Values.postgres.cnpg.inheritedLabels }}
+  # carried onto every object the operator creates, pods included — the
+  # door for platform labels a webhook reads (image caching opt-outs...)
+  inheritedMetadata:
+    labels: {{- toYaml . | nindent 6 }}
+  {{- end }}
 
   # the operator creates the database, the application role, and the
   # "<cluster>-app" secret holding the full DSN (key "uri")

@@ -30,6 +30,9 @@ postgres:
     instances: 3
     # laisser vide = image par défaut de l'opérateur
     imageName: ""
+    # étiquettes héritées par tous les objets de l'opérateur, pods compris —
+    # la porte pour les étiquettes de plateforme qu'un webhook lit
+    inheritedLabels: {}
     storage:
       size: 8Gi
       storageClass: ""
