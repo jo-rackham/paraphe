@@ -51,7 +51,7 @@ confidentiality, and the interface says so. For a campaign of several dozen
 people, the server version avoids duplicates — the worst possible misstep with
 an elected official.
 
-The browser version loads the **priority list** (1,972 mayors, 139 kB) by
+The browser version loads the **priority list** (1,959 mayors, 139 kB) by
 default and offers the **full base** (34,826 mayors, 2 MB) in one click. You
 can also load your own file: the published lists are a convenience, they age,
 and `task all` regenerates them.
@@ -69,7 +69,7 @@ devbox install && task
 | `task all` | downloads the open sources and builds every list |
 | `task messages` | generates the mailing (CSV emails, HTML letters) |
 | `task build` | crosses the sources again without re-downloading |
-| `task db` | starts PostgreSQL locally (required by `task api`) |
+| `task db` | starts PostgreSQL and Valkey locally (both required by `task api`) |
 | `task api` | runs the team API on http://127.0.0.1:8047 |
 | `task web` | the interface in development (http://127.0.0.1:5180) |
 | `task test` | every test: tools and core (TS), API (Go), interface (TS) |

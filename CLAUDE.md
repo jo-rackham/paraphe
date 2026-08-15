@@ -282,9 +282,14 @@ refuses to open rather than let anyone in.
 - `PARAPHE_INSTANCE_ADMIN_*` bootstrap the instance administration.
   The session cookie is always `Secure`, `HttpOnly` and `SameSite=Lax`, none
   of them configurable: a setting is one an operator can get wrong once, in
-  the direction where nothing appears to break. `PARAPHE_SECRET_KEY`
-  is mandatory on a multi-campaign instance; otherwise a random secret is
-  drawn at first start and kept in the database. The session is a **JWT
+  the direction where nothing appears to break. `PARAPHE_SECRET_KEY`, when
+  supplied, is **refused below 32 bytes** — it signs every session, and one
+  captured cookie turns a short key into an offline search; unset, a random
+  secret is drawn at first start and kept in the database. **The chart, on
+  the other hand, requires it**: rendered client-side (`helm template`,
+  ArgoCD by default) it cannot read the Secret already in place, so drawing
+  one would mint a new one at every sync and sign everyone out. The session
+  is a **JWT
   (HS512) in that cookie**: symmetric, so post-quantum by construction, and
   the margin is bounded by the KEY — 64 bytes, hence ~256 bits after Grover.
   The verifier never READS `alg`, it compares the header byte for byte, which

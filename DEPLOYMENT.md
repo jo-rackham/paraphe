@@ -6,8 +6,11 @@
 cp .env.exemple .env            # then fill in: secrets, database password,
                                 # campaign identity
 task build                      # (re)generates the embedded mayor list
-docker compose up -d --build    # PostgreSQL + both images, on :8047
+docker compose up -d --build    # PostgreSQL, Valkey and the app, on :8047
 ```
+
+Three containers: PostgreSQL, Valkey (the shared rate-limit counters) and
+**one** application image, which serves the pages and the JSON alike.
 
 The application is **stateless**: accounts, assignments, statuses and notes
 all live in PostgreSQL. That is what lets it run as several instances — and
@@ -46,11 +49,13 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_CONTACT_PHONE` / `_EMAIL` / `PARAPHE_SITE` | campaign contact details |
 | `PARAPHE_SENDING_CITY` | the place in the letter's dateline |
 | `PARAPHE_BATCH_SIZE` | mayors handed out per "take a batch" (default 10) |
-| `PARAPHE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | coordination account, created or refreshed at every start — **mandatory at first launch** |
-| `PARAPHE_SECRET_KEY` | session signing secret — `openssl rand -hex 64` |
+| `PARAPHE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | coordination account, created at first launch and its password refreshed at every start — **mandatory at first launch**. A deactivated account is NOT switched back on: the password an incident revoked stays revoked |
+| `PARAPHE_SECRET_KEY` | session signing secret — `openssl rand -hex 64`. Refused below 32 bytes: it signs every session, and a short one falls to an offline search on a single captured cookie |
+| `PARAPHE_LOG_LEVEL` | `debug`, `info` (default), `warn` or `error`. Panics, 500s and refused waves are logged at `warn` or above, so they survive any level an operator picks |
 | `PARAPHE_SOURCE_URL` | public repository URL: shows "source code" in the footer |
 | `PARAPHE_BROWSER_VERSION_URL` | URL of the account-less browser version offered on the instance home page — defaults to the self-hosted `/navigateur/` when the image serves one; set to point elsewhere |
 | `PARAPHE_BROWSER_WEB_DIR` | build of the browser version served under `/navigateur/` (the image sets it; empty serves none) |
+| `PARAPHE_WEB_DIR` | the interface the binary serves (the image sets it). Unreadable, **the start fails** — one image serves the pages and the JSON, so a 404 on every page while `/api` answers is what a probe calls healthy and a volunteer calls a blank screen. Set explicitly empty, it means "JSON only" |
 | `PARAPHE_DATABASE_URL` | PostgreSQL DSN — **mandatory**, the app refuses to start without it |
 | `PARAPHE_HOST` / `PARAPHE_PORT` | listening interface and port |
 | `PARAPHE_BASE_DOMAIN` | domain of the campaign subdomains — **empty = a single campaign** (see below) |
@@ -58,7 +63,7 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_INSTANCE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | instance administration: approves hosting requests. Required in multi-campaign mode |
 | `PARAPHE_VALKEY_URL` | shared rate-limit counters: `valkey://host:6379`, or `valkey+sentinel://h1:26379,h2:26379,h3:26379/paraphe`. Empty = counted in process memory, which is exact for ONE replica and says so at startup |
 | `PARAPHE_VALKEY_PASSWORD` | Valkey password — never inside the URL, which travels in process lists and deployment files |
-| `PARAPHE_TRUSTED_PROXIES` | CIDRs whose `X-Forwarded-For` is believed (your TLS proxy, the ingress). Empty = every request is attributed to its TCP peer — behind a proxy, everyone then shares one counter |
+| `PARAPHE_TRUSTED_PROXIES` | CIDRs whose `X-Forwarded-For` is believed (your TLS proxy, the ingress). Empty = every request is attributed to its TCP peer — behind a proxy, everyone then shares one counter. `docker-compose.yml` and the chart both set the private ranges; **set it yourself only when running the binary directly** behind a proxy |
 
 A variable left unset falls back to the embedded `campagne.yaml` (or to
 `config/campagne.local.yaml`, git-ignored, if you prefer a file).
@@ -96,7 +101,9 @@ the others.
   reserved by another team are refused (403). Campaign counters (statuses,
   departments covered) stay visible to everyone, **with no names**.
 - Deactivating an account takes effect at the next request, without waiting
-  for a sign-out.
+  for a sign-out — **and it survives a restart**, including for the account
+  `PARAPHE_ADMIN_EMAIL` seeds. Startup then refuses rather than serve a
+  campaign whose only coordination is switched off.
 
 ## Data and backup
 
@@ -165,8 +172,27 @@ helm upgrade --install paraphe chart/paraphe \
   --set instance.admin.email=admin@paraphe.fr \
   --set secrets.instanceAdminPassword="$(openssl rand -hex 24)" \
   --set secrets.adminPassword="$(openssl rand -hex 24)" \
-  --set secrets.secretKey="$(openssl rand -hex 32)"
+  --set secrets.secretKey="$(openssl rand -hex 32)" \
+  --set secrets.valkeyPassword="$(openssl rand -hex 24)" \
+  --set postgres.cnpg.backup.enabled=true \
+  --set postgres.cnpg.backup.s3CredentialsSecret=paraphe-s3
 ```
+
+**The chart refuses to render** without `secrets.secretKey`,
+without `secrets.valkeyPassword` (while `valkey.enabled`), and with
+CloudNativePG but no backup. The first two because it cannot draw them
+itself: rendered client-side — `helm template`, and ArgoCD by default — it
+cannot read the Secret already in place, so a random fallback would mint a
+NEW one at every sync, signing every volunteer out and leaving the
+application and the Valkey pods refusing each other's password. The third
+because a database with no base backup AND no WAL archiving loses the only
+irreplaceable thing here; if durability is covered elsewhere (Velero,
+storage snapshots), say so with
+`--set postgres.cnpg.backup.acknowledgedDisabled=true`.
+
+Passing them through a `Secret` you manage yourself — ExternalSecret,
+SealedSecret, SOPS — is `--set secrets.existingSecret=<name>`, and the keys
+it must carry are listed in `values.yaml`.
 
 On the infrastructure side:
 
@@ -210,11 +236,22 @@ what, who is hesitating, who refused. Hence HTTPS, named accounts, encrypted
 backups if they leave the server, and deleting the notes when the campaign
 ends.
 
-**Rate limits** guard the doors: sign-in per source and per submitted
-address, the public hosting form, the anonymous reads, the authenticated
-writes and the CSV export each have a ceiling, generous enough that a
-campaign office behind one NAT never meets them. The ceilings are constants,
-not settings. With several replicas the counters must be shared or every
+**Rate limits** guard the doors, generously enough that a campaign office
+behind one NAT never meets them. Each refusal logs its class, so a `429` a
+volunteer reports is read straight off `rate_limited class=…`:
+
+| class | ceiling | keyed on |
+|---|---|---|
+| `signin_ip` | 60 / 10 min | source |
+| `signin_account` | 10 / 15 min | submitted address |
+| `hosting_ip` | 3 / hour | source |
+| `anon_ip` | 120 / min | source |
+| `write_account` | 120 / min | account |
+| `export_account` | 6 / 10 min | account |
+
+The ceilings are constants, not settings: one an operator can raise under
+pressure is one raised on the night it was protecting something. With
+several replicas the counters must be shared or every
 ceiling silently multiplies: that is what Valkey is for — one node in the
 compose file, a three-node Sentinel group in the chart, automatic failover.
 Its content is disposable TTL'd counters, so it has **no volume anywhere**:
