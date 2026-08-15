@@ -241,7 +241,11 @@ refuses to open rather than let anyone in.
   of them configurable: a setting is one an operator can get wrong once, in
   the direction where nothing appears to break. `PARAPHE_SECRET_KEY`
   is mandatory on a multi-campaign instance; otherwise a random secret is
-  drawn at first start and kept in the database. The repository's example
+  drawn at first start and kept in the database. The session is a **JWT
+  (HS512) in that cookie**: symmetric, so post-quantum by construction, and
+  the margin is bounded by the KEY — 64 bytes, hence ~256 bits after Grover.
+  The verifier never READS `alg`, it compares the header byte for byte, which
+  is what rules out `alg:none`, HS/RS confusion and `kid`/`jku` injection. The repository's example
   values are refused at startup — they are public.
 - **Real values never go in a versioned file**: `.env` (compose) and
   `config/campagne.local.yaml` are ignored; `docker-compose.yml` and

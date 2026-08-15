@@ -110,7 +110,11 @@ func SessionSecret(ctx context.Context, pool *pgxpool.Pool) ([]byte, error) {
 		"key TEXT PRIMARY KEY, value TEXT)"); err != nil {
 		return nil, fmt.Errorf("creating the settings table: %w", err)
 	}
-	raw := make([]byte, 32)
+	// 64 bytes, not 32: the post-quantum margin of an HMAC is bounded by the
+	// KEY, not by the digest. Grover searches a k-bit key in 2^(k/2), so 512
+	// bits of key keep ~256 where 256 bits keep ~128. Both are ample; this
+	// one costs 32 bytes.
+	raw := make([]byte, 64)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, fmt.Errorf("drawing the session secret: %w", err)
 	}

@@ -122,7 +122,7 @@ secrets:
   # instance.baseDomain est renseigné : sans lui, les demandes d'hébergement
   # s'accumulent sans que personne puisse les valider.
   instanceAdminPassword: ""
-  # 32+ octets aléatoires (openssl rand -hex 32). En HA, le poser
+  # 64 octets aléatoires (openssl rand -hex 64). En HA, le poser
   # explicitement : sinon la première instance démarrée en tire un et
   # l'enregistre en base, ce qui fonctionne mais rend les sessions
   # dépendantes de l'ordre de démarrage.
