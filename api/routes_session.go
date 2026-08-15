@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -91,7 +91,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 		// an unreadable hash is an operations problem, not a typing error:
 		// it is logged in full. Telling the client would reveal that the
 		// account exists.
-		log.Printf("unusable hash for %q: %v", email, verifyErr)
+		slog.Error("unusable password hash", "email", email, "error", verifyErr)
 		good = false
 	}
 	if !found || !good {
@@ -134,13 +134,13 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	// improvement into an outage. The old hash still verifies.
 	if NeedsRehash(stored) {
 		if fresh, hashErr := HashPassword(d.Password); hashErr != nil {
-			log.Printf("hash not upgraded for %q: %v", email, hashErr)
+			slog.Warn("password hash not upgraded", "email", email, "error", hashErr)
 		} else if _, execErr := s.tx(r).Exec(r.Context(),
 			"UPDATE accounts SET password_hash=$3 WHERE org_id=$1 AND email=$2",
 			scopeOrg(r), email, fresh); execErr != nil {
-			log.Printf("hash not upgraded for %q: %v", email, execErr)
+			slog.Warn("password hash not upgraded", "email", email, "error", execErr)
 		} else if commitErr := s.commit(r); commitErr != nil {
-			log.Printf("hash not upgraded for %q: %v", email, commitErr)
+			slog.Warn("password hash not upgraded", "email", email, "error", commitErr)
 		}
 	}
 	if err := s.sessions.Set(w, email, currentOrg(r), s.now()); err != nil {

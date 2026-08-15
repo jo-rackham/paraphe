@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"math"
 	"net"
 	"os"
@@ -146,7 +147,7 @@ func InitDatabase(ctx context.Context, pool *pgxpool.Pool, csvPath string,
 	}
 	defer c.Release()
 
-	log.Print("import: waiting for the lock…")
+	slog.Info("import: waiting for the lock")
 	// outside the transaction: otherwise the snapshot is frozen at lock
 	// acquisition, hence BEFORE the wait, and the next instance works on a
 	// stale view
@@ -154,7 +155,7 @@ func InitDatabase(ctx context.Context, pool *pgxpool.Pool, csvPath string,
 		return err
 	}
 	defer releaseLock(ctx, c, ImportLock)
-	log.Print("import: lock acquired")
+	slog.Info("import: lock acquired")
 
 	tx, err := c.Begin(ctx)
 	if err != nil {

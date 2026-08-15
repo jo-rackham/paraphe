@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -100,10 +101,50 @@ func gzipBytes(raw []byte) ([]byte, error) {
 }
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.LUTC)
 	if err := run(); err != nil {
-		log.Fatalf("paraphe: %v", err)
+		slog.Error("paraphe stopped", "error", err)
+		os.Exit(1)
 	}
+}
+
+// setupLogging: JSON on stdout, one object per line.
+//
+// The twelfth-factor point is not the format for its own sake — the service
+// already wrote to stdout and let the platform collect it. It is that a
+// collector can then FILTER: a `level` to alert on, a `time` to correlate
+// across three pods, and a message that stays one field however many commas
+// it contains. A grep over free text does none of that, and the lines this
+// service emits are French sentences with quotes in them.
+//
+// The standard logger is redirected into the same handler rather than each
+// of its call sites being rewritten. `log.Printf` in this package, in pgx,
+// or in anything else, lands in the same stream with the same shape; the
+// sites that carry values worth querying use slog directly.
+func setupLogging() {
+	level := slog.LevelInfo
+	if err := level.UnmarshalText([]byte(Get("log_level"))); err != nil {
+		// Said, not swallowed: a misspelt level would otherwise silently
+		// mean "info" and an operator would conclude the setting does
+		// nothing.
+		defer func() {
+			slog.Warn("unreadable log level, using info",
+				"value", Get("log_level"), "error", err)
+		}()
+		level = slog.LevelInfo
+	}
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+	log.SetFlags(0)
+	log.SetOutput(logWriter{})
+}
+
+// logWriter sends the standard logger's lines through slog, so a package
+// that knows nothing of this one still lands in the same stream.
+type logWriter struct{}
+
+func (logWriter) Write(p []byte) (int, error) {
+	slog.Info(strings.TrimRight(string(p), "\n"))
+	return len(p), nil
 }
 
 // waitFlag: init-container mode. Without this wait, the instances restart
@@ -116,6 +157,10 @@ func run() error {
 	DeclareFlags(flag.CommandLine)
 	flag.Parse()
 	AdoptFlags(flag.CommandLine)
+	// After AdoptFlags, so that `-log-level` is one: set up before it, the
+	// flag layer does not exist yet and the flag would silently do nothing
+	// — the same shape as `config_dir` resolved twice.
+	setupLogging()
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -234,7 +279,7 @@ func run() error {
 
 	done := make(chan error, 1)
 	go func() {
-		log.Printf("paraphe: http://%s", addr)
+		slog.Info("listening", "address", addr, "interface", s.webDir != "")
 		err := srv.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -246,7 +291,7 @@ func run() error {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		log.Print("shutdown requested, finishing in-flight requests…")
+		slog.Info("shutdown requested, finishing in-flight requests")
 		// long enough for a running export to finish
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()

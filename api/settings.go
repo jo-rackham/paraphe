@@ -42,6 +42,16 @@ type Setting struct {
 	// preference: it is what LOCATES the file, so reading it from there
 	// would require already knowing it.
 	NoFile bool
+	// Blankable: an EMPTY value, given explicitly, is a value.
+	//
+	// Off by default, and that default is the safe one: `PARAPHE_HOST=` in
+	// a generated .env would otherwise resolve to an empty listening
+	// address, which is every interface rather than the loopback the
+	// default names. It is on for `web_dir` alone, where empty means
+	// "serve no pages" — the escape hatch of a start that otherwise fails
+	// on an unreadable interface, and the shape a developer has before
+	// their first `task web-build`.
+	Blankable bool
 }
 
 var Settings = []Setting{
@@ -59,7 +69,8 @@ var Settings = []Setting{
 	{Key: "csv", Env: "PARAPHE_CSV", Flag: "csv",
 		Default: "out/04_base_complete.csv", Help: "the mayor list to import"},
 	{Key: "web_dir", Env: "PARAPHE_WEB_DIR", Flag: "web-dir", Default: "web/dist",
-		Help: "built interface to serve; empty means answer JSON only"},
+		Blankable: true,
+		Help:      "built interface to serve; set empty to answer JSON only"},
 	{Key: "base_domain", Env: "PARAPHE_BASE_DOMAIN", Flag: "base-domain",
 		Help: "domain of the campaign subdomains; empty means a single campaign"},
 	{Key: "org_slug", Env: "PARAPHE_ORG_SLUG", Flag: "org-slug",
@@ -84,6 +95,8 @@ var Settings = []Setting{
 		Help: "instance administration display name"},
 	{Key: "batch_size", Env: "PARAPHE_BATCH_SIZE", Flag: "batch-size",
 		Help: "mayors handed out per batch; overrides the campaign file"},
+	{Key: "log_level", Env: "PARAPHE_LOG_LEVEL", Flag: "log-level",
+		Default: "info", Help: "debug, info, warn or error"},
 }
 
 // fromFile: the `server:` block, read once at startup. Empty until then, so
@@ -124,13 +137,21 @@ func Get(key string) string {
 		if s.Key != key {
 			continue
 		}
+		// A layer that was TOUCHED answers, empty included, when the setting
+		// says an empty value means something. Otherwise an empty layer
+		// falls through — which is what makes `PARAPHE_BATCH_SIZE=` in a
+		// generated .env mean "leave it alone" rather than "zero".
 		if flagTyped[s.Flag] {
-			if v := strings.TrimSpace(*flagValues[s.Key]); v != "" {
+			v := strings.TrimSpace(*flagValues[s.Key])
+			if v != "" || s.Blankable {
 				return v
 			}
 		}
-		if v := strings.TrimSpace(os.Getenv(s.Env)); v != "" {
-			return v
+		if raw, set := os.LookupEnv(s.Env); set {
+			v := strings.TrimSpace(raw)
+			if v != "" || s.Blankable {
+				return v
+			}
 		}
 		if v := strings.TrimSpace(fromFile[s.Key]); v != "" {
 			return v

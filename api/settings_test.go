@@ -136,6 +136,59 @@ func TestSettingPrecedence(t *testing.T) {
 	})
 }
 
+// An empty value is a value where the setting says so, and falls through
+// everywhere else.
+//
+// `web_dir` empty means "serve no pages", and it is the escape hatch of a
+// start that otherwise FAILS on an unreadable interface — a developer before
+// their first `task web-build` has nothing else. It was unreachable: the
+// resolution treated every empty layer as absent, so an explicitly empty
+// PARAPHE_WEB_DIR resolved to the default `web/dist` and the hatch did not
+// open. Meanwhile `PARAPHE_HOST=` in a generated .env must NOT resolve to an
+// empty listening address, which is every interface rather than the loopback
+// the default names.
+func TestAnEmptyValueCountsOnlyWhereItMeansSomething(t *testing.T) {
+	t.Run("web_dir empty is web_dir empty", func(t *testing.T) {
+		saveSettingsState(t)
+		t.Setenv("PARAPHE_WEB_DIR", "")
+		if got := Get("web_dir"); got != "" {
+			t.Errorf("an explicitly empty web_dir resolved to %q: the "+
+				"start fails on a missing interface and nothing opts out", got)
+		}
+	})
+
+	t.Run("web_dir untouched is the default", func(t *testing.T) {
+		saveSettingsState(t)
+		if got := Get("web_dir"); got != "web/dist" {
+			t.Errorf("Get(web_dir) = %q, want the default", got)
+		}
+	})
+
+	t.Run("an empty host is not every interface", func(t *testing.T) {
+		saveSettingsState(t)
+		t.Setenv("PARAPHE_HOST", "")
+		if got := Get("host"); got != "127.0.0.1" {
+			t.Errorf("Get(host) = %q — an empty listening address binds every "+
+				"interface, where the default names the loopback", got)
+		}
+	})
+
+	t.Run("a typed empty flag counts too", func(t *testing.T) {
+		saveSettingsState(t)
+		t.Setenv("PARAPHE_WEB_DIR", "/quelque/part")
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		DeclareFlags(fs)
+		if err := fs.Parse([]string{"-web-dir="}); err != nil {
+			t.Fatalf("parsing: %v", err)
+		}
+		AdoptFlags(fs)
+		if got := Get("web_dir"); got != "" {
+			t.Errorf("`-web-dir=` resolved to %q: an operator cannot turn the "+
+				"pages off for one run", got)
+		}
+	})
+}
+
 // config_dir is what says where the file is, so reading it FROM that file
 // would require already knowing it. It used to be resolved twice — once by
 // `env()` for the server block, once by `Get` for the campaign — and
