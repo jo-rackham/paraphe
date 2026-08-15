@@ -147,6 +147,37 @@ tr.inactif td { color: var(--texte-sec); }
 .groupe:first-child { margin-top: 0; }
 .aide { display: block; margin-top: .25rem; }
 .grand-tel { font-size: 1.5rem; font-weight: 700; margin: .2rem 0; }
+/* why this mayor: the one line that justifies the whole card */
+.pourquoi { border-left: 4px solid var(--jaune); padding: .1rem .8rem;
+            margin: .1rem 0 .7rem; }
+/* The card's status bar: pinned to the viewport bottom until its place in
+   the flow is reached — recording a call must not require scrolling past
+   sixteen rows of email. scroll-padding keeps it from covering what the
+   keyboard focuses near the page bottom. */
+html { scroll-padding-bottom: 8rem; }
+.barre-statut { position: sticky; bottom: 0; z-index: 5;
+  background: var(--carte); border: 1px solid var(--trait);
+  border-radius: .6rem .6rem 0 0; box-shadow: 0 -3px 10px rgba(0,0,0,.07);
+  padding: .5rem .8rem calc(.6rem + env(safe-area-inset-bottom, 0px));
+  margin-top: 1rem; }
+.barre-statut .champs { display: flex; flex-wrap: wrap; gap: .4rem .8rem;
+  align-items: end; }
+.barre-statut label { font-size: .85rem; color: var(--texte-sec); }
+.barre-statut select, .barre-statut textarea { display: block;
+  font-size: 1rem; color: var(--texte); margin-top: .15rem; }
+.barre-statut select { width: auto; max-width: 17rem; }
+.barre-statut .note { flex: 1; min-width: 12rem; }
+/* on a phone the bar must stay a sliver: status and save on one line, the
+   note folded to a single line that opens under the finger */
+@media (max-width: 640px) {
+  .barre-statut { padding-left: .6rem; padding-right: .6rem; }
+  .barre-statut .champs { gap: .3rem .6rem; }
+  .barre-statut select { flex: 1; max-width: none; width: 100%; }
+  .barre-statut label:first-child { flex: 1; }
+  .barre-statut .note { flex-basis: 100%; order: 3; }
+  .barre-statut textarea { height: 2.4rem; }
+  .barre-statut textarea:focus { height: 5.5rem; }
+}
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);
@@ -192,7 +223,8 @@ footer .officiel { border: 1px solid var(--trait);
   form.enligne > div { min-width: 0; flex: 1 1 45%; }
   form.enligne > div:has(input[type="text"]) { flex-basis: 100%; }
 }
-@media print { header, footer, .rayures, .tricolore, details summary { display: none } }
+@media print { header, footer, .rayures, .tricolore, details summary,
+               .barre-statut { display: none } }
 
 /* GUIDE.md rendu dans l'application : la même source que le dépôt. */
 .guide h1 { font-size: 1.5rem; }

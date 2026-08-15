@@ -730,7 +730,7 @@ export function Fiche({
       {header}
 
       <div className="carte">
-        <p style={{ margin: ".2rem 0" }}>
+        <p className="pourquoi">
           <strong>Pourquoi cette personne :</strong>{" "}
           {rank === "has_endorsed" ? (
             `a parrainé ${
@@ -753,7 +753,15 @@ export function Fiche({
         <p className="grand-tel">
           <Emoji>☎ </Emoji>
           <span className="sr-only">Téléphone : </span>
-          {mayor.phone || "non renseigné"}
+          {mayor.phone ? (
+            // tel: carries only digits (and a leading +): the display
+            // keeps the printed spacing, the link is what a phone dials
+            <a href={`tel:${mayor.phone.replace(/[^+\d]/g, "")}`}>
+              {mayor.phone}
+            </a>
+          ) : (
+            "non renseigné"
+          )}
         </p>
         <p style={{ margin: ".2rem 0" }}>
           <strong>Ouverture :</strong>{" "}
@@ -870,12 +878,40 @@ export function Fiche({
         </>
       )}
 
-      <div className="carte">
-        <h2 style={{ marginTop: 0 }}>Après le contact</h2>
+      {notes.length > 0 && (
+        <div className="carte">
+          <h2 style={{ marginTop: 0 }}>Historique</h2>
+          {/* The history is append-only and rendered whole, in order:
+              nothing is inserted, removed or reordered, which is the case
+              the rule exists for. Two notes can share a timestamp, so the
+              index is the only key here that is actually unique. */}
+          {notes.map((n, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: append-only, never reordered
+            <div className="note-item" key={i}>
+              <span className="gris">
+                {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
+                {n.volunteer ? ` — ${n.volunteer}` : ""}
+              </span>
+              {n.note && (
+                <>
+                  <br />
+                  {n.note}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sticky: the outcome of a contact is recorded WHILE on the phone,
+          and these controls sat below sixteen rows of email. Last in the
+          flow, pinned to the viewport bottom until scrolled to — same
+          controls, same state, nothing is duplicated. */}
+      <section className="barre-statut" aria-label="Après le contact">
         <Alerte
           message={statusError ? { tone: "erreur", text: statusError } : null}
         />
-        <p>
+        <div className="champs">
           <label>
             Statut
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -886,50 +922,24 @@ export function Fiche({
               ))}
             </select>
           </label>
-        </p>
-        <p>
-          <label>
+          <label className="note">
             Note
             <textarea
-              rows={3}
+              rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
           </label>
-        </p>
-        <button type="button" onClick={save} disabled={saving}>
-          {saving ? "Enregistrement…" : "Enregistrer"}
-        </button>{" "}
-        {/* always in the tree: a live region announces reliably only when
-            its CONTENT changes, not when it appears with it */}
-        <span role="status" className="gris">
-          {saved ? "Enregistré." : ""}
-        </span>
-        {notes.length > 0 && (
-          <>
-            <h2>Historique</h2>
-            {/* The history is append-only and rendered whole, in order:
-                nothing is inserted, removed or reordered, which is the case
-                the rule exists for. Two notes can share a timestamp, so the
-                index is the only key here that is actually unique. */}
-            {notes.map((n, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only, never reordered
-              <div className="note-item" key={i}>
-                <span className="gris">
-                  {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
-                  {n.volunteer ? ` — ${n.volunteer}` : ""}
-                </span>
-                {n.note && (
-                  <>
-                    <br />
-                    {n.note}
-                  </>
-                )}
-              </div>
-            ))}
-          </>
-        )}
-      </div>
+          <button type="button" onClick={save} disabled={saving}>
+            {saving ? "Enregistrement…" : "Enregistrer"}
+          </button>{" "}
+          {/* always in the tree: a live region announces reliably only when
+              its CONTENT changes, not when it appears with it */}
+          <span role="status" className="gris">
+            {saved ? "Enregistré." : ""}
+          </span>
+        </div>
+      </section>
     </>
   );
 }

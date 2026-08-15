@@ -1,8 +1,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Alerte } from "./common.tsx";
-import type { Message } from "./types.ts";
+import { Alerte, EMPTY_CFG, Fiche } from "./common.tsx";
+import type { Mayor, Message } from "./types.ts";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,5 +56,43 @@ describe("Alerte", () => {
     show({ tone: "erreur", text: "Écriture refusée." }, onClose);
     act(() => vi.advanceTimersByTime(60_000));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("Fiche", () => {
+  const MAYOR: Mayor = {
+    insee_code: "01001",
+    commune: "Artemare",
+    department: "Ain",
+    last_name: "DESCHAMPS",
+    first_name: "Roland",
+    title: "M.",
+    phone: "04 79 87 32 64",
+    email: "mairie@artemare.fr",
+  };
+
+  const render = (mayor: Mayor) =>
+    act(() => {
+      root.render(
+        <Fiche
+          mayor={mayor}
+          cfg={EMPTY_CFG}
+          onBack={() => {}}
+          onStatus={() => {}}
+        />,
+      );
+    });
+
+  it("the phone dials: a tel: link carrying digits only", () => {
+    render(MAYOR);
+    const link = container.querySelector<HTMLAnchorElement>('a[href^="tel:"]');
+    expect(link?.getAttribute("href")).toBe("tel:0479873264");
+    expect(link?.textContent).toBe("04 79 87 32 64");
+  });
+
+  it("no phone, no link — the absence is written out", () => {
+    render({ ...MAYOR, phone: "" });
+    expect(container.querySelector('a[href^="tel:"]')).toBeNull();
+    expect(container.textContent).toContain("non renseigné");
   });
 });
