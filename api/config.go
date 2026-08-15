@@ -133,7 +133,7 @@ func LoadConfig(dir string) (*Config, error) {
 			cfg.Overrides[k] = v
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv("PARAPHE_BATCH_SIZE")); v != "" {
+	if v := strings.TrimSpace(Get("batch_size")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
 			return nil, fmt.Errorf("PARAPHE_BATCH_SIZE = %q: expected an integer", v)
@@ -141,7 +141,7 @@ func LoadConfig(dir string) (*Config, error) {
 		cfg.BatchSize = n
 		cfg.BatchSizeOverride = &n
 	}
-	cfg.SourceURL = strings.TrimSpace(os.Getenv("PARAPHE_SOURCE_URL"))
+	cfg.SourceURL = strings.TrimSpace(Get("source_url"))
 
 	var missing []string
 	for _, k := range CampaignKeys {
@@ -203,11 +203,4 @@ func UsableSecret(value, what string) (string, error) {
 			"(%q), which is public. Generate one: openssl rand -hex 32", what, v)
 	}
 	return v, nil
-}
-
-func env(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return fallback
 }

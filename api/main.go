@@ -83,25 +83,33 @@ var waitFlag = flag.Duration("attendre-base", 0,
 	"wait until PostgreSQL answers, then exit (init container)")
 
 func run() error {
+	DeclareFlags(flag.CommandLine)
 	flag.Parse()
+	AdoptFlags(flag.CommandLine)
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dsn := strings.TrimSpace(os.Getenv("PARAPHE_DATABASE_URL"))
-	if dsn == "" {
-		return errors.New(
-			"PARAPHE_DATABASE_URL is required (PostgreSQL). Example:\n" +
-				"  PARAPHE_DATABASE_URL=postgresql://paraphe:password@127.0.0.1:5432/paraphe\n" +
-				"Locally: `task db` starts a disposable database.")
-	}
+	// The waiting flag answers before anything is resolved: an init
+	// container has a DSN and nothing else, and must not be refused for a
+	// setting it does not need.
 	if *waitFlag > 0 {
-		return waitForDatabase(ctx, dsn, *waitFlag)
+		return waitForDatabase(ctx, strings.TrimSpace(
+			os.Getenv("PARAPHE_DATABASE_URL")), *waitFlag)
 	}
+	// Resolved ONCE, and the same value locates the server block and the
+	// campaign. Read twice, `-config-dir` moved one and not the other: the
+	// settings came from ./config and the campaign from elsewhere, in the
+	// same start.
+	configDir := Get("config_dir")
+	if err := CheckSettings(configDir); err != nil {
+		return fmt.Errorf("%w\nLocally: `task db` starts a disposable database.", err)
+	}
+	dsn := Get("database_url")
 	// non-strict on the app side: it stays explorable with the template
 	// configuration, but every page says so. The mass mailing, on the other
 	// hand, refuses to run.
-	cfg, err := LoadConfig(env("PARAPHE_CONFIG_DIR", "config"))
+	cfg, err := LoadConfig(configDir)
 	if err != nil {
 		return err
 	}
@@ -117,12 +125,12 @@ func run() error {
 	defer pool.Close()
 
 	bootstrapSlug := strings.ToLower(strings.TrimSpace(
-		env("PARAPHE_ORG_SLUG", "campaign")))
+		Get("org_slug")))
 	if !ValidSlug(bootstrapSlug) {
 		return fmt.Errorf("PARAPHE_ORG_SLUG = %q: 2 to 63 characters, lowercase, "+
 			"digits and dashes, and not a reserved name", bootstrapSlug)
 	}
-	if err := InitDatabase(ctx, pool, env("PARAPHE_CSV", "out/04_base_complete.csv"),
+	if err := InitDatabase(ctx, pool, Get("csv"),
 		cfg, bootstrapSlug); err != nil {
 		return err
 	}
@@ -144,32 +152,27 @@ func run() error {
 	s := &Server{
 		pool:          pool,
 		cfg:           cfg,
-		sessions:      NewSessions(secret, os.Getenv("PARAPHE_HTTPS") != ""),
+		sessions:      NewSessions(secret, Get("https") != ""),
 		bootstrapSlug: bootstrapSlug,
 		decoyHash:     decoy,
 		now:           time.Now,
-		webDir:        env("PARAPHE_WEB_DIR", "web/dist"),
+		webDir:        Get("web_dir"),
 	}
-	// An EMPTY PARAPHE_WEB_DIR says there is no interface here on purpose:
-	// that is the deployed shape, where the interface is an image of its own
-	// serving the files and proxying /api back. Serving it from both would be
-	// a second copy nobody rebuilds. Unset, the default keeps `task api`
-	// serving a locally built web/dist, which is how development runs.
-	switch {
-	case s.webDir == "":
-		log.Print("no interface served here: the API answers JSON, and the " +
-			"interface image serves the pages")
-	default:
-		if landingPage, err := markInterface(s.webDir); err != nil {
-			log.Printf("interface missing or unreadable in %s (%v): the API "+
-				"answers, but no page is served. Build with `task web-build`, "+
-				"or point PARAPHE_WEB_DIR elsewhere.", s.webDir, err)
-		} else {
-			s.landingPage = landingPage
-		}
+	// No interface is the DEPLOYED shape: the interface image serves the
+	// pages and proxies /api back here, and serving them from both would be a
+	// second copy nobody rebuilds. It is also what a developer sees before
+	// the first `task web-build`. One message covers both, because nothing
+	// here can tell them apart — an environment variable set to the empty
+	// string reads exactly like one nobody set.
+	if landingPage, err := markInterface(s.webDir); err != nil {
+		log.Printf("no interface served here (%s: %v): this binary answers "+
+			"JSON. In a deployment the interface image serves the pages; "+
+			"locally, `task web-build` builds one.", s.webDir, err)
+	} else {
+		s.landingPage = landingPage
 	}
 
-	addr := env("PARAPHE_HOST", "127.0.0.1") + ":" + env("PARAPHE_PORT", "8047")
+	addr := Get("host") + ":" + Get("port")
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: securityHeaders(s.routes()),

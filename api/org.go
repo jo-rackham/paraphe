@@ -58,7 +58,7 @@ type Org struct {
 // small campaign must not have to set up a wildcard DNS to use the
 // application.
 func BaseDomain() string {
-	return normaliseHost(env("PARAPHE_BASE_DOMAIN", ""))
+	return normaliseHost(Get("base_domain"))
 }
 
 // HostScope: what a Host header designates.

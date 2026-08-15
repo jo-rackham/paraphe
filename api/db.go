@@ -85,7 +85,7 @@ func releaseLock(ctx context.Context, c *pgxpool.Conn, key int) {
 // provided by the environment, or drawn at random once and kept, so
 // sessions survive restarts.
 func SessionSecret(ctx context.Context, pool *pgxpool.Pool) ([]byte, error) {
-	provided, err := UsableSecret(os.Getenv("PARAPHE_SECRET_KEY"), "PARAPHE_SECRET_KEY")
+	provided, err := UsableSecret(Get("secret_key"), "PARAPHE_SECRET_KEY")
 	if err != nil {
 		return nil, err
 	}
@@ -506,15 +506,15 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 		return nil
 	}
 
-	email := strings.ToLower(strings.TrimSpace(os.Getenv("PARAPHE_ADMIN_EMAIL")))
-	password, err := UsableSecret(os.Getenv("PARAPHE_ADMIN_PASSWORD"),
+	email := strings.ToLower(strings.TrimSpace(Get("admin_email")))
+	password, err := UsableSecret(Get("admin_password"),
 		"PARAPHE_ADMIN_PASSWORD")
 	if err != nil {
 		return err
 	}
 	if email != "" && password != "" {
 		if err := seedAccount(ctx, tx, bootstrapOrg, email,
-			env("PARAPHE_ADMIN_NAME", "Coordination"), password, RoleCoordination); err != nil {
+			Get("admin_name"), password, RoleCoordination); err != nil {
 			return err
 		}
 		log.Printf("coordination account: %s", email)
@@ -533,7 +533,7 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 		return fmt.Errorf("no coordination account, and none can be created: "+
 			"set PARAPHE_ADMIN_EMAIL and PARAPHE_ADMIN_PASSWORD (currently "+
 			"%q and %s). Without them nobody could ever sign in",
-			email, describeSecret(os.Getenv("PARAPHE_ADMIN_PASSWORD")))
+			email, describeSecret(Get("admin_password")))
 	}
 	if err != nil {
 		return fmt.Errorf("looking up a coordination account: %w", err)
@@ -554,8 +554,8 @@ func describeSecret(v string) string {
 // campaign requests, it does not read volunteers' notes.
 func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 	email := strings.ToLower(strings.TrimSpace(
-		os.Getenv("PARAPHE_INSTANCE_ADMIN_EMAIL")))
-	password, err := UsableSecret(os.Getenv("PARAPHE_INSTANCE_ADMIN_PASSWORD"),
+		Get("instance_admin_email")))
+	password, err := UsableSecret(Get("instance_admin_password"),
 		"PARAPHE_INSTANCE_ADMIN_PASSWORD")
 	if err != nil {
 		return err
@@ -578,7 +578,7 @@ func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 		return nil
 	}
 	if err := seedAccount(ctx, tx, OrgInstance, email,
-		env("PARAPHE_INSTANCE_ADMIN_NAME", "Administration"), password,
+		Get("instance_admin_name"), password,
 		RoleAdministration); err != nil {
 		return err
 	}
