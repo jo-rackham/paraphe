@@ -413,7 +413,8 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	if name == "" || coordination == "" || !strings.Contains(email, "@") {
 		errorJSON(w, http.StatusBadRequest,
-			"Le nom de la campagne, le nom et l'email de sa coordination sont requis.")
+			"Le nom de la campagne, ainsi que le nom et l'adresse email du "+
+				"compte de coordination, sont requis.")
 		return
 	}
 	if utf8.RuneCountInString(email) > maxEmailRunes {
@@ -424,8 +425,8 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(name) > maxNameRunes ||
 		utf8.RuneCountInString(coordination) > maxNameRunes {
 		errorJSON(w, http.StatusBadRequest,
-			"Le nom de la campagne et celui de sa coordination ne doivent pas "+
-				"dépasser 200 caractères.")
+			"Le nom de la campagne et celui du compte de coordination ne "+
+				"doivent pas dépasser 200 caractères.")
 		return
 	}
 	for k, v := range d.Campaign {
