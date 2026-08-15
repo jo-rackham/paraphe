@@ -67,7 +67,15 @@ jobs:
       - name: Workflows, shell scripts and Dockerfiles
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
-          docker run --rm -i hadolint/hadolint:v2.14.0-alpine < api/Dockerfile
+          # The repository is mounted and the path is passed, rather than the
+          # file being piped in: fed by stdin with nothing mounted, hadolint
+          # never saw .hadolint.yaml, so it ran at its DEFAULT threshold and
+          # failed the build on the one `info` that file exists to accept —
+          # SC2016, on a line whose single quotes are the whole point. Same
+          # class as the golangci-lint mount above: a linter enforcing
+          # something other than what the repository declares.
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            hadolint/hadolint:v2.14.0-alpine hadolint api/Dockerfile
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           # git ls-files respects .gitignore by construction, where a find
           # needs one exclusion per directory anybody ever creates

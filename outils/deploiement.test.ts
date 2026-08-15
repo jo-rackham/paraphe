@@ -179,6 +179,62 @@ describe("the deployment files", () => {
   // repository declares its own: the clone was green, the CI red, and the
   // release refused to publish over six findings .golangci.yml excludes on
   // purpose. Whatever is mounted has to contain the configuration.
+  // The same defect twice in one workflow: golangci-lint mounted api/ alone
+  // and missed .golangci.yml at the root; hadolint was PIPED the Dockerfile
+  // with nothing mounted and missed .hadolint.yaml entirely, so it ran at
+  // its default threshold and failed the build on the one `info` that file
+  // exists to accept. A containerised linter sees exactly what is mounted —
+  // so every one of them must have the repository under it.
+  it("give every containerised linter the repository to read", () => {
+    const ci = readFileSync(
+      join(ROOT, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    // the tools whose behaviour a file in this repository configures
+    const configured: Record<string, string> = {
+      "golangci-lint": ".golangci.yml",
+      hadolint: ".hadolint.yaml",
+      actionlint: ".github",
+    };
+    const blind: string[] = [];
+    let checked = 0;
+    for (const line of ci.split("\n")) {
+      if (!line.includes("docker run")) continue;
+      // the invocation may be wrapped over several lines; take the whole
+      // command by joining continuations
+      const start = ci.indexOf(line);
+      const command = ci
+        .slice(start)
+        .split("\n")
+        .reduce<string[]>((acc, l) => {
+          if (acc.length === 0 || acc[acc.length - 1].endsWith("\\")) {
+            acc.push(l.trim());
+          }
+          return acc;
+        }, [])
+        .join(" ")
+        .replace(/\\ /g, " ");
+      const tool = Object.keys(configured).find((t) => command.includes(t));
+      if (!tool) continue;
+      checked++;
+      if (!/-v\s+"\$PWD:/.test(command)) {
+        blind.push(`${tool}: ${configured[tool]} is not mounted`);
+      }
+      // piping the subject in leaves the tool with no directory to search
+      if (/<\s*\S+/.test(command)) {
+        blind.push(`${tool}: fed by stdin, so it reads no configuration`);
+      }
+    }
+    expect(
+      blind,
+      "these linters run on rules the repository does not declare",
+    ).toEqual([]);
+    expect(
+      checked,
+      "no containerised linter found: the check read nothing",
+    ).toBeGreaterThanOrEqual(3);
+  });
+
   it("lint with the configuration the repository declares", () => {
     const ci = readFileSync(
       join(ROOT, ".github", "workflows", "ci.yml"),
