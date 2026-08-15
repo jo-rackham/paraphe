@@ -15,11 +15,11 @@ import { RANKS } from "../noyau/messages.ts";
 import { ROOT } from "./config.ts";
 import { main as syntheticData } from "./faux-jeu.ts";
 
-/** The threshold below which the API refuses to import, read in api/db.go. */
+/** The threshold below which the API refuses to import, read in api/import.go. */
 function importThreshold(): number {
-  const source = readFileSync(join(ROOT, "api", "db.go"), "utf8");
+  const source = readFileSync(join(ROOT, "api", "import.go"), "utf8");
   const m = /len\(rows\) < (\d+)/.exec(source);
-  if (!m) throw new Error("import threshold not found in api/db.go");
+  if (!m) throw new Error("import threshold not found in api/import.go");
   return Number(m[1]);
 }
 
@@ -173,12 +173,13 @@ describe("the deployment files", () => {
   // router — the day it wraps something narrower, the pages lose their
   // policy again, which is exactly what splitting the images did once.
   it("wrap the whole router in the security headers", () => {
-    const go = readFileSync(join(ROOT, "api", "main.go"), "utf8");
+    const main = readFileSync(join(ROOT, "api", "main.go"), "utf8");
     expect(
-      go,
+      main,
       "the router is no longer wrapped in securityHeaders: whatever " +
         "it stops covering is served without a Content-Security-Policy",
     ).toMatch(/Handler:\s*securityHeaders\(s\.routes\(\)\)/);
+    const go = readFileSync(join(ROOT, "api", "router.go"), "utf8");
     const block = /const policy = ([\s\S]*?)\n\treturn /.exec(go);
     expect(
       block,
@@ -212,8 +213,8 @@ describe("the deployment files", () => {
   it("stamp the mode marker the interface looks for", () => {
     const marker = /<meta name="paraphe-mode" content="team">/;
     expect(
-      readFileSync(join(ROOT, "api/main.go"), "utf8"),
-      "api/main.go no longer carries the marker the interface reads",
+      readFileSync(join(ROOT, "api/pages.go"), "utf8"),
+      "api/pages.go no longer carries the marker the interface reads",
     ).toMatch(marker);
     // …and the interface still reads that attribute, under that name
     const reader = readFileSync(join(ROOT, "web", "src", "api.ts"), "utf8");

@@ -16,9 +16,9 @@ import {
   dedupeByInsee,
   keyAmong,
   personKey,
-  readStrict,
   type Target,
-} from "./build.ts";
+} from "./matching.ts";
+import { readStrict } from "./sources.ts";
 
 describe("the identity of an endorser", () => {
   const commune = { dept: "Vosges", commune: "Robécourt", lastName: "MARTIN" };

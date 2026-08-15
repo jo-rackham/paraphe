@@ -4,6 +4,11 @@
 // mayors who endorsed "small" candidates and are still in office, with their
 // contact details.
 //
+// The pieces live beside this file: sources.ts reads and validates the three
+// sources, matching.ts holds the identity rules. This file keeps the
+// classification — the definition of "small candidate", meant to be adjusted
+// here — and the crossing itself.
+//
 // Outputs in out/ (file names stay French — the campaign team opens them):
 //   01_maires_cibles_prioritaires.csv  mayors still in office (the target)
 //   02_anciens_parrains.csv            endorsers not found as mayors in 2026
@@ -13,25 +18,35 @@
 //
 // Run with `node outils/build.ts` — no compilation, no dependency.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseRecords, parseRows, writeCsv } from "../noyau/csv.ts";
-import { RANKS } from "../noyau/messages.ts";
+import { writeCsv } from "../noyau/csv.ts";
+import { proseName, RANKS } from "../noyau/messages.ts";
 import {
   closestMatch,
-  collapse,
   communeLabel,
   norm,
-  ratio,
-  sexFromTitle,
   stripControls,
-  titleCase,
 } from "../noyau/texte.ts";
+import { ROOT } from "./config.ts";
+import {
+  cmp,
+  compareIdentity,
+  dedupeByInsee,
+  keyAmong,
+  type Person,
+  type Target,
+} from "./matching.ts";
+import {
+  loadDirectory,
+  loadEndorsements,
+  loadRne,
+  type Official,
+  YEARS,
+} from "./sources.ts";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const RAW = join(ROOT, "data", "raw");
 const OUT = join(ROOT, "out");
 
 // ---------------------------------------------------------------------------
@@ -116,543 +131,6 @@ const DEMOCRATIC_THEME = [
   "TROADEC Christian", // decentralisation, local democracy
 ];
 
-const YEARS = [2022, 2017];
-const ENDORSEMENT_FILES: Record<number, string> = {
-  2022: join(RAW, "parrainages2022.csv"),
-  2017: join(RAW, "parrainages2017.csv"),
-};
-
-export interface Endorsement {
-  year: number;
-  civ: string;
-  lastName: string;
-  firstName: string;
-  office: string;
-  commune: string;
-  dept: string;
-  candidate: string;
-}
-
-interface Official {
-  dept: string;
-  insee: string;
-  commune: string;
-  lastName: string;
-  firstName: string;
-  sex: string;
-}
-
-interface Contact {
-  cardName: string;
-  email: string;
-  phone: string;
-  street: string;
-  zip: string;
-  city: string;
-  website: string;
-  contactForm: string;
-  hours: string;
-}
-
-interface Person {
-  civ: string;
-  lastName: string;
-  firstName: string;
-  commune: string;
-  dept: string;
-  office: string;
-  small: string[];
-  others: string[];
-  years: Set<number>;
-  score: number;
-  status?: string;
-  communeInsee?: string;
-  // normalised forms of the aggregation key: recomputing them from a
-  // concatenated key would be wrong, department and commune contain spaces
-  deptN: string;
-  communeN: string;
-}
-
-export interface Target extends Person {
-  rne: Official;
-  contact: Contact | undefined;
-  conf: string;
-}
-
-// STRICT decoding: `readFileSync(…, "utf8")` replaces an invalid byte with
-// U+FFFD without a word, and the corrupted commune name goes into the
-// outputs — relabelling the match with a wrong explanation along the way.
-// The sources already carry CP1252 leftovers: the raw byte is not a
-// hypothesis.
-export const readStrict = (path: string): string => {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path));
-  } catch (e) {
-    throw new Error(`${path} is not valid UTF-8: ${(e as Error).message}`);
-  }
-};
-
-/** Possibly missing or malformed JSON -> explicit fallback value. */
-function jsonOrDefault<T>(raw: string | undefined, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    // the directory embeds JSON inside a CSV: a malformed card is skipped,
-    // it must not stop the crossing of the 34,826 others
-    return fallback;
-  }
-}
-
-export function loadEndorsements(): Endorsement[] {
-  const rows: Endorsement[] = [];
-  for (const year of YEARS) {
-    const lines = parseRows(readStrict(ENDORSEMENT_FILES[year]));
-    checkHeader(`parrainages${year}.csv`, lines[0] ?? [], ENDORSEMENT_COLUMNS);
-    for (const r of lines.slice(1)) {
-      if (r.length < 8) continue;
-      rows.push({
-        year,
-        civ: r[0].trim(),
-        lastName: collapse(r[1]),
-        firstName: collapse(r[2]),
-        office: collapse(r[3]),
-        commune: collapse(r[4]),
-        dept: collapse(r[5]),
-        candidate: collapse(r[6]),
-      });
-    }
-  }
-  checkCivilities(rows);
-  // ~14,000 endorsements per year, all offices taken together
-  if (rows.length < 20000) {
-    throw new Error(
-      `only ${rows.length} endorsement(s) read across ${YEARS.length} years, ` +
-        "while ~27,700 are expected. Truncated source or changed format.",
-    );
-  }
-  return rows;
-}
-
-/**
- * The sex code is THE discriminant that decides Christian/Christine, and
- * `compareIdentity` silently disables it when the civility leaves the known
- * domain. The two files already spell it differently ("M" in 2017, "M." in
- * 2022): a "Mr" in 2027 would be enough to mail "you presented X" to the
- * namesake of the other sex. We refuse to proceed rather than disarm.
- */
-export function checkCivilities(rows: { civ: string }[]): void {
-  const unknown = new Map<string, number>();
-  for (const p of rows) {
-    if (sexFromTitle(p.civ) === null) {
-      unknown.set(p.civ, (unknown.get(p.civ) ?? 0) + 1);
-    }
-  }
-  if (!unknown.size) return;
-  const list = [...unknown].map(([v, n]) => `${JSON.stringify(v)} (${n})`);
-  throw new Error(
-    "civility outside the domain in the endorsement files: " +
-      `${list.join(", ")}. The sex code is the discriminant that tells two ` +
-      "namesakes apart; accepting it would silently disable it. Add the form " +
-      "to sexFromTitle() after checking.",
-  );
-}
-
-function loadRne(): {
-  byCommune: Map<string, Map<string, Official>>;
-  byPerson: Map<string, Official[]>;
-} {
-  const byCommune = new Map<string, Map<string, Official>>();
-  const byPerson = new Map<string, Official[]>();
-  const lines = parseRows(readStrict(join(RAW, "rne_maires.csv")));
-  checkHeader("rne_maires.csv", lines[0] ?? [], RNE_COLUMNS);
-  for (const r of lines.slice(1)) {
-    // Martinique, Guyane, Polynésie, Nouvelle-Calédonie and SPM have an
-    // EMPTY department label: their name is in the "special-status
-    // collectivity" column
-    const dept = collapse(r[1]) || collapse(r[3]);
-    const official: Official = {
-      dept,
-      insee: r[4],
-      commune: r[5],
-      lastName: collapse(r[6]),
-      firstName: collapse(r[7]),
-      sex: collapse(r[8]).toUpperCase(),
-    };
-    const d = norm(dept);
-    let communes = byCommune.get(d);
-    if (!communes) {
-      communes = new Map();
-      byCommune.set(d, communes);
-    }
-    communes.set(norm(official.commune), official);
-    const people = byPerson.get(d);
-    if (people) people.push(official);
-    else byPerson.set(d, [official]);
-  }
-  // A source that yields nothing is a source read wrong: without this
-  // floor, the crossing carries on and writes 34,826 rows of garbage.
-  if (byPerson.size < 90) {
-    throw new Error(
-      `rne_maires.csv yielded only ${byPerson.size} department(s), while ~104 ` +
-        "are expected. Truncated source or changed format.",
-    );
-  }
-  return { byCommune, byPerson };
-}
-
-interface OpeningRange {
-  nom_jour_debut?: string;
-  nom_jour_fin?: string;
-  [k: string]: string | undefined;
-}
-
-/** DILA plage_ouverture JSON -> 'Lun-Ven 09:00-12:00/14:00-17:00 ; Sam …'. */
-export function compactHours(raw: string): string {
-  const ranges = jsonOrDefault<OpeningRange[]>(raw, []);
-  const parts: string[] = [];
-  for (const p of ranges) {
-    const d1 = p.nom_jour_debut ?? "";
-    const d2 = p.nom_jour_fin ?? "";
-    const days =
-      !d2 || d1 === d2 ? d1.slice(0, 3) : `${d1.slice(0, 3)}-${d2.slice(0, 3)}`;
-    const hours: string[] = [];
-    for (const i of [1, 2]) {
-      const from = (p[`valeur_heure_debut_${i}`] ?? "").slice(0, 5);
-      const to = (p[`valeur_heure_fin_${i}`] ?? "").slice(0, 5);
-      if (from && to) hours.push(`${from}-${to}`);
-    }
-    if (days && hours.length) parts.push(`${days} ${hours.join("/")}`);
-  }
-  return parts.join(" ; ");
-}
-
-interface Value {
-  valeur?: string;
-}
-interface Address {
-  type_adresse?: string;
-  complement1?: string;
-  numero_voie?: string;
-  code_postal?: string;
-  nom_commune?: string;
-}
-
-// The RNE and the endorsement files are read BY POSITION: r[4] is the
-// commune, r[8] the sex code. That is the only way — the RNE header
-// carries no stable machine name — but it means a column inserted upstream
-// shifts everything by one, silently. Both datasets have already gained
-// columns once (the special-status collectivity pair). Checked at the
-// index the code actually reads, not merely present.
-export const RNE_COLUMNS: [number, string[]][] = [
-  [1, ["Libellé du département"]],
-  [3, ["Libellé de la collectivité à statut particulier"]],
-  [4, ["Code de la commune"]],
-  [5, ["Libellé de la commune"]],
-  [6, ["Nom de l'élu"]],
-  [7, ["Prénom de l'élu"]],
-  [8, ["Code sexe"]],
-];
-
-// The two years do not spell their last column the same way ("Candidat"
-// in 2022, "Candidat-e parrainé-e" in 2017): several spellings are
-// accepted, an unknown one is not.
-export const ENDORSEMENT_COLUMNS: [number, string[]][] = [
-  [0, ["Civilité"]],
-  [1, ["Nom"]],
-  [2, ["Prénom"]],
-  [3, ["Mandat"]],
-  [4, ["Circonscription"]],
-  [5, ["Département"]],
-  [6, ["Candidat", "Candidat-e parrainé-e"]],
-];
-
-export function checkHeader(
-  file: string,
-  header: string[],
-  expected: [number, string[]][],
-): void {
-  const wrong = expected
-    .filter(
-      ([i, names]) => !names.some((n) => norm(header[i] ?? "") === norm(n)),
-    )
-    .map(
-      ([i, names]) =>
-        `${i}: attendu ${names.map((n) => JSON.stringify(n)).join(" ou ")}, ` +
-        `trouvé ${JSON.stringify(header[i] ?? "")}`,
-    );
-  if (wrong.length) {
-    throw new Error(
-      `${file}: the columns have moved — ${wrong.join(" ; ")}. The file is ` +
-        "read by position: one column inserted upstream shifts the identity " +
-        "of every mayor.",
-    );
-  }
-}
-
-const DIRECTORY_COLUMNS = [
-  "pivot",
-  "code_insee_commune",
-  "nom",
-  "adresse_courriel",
-  "telephone",
-  "site_internet",
-  "adresse",
-  "formulaire_contact",
-  "plage_ouverture",
-];
-
-function loadDirectory(): Map<string, Contact> {
-  const contacts = new Map<string, Contact>();
-  const raw = readStrict(join(RAW, "annuaire_mairies.csv"));
-  // A column renamed upstream would drop EVERY card without an error: the
-  // only trace would be "email=0" at the end of a console line, and Pages
-  // would publish a list without a single contact.
-  const header = new Set(parseRows(raw)[0] ?? []);
-  const missing = DIRECTORY_COLUMNS.filter((c) => !header.has(c));
-  if (missing.length) {
-    throw new Error(
-      `columns missing from annuaire_mairies.csv: ${missing.join(", ")} — ` +
-        "the directory format changed, the crossing would produce cards " +
-        "without contact details.",
-    );
-  }
-  // one card per commune: the main town hall first — "Mairie déléguée -
-  // Pruillé" is shorter than "Mairie - Longuenée-en-Anjou" but it is not
-  // the right one
-  const rankCard = (name: string): [number, number] => {
-    const n = name.toLowerCase();
-    return [n.includes("délégu") || n.includes("annexe") ? 1 : 0, name.length];
-  };
-  const beforeOrEqual = (a: [number, number], b: [number, number]): boolean =>
-    a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
-
-  for (const r of parseRecords(raw)) {
-    const pivots = jsonOrDefault<{ type_service_local?: string }[]>(
-      r.pivot,
-      null as never,
-    );
-    if (pivots === null) continue;
-    const types = new Set(pivots.map((p) => p.type_service_local));
-    if (!types.has("mairie") && !types.has("mairie_com")) continue; // annexes, mobile town halls
-    const insee = (r.code_insee_commune ?? "").trim();
-    if (!insee) continue;
-    const existing = contacts.get(insee);
-    if (existing && beforeOrEqual(rankCard(existing.cardName), rankCard(r.nom)))
-      continue;
-
-    const phones = jsonOrDefault<Value[]>(r.telephone, []);
-    const sites = jsonOrDefault<Value[]>(r.site_internet, []);
-    const addresses = jsonOrDefault<Address[]>(r.adresse, []);
-    const addr =
-      addresses.find((a) => a.type_adresse === "Adresse") ?? addresses[0] ?? {};
-    contacts.set(insee, {
-      cardName: r.nom,
-      email: (r.adresse_courriel ?? "").trim(),
-      phone: phones[0]?.valeur ?? "",
-      street: [addr.complement1 ?? "", addr.numero_voie ?? ""]
-        .filter(Boolean)
-        .join(" ")
-        .trim(),
-      zip: addr.code_postal ?? "",
-      city: addr.nom_commune ?? "",
-      website: sites[0]?.valeur ?? "",
-      contactForm: (r.formulaire_contact ?? "").trim(),
-      hours: compactHours(r.plage_ouverture ?? ""),
-    });
-  }
-  // yield floor: ~34,800 communes have a card. A silent collapse deserves
-  // a halt.
-  if (contacts.size < 30000) {
-    throw new Error(
-      `annuaire_mairies.csv produced only ${contacts.size} contact card(s), ` +
-        "while ~34,800 are expected. Truncated source or changed format — " +
-        "without contacts the produced list is unusable.",
-    );
-  }
-  return contacts;
-}
-
-/**
- * 'ok' | 'unsure' | 'different'.
- *
- * Compares the WHOLE first-name string: reduced to the first token,
- * Marie-Cécile and Marie-Ève would become the same person. Truncation is
- * accepted (Jean-Louis ⊇ Louis, Don Philippe ⊇ Philippe), contradiction is
- * not.
- */
-export function compareFirstNames(a: string, b: string): string {
-  const ta = norm(a).split(" ").filter(Boolean);
-  const tb = norm(b).split(" ").filter(Boolean);
-  if (!ta.length || !tb.length) return "unsure";
-  const sa = new Set(ta);
-  const sb = new Set(tb);
-  const subset = (x: Set<string>, y: Set<string>) =>
-    [...x].every((v) => y.has(v));
-  if (subset(sa, sb) || subset(sb, sa)) return "ok";
-  // only common positions are compared: "Jean-Louis" and "Louis" do not
-  // have the same number of tokens
-  let worst = Infinity;
-  for (let i = 0; i < Math.min(ta.length, tb.length); i++) {
-    worst = Math.min(worst, ratio(ta[i], tb[i]));
-  }
-  if (worst >= 0.8) return "ok"; // Henry/Henri, Magali/Magalli
-  if (worst >= 0.6) return "unsure"; // Jacky/Jacquy: plausible, to check
-  return "different";
-}
-
-/**
- * Is the endorser the current mayor? 'ok' | 'unsure' | 'different'.
- *
- * The RNE sex code decides spousal or filial successions that spelling
- * alone conflates (Christian → Christine: ratio 0.89).
- */
-/**
- * The identity of an endorser, as the aggregation groups them. The first
- * name is PART of it: without it two namesakes of the same commune — a
- * predecessor and their successor, two spouses — merge into one person,
- * and the current mayor inherits the other's endorsements — five false
- * « merci pour votre parrainage » on the real data.
- *
- * Grouped on the FIRST TOKEN, because one person is written two ways
- * across the two years — « Jean-Claude » in 2017 and « Jean-Claude
- * Raymond » in 2022, both real, both the mayor of Villautou. Keying on
- * the whole first name splits them and loses a real endorsement.
- *
- * Which leaves Jean-Louis and Jean-Marc DUPONT sharing a token: that is
- * what `discriminator` is for — the caller passes it when the full names
- * CONTRADICT, and the two records stay apart. Truncation groups,
- * contradiction separates, exactly as compareFirstNames decides it
- * everywhere else.
- */
-export function personKey(
-  p: { dept: string; commune: string; lastName: string; firstName: string },
-  discriminator = "",
-): string {
-  return JSON.stringify([
-    norm(p.dept),
-    norm(p.commune),
-    norm(p.lastName),
-    norm(p.firstName).split(" ").filter(Boolean)[0] ?? "",
-    discriminator,
-  ]);
-}
-
-/** How well a match is established; 0 is the best. */
-export function confidenceRank(conf: string): number {
-  return (
-    ["exact", "commune approchée", "retrouvé par nom"].indexOf(conf) + 1 ||
-    Number.MAX_SAFE_INTEGER
-  );
-}
-
-/**
- * One row per INSEE. A commune's name spelt differently between 2017 and
- * 2022 (compound, accents) yields two rows for one person — merge. At
- * equal INSEE with DIFFERENT first names it is a matching bug, and it
- * throws: a duplicated INSEE in the output is a mayor thanked for a
- * stranger's endorsement.
- */
-export function dedupeByInsee(rows: Target[]): {
-  kept: Target[];
-  mergedSpellings: number;
-} {
-  const byInsee = new Map<string, Target>();
-  let mergedSpellings = 0;
-  for (const r of rows) {
-    const k = r.rne.insee;
-    const target = byInsee.get(k);
-    if (!target) {
-      byInsee.set(k, r);
-      continue;
-    }
-    if (compareFirstNames(target.firstName, r.firstName) === "different") {
-      throw new Error(
-        `two different people matched onto INSEE ${k}: ` +
-          `${target.firstName} ${target.lastName} / ${r.firstName} ${r.lastName}`,
-      );
-    }
-    mergedSpellings++;
-    // The survivor keeps the BEST-established match, not the first one
-    // read: two records of one person can be matched differently — the
-    // commune spelt as signed in one year and found by fuzzy fallback in
-    // the other — and taking whichever came first made the commune shown
-    // and the confidence label depend on the order the source files are
-    // listed in. What is shown is now the same whatever that order.
-    if (confidenceRank(r.conf) < confidenceRank(target.conf)) {
-      target.conf = r.conf;
-      target.commune = r.commune;
-      target.communeN = r.communeN;
-    }
-    target.small = [...new Set([...target.small, ...r.small])].sort(cmp);
-    target.others = [...new Set([...target.others, ...r.others])].sort(cmp);
-    for (const y of r.years) target.years.add(y);
-    target.score =
-      2 * target.small.filter((t) => t.includes("(A)")).length +
-      target.small.filter((t) => t.includes("(B)")).length +
-      (target.years.size >= 2 ? 1 : 0);
-  }
-  const kept = [...byInsee.values()].sort(
-    (a, b) =>
-      b.score - a.score || cmp(a.dept, b.dept) || cmp(a.commune, b.commune),
-  );
-  return { kept, mergedSpellings };
-}
-
-/**
- * The key this endorsement is filed under, among those already seen.
- *
- * A shared first token is not a shared identity: Jean-Louis and Jean-Marc
- * DUPONT of one commune would be one person, and whichever of them is
- * still mayor would be thanked for the other's endorsement. When the full
- * names CONTRADICT, the record gets a key of its own — while « Jean-Claude »
- * and « Jean-Claude Raymond », one man written two ways across the two
- * years, keep sharing theirs.
- */
-export function keyAmong(
-  p: { dept: string; commune: string; lastName: string; firstName: string },
-  seen: Map<string, { firstName: string }>,
-): string {
-  const key = personKey(p);
-  const sharing = seen.get(key);
-  if (
-    sharing &&
-    compareFirstNames(sharing.firstName, p.firstName) === "different"
-  ) {
-    return personKey(p, norm(p.firstName));
-  }
-  return key;
-}
-
-export function compareIdentity(
-  rec: { lastName: string; firstName: string; civ: string },
-  row: Official,
-): string {
-  const lastP = norm(rec.lastName);
-  const lastR = norm(row.lastName);
-  if (
-    !(
-      lastP === lastR ||
-      lastR.split(" ").includes(lastP) ||
-      lastP.split(" ").includes(lastR)
-    )
-  ) {
-    return "different";
-  }
-  const verdict = compareFirstNames(rec.firstName, row.firstName);
-  const sexP = sexFromTitle(rec.civ);
-  if (sexP && row.sex && sexP !== row.sex) {
-    // last AND first names strictly identical: the Conseil constitutionnel
-    // file's civility is what is wrong ("M. Sophie PRADEL"), not two
-    // different people. Assert nothing: the doubt goes to 03 "to check",
-    // never to 02 "successor in place".
-    if (lastP === lastR && norm(rec.firstName) === norm(row.firstName))
-      return "unsure";
-    return verdict === "ok" ? "unsure" : "different";
-  }
-  return verdict;
-}
-
 /**
  * Department code of an INSEE code. Overseas takes three digits (97120 is
  * Martinique, not department 97), mainland two — 2A/2B included, Corsican
@@ -661,22 +139,6 @@ export function compareIdentity(
 function departmentOfInsee(insee: string): string {
   return /^9[78]/.test(insee) ? insee.slice(0, 3) : insee.slice(0, 2);
 }
-
-/** 'THOUY Hélène' -> 'Hélène Thouy' (all-uppercase tokens = last name). */
-function candidateProseName(candidate: string): string {
-  const lastNames: string[] = [];
-  const firstNames: string[] = [];
-  for (const tok of candidate.split(" ").filter(Boolean)) {
-    (tok === tok.toUpperCase() && tok !== tok.toLowerCase()
-      ? lastNames
-      : firstNames
-    ).push(tok);
-  }
-  return [...firstNames, ...lastNames.map(titleCase)].join(" ");
-}
-
-/** Code-point string comparison, like Python. */
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Python's `max(iterable, key=…)`: returns the FIRST maximal element. */
 function maxBy<T>(items: T[], key: (x: T) => string): T {
@@ -835,12 +297,6 @@ export function main(): void {
       // endorser is gone: letting a departmental namesake win thanked 12
       // mayors for an endorsement that is not theirs, under the
       // "renamed/merged commune" label the data contradicts.
-      // A commune absent from the RNE is not thereby a merged commune: it
-      // may simply have no mayor row this month — 912 communes have a town
-      // hall in the directory and no RNE row. Taking the fallback there
-      // hands the endorsement to a departmental namesake 130 km away, and
-      // the letter thanks them for it. If the signed commune still owns an
-      // INSEE code of its own, it is neither a rename nor a merger.
       // successor in place: the commune IS in the RNE, under someone else
       const counterProof = verdict === "different" && !approx;
       const hits = counterProof
@@ -995,7 +451,7 @@ export function main(): void {
       city: stripControls(c?.city ?? ""),
       website: c?.website ?? "",
       contact_form: c?.contactForm ?? "",
-      recent_candidate: candidateProseName(tagCandidate(recent)),
+      recent_candidate: proseName(tagCandidate(recent)),
       recent_year: tagYear(recent),
       commune_2026: rne.commune,
       matching_confidence: r.conf,
@@ -1140,9 +596,7 @@ export function main(): void {
         endorsement_history: hist,
         predecessor,
         predecessor_mayor: predecessorMayor,
-        recent_candidate: recent
-          ? candidateProseName(tagCandidate(recent))
-          : "",
+        recent_candidate: recent ? proseName(tagCandidate(recent)) : "",
         recent_year: recent ? tagYear(recent) : "",
         email: c?.email ?? "",
         phone: c?.phone ?? "",
