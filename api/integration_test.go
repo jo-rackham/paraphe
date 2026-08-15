@@ -371,6 +371,52 @@ func (c *client) request(method, path string, body any) *http.Request {
 	return req
 }
 
+// cookie: what the jar holds for the host this client presents. Go keys the
+// jar on the Host header, so a client that changes campaigns mid-test sends
+// NOTHING rather than sending the neighbour a real session — which reads as
+// a wall and is not one.
+func (c *client) cookie(name string) *http.Cookie {
+	c.t.Helper()
+	host := c.host
+	if host == "" {
+		u, err := url.Parse(c.base)
+		if err != nil {
+			c.t.Fatal(err)
+		}
+		host = u.Host
+	}
+	u, err := url.Parse("https://" + host)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	for _, k := range c.http.Jar.Cookies(u) {
+		if k.Name == name {
+			return k
+		}
+	}
+	return nil
+}
+
+// callWith presents cookies EXPLICITLY, whatever the jar would have said.
+// It is how a session obtained on one campaign is carried onto another.
+func (c *client) callWith(method, path string, cookies ...*http.Cookie) (
+	int, map[string]any,
+) {
+	c.t.Helper()
+	req := c.request(method, path, nil)
+	for _, k := range cookies {
+		req.AddCookie(k)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
 func (c *client) call(method, path string, body any) (int, map[string]any) {
 	c.t.Helper()
 	resp, err := c.http.Do(c.request(method, path, body))
@@ -832,6 +878,57 @@ func TestImportRefusesATruncatedList(t *testing.T) {
 	// and the existing list is untouched
 	if n := countMayors(t, s); n != 3 {
 		t.Errorf("%d mayors left after the refusal, expected 3", n)
+	}
+}
+
+// The absolute floor is 1,000 rows against a list of ~34,800: three per
+// cent. A file cut anywhere above it passed, and removeStale then deleted
+// every mayor missing from it and flagged the cards the team had worked with
+// « parrainage attribué à tort » — a claim about the crossing that nothing
+// had re-run, made to the volunteer who wrote the notes.
+func TestImportRefusesAListThatLostATenthOfItself(t *testing.T) {
+	s, _ := testServer(t)
+	full := filepath.Join(t.TempDir(), "complete.csv")
+	writeMayorCSV(t, full, 2000)
+	if err := withTx(t, s, func(tx pgx.Tx) error {
+		return importList(context.Background(), tx, full)
+	}); err != nil {
+		t.Fatalf("the complete list was refused: %v", err)
+	}
+	if n := countMayors(t, s); n != 2000 {
+		t.Fatalf("%d mayors imported, expected 2000", n)
+	}
+
+	// well above the absolute floor, and missing a quarter of the list
+	truncated := filepath.Join(t.TempDir(), "tronquee.csv")
+	writeMayorCSV(t, truncated, 1500)
+	err := withTx(t, s, func(tx pgx.Tx) error {
+		return importList(context.Background(), tx, truncated)
+	})
+	if err == nil {
+		t.Fatal("a list that lost a quarter of its rows was imported: the " +
+			"missing mayors are deleted and the worked-on ones are told " +
+			"their endorsement was wrongly attributed")
+	}
+	if !strings.Contains(err.Error(), "import refused") {
+		t.Errorf("refused, but not for the right reason: %v", err)
+	}
+	if n := countMayors(t, s); n != 2000 {
+		t.Errorf("%d mayors left after the refusal, expected 2000", n)
+	}
+
+	// …and a list that merely shrinks a little still goes through: the RNE
+	// loses mayors between elections, and refusing that would freeze the
+	// list at its largest size for ever
+	slightly := filepath.Join(t.TempDir(), "un-peu-moins.csv")
+	writeMayorCSV(t, slightly, 1900)
+	if err := withTx(t, s, func(tx pgx.Tx) error {
+		return importList(context.Background(), tx, slightly)
+	}); err != nil {
+		t.Fatalf("a list 5%% shorter was refused: %v", err)
+	}
+	if n := countMayors(t, s); n != 1900 {
+		t.Errorf("%d mayors after the legitimate shrink, expected 1900", n)
 	}
 }
 

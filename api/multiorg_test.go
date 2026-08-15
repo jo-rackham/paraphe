@@ -3,10 +3,49 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// PARAPHE_BASE_DOMAIN is a bare DNS name, and normaliseHost — written for an
+// incoming Host header, where a port is legal — read `http://example.org` as
+// the domain `http`. The process started, /health/db answered 200, the pod
+// went ready, and every legitimate host answered 404: a whole instance dark
+// behind a green probe.
+func TestBaseDomainRefusesWhatIsNotADomain(t *testing.T) {
+	for _, bad := range []string{
+		"http://paraphe.org", "https://paraphe.org",
+		"paraphe.org/campagnes", "paraphe.org?x=1", "paraphe.org#a",
+		"admin@paraphe.org", "paraphe.org:8047", ".paraphe.org",
+		"paraphe org", "127.0.0.1", ".", "..",
+		"paraphe..org", "-paraphe.org", "paraphe.org-",
+	} {
+		if err := validBaseDomain(bad); err == nil {
+			t.Errorf("PARAPHE_BASE_DOMAIN=%q accepted: the instance starts, the "+
+				"probe passes, and no host ever matches a campaign", bad)
+		}
+	}
+	for _, good := range []string{
+		"paraphe.org", "PARAPHE.ORG", " paraphe.org ", "paraphe.org.",
+		"campagnes.paraphe.org", "paraphe.example.co.uk", "p-a.paraphe.org",
+		// one label is not a mistake: *.localhost resolves to the loopback
+		// in every browser, and the end-to-end suite runs the whole instance
+		// mode on it. Refusing it would have been a guard breaking a working
+		// configuration, which costs what a hole costs.
+		"localhost",
+	} {
+		if err := validBaseDomain(good); err != nil {
+			t.Errorf("PARAPHE_BASE_DOMAIN=%q refused: %v", good, err)
+		}
+	}
+	// and what is accepted still resolves to the domain the router uses
+	t.Setenv("PARAPHE_BASE_DOMAIN", "Paraphe.ORG.")
+	if got := BaseDomain(); got != "paraphe.org" {
+		t.Errorf("BaseDomain() = %q, want paraphe.org", got)
+	}
+}
 
 func TestScopeOfHost(t *testing.T) {
 	const base = "paraphe.fr"
@@ -194,10 +233,25 @@ func TestSessionDoesNotCrossCampaigns(t *testing.T) {
 	if code := c.signIn("moi@exemple.fr", pw); code != http.StatusOK {
 		t.Fatalf("sign-in: %d", code)
 	}
-	// same client, same cookie jar, other campaign
+	// The cookie is PRESENTED, not left to the jar. Go keys the jar on the
+	// Host header, so moving `c.host` to the neighbour simply sent no cookie
+	// at all: the 401 that read as a wall was « session absente », and
+	// deleting the wall left this test green. What has to be exercised is a
+	// real session arriving on another campaign's host — which is what an
+	// attacker does with a stolen cookie, and what a shared Domain attribute
+	// would do by accident.
+	session := c.cookie(SessionCookieName)
+	if session == nil {
+		t.Fatal("sign-in left no session cookie to carry over")
+	}
 	c.host = "other.paraphe.test"
-	if code, rep := c.call(http.MethodGet, "/api/me", nil); code != http.StatusUnauthorized {
+	code, rep := c.callWith(http.MethodGet, "/api/me", session)
+	if code != http.StatusUnauthorized {
 		t.Errorf("one campaign's session is valid for another: %d %v", code, rep)
+	}
+	// …and for the reason claimed: the campaign, not an absent cookie
+	if msg, _ := rep["error"].(string); !strings.Contains(msg, "autre campagne") {
+		t.Errorf("the refusal does not come from the campaign check: %q", msg)
 	}
 }
 
@@ -583,6 +637,61 @@ func TestListingChoiceTravelsAndToggles(t *testing.T) {
 	}
 	if !scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='directe-discrete'") {
 		t.Fatal("a save without the field flipped the listing")
+	}
+}
+
+// A column added to a table that already has rows gives those rows a value
+// nobody chose. When the value IS a choice, the migration answers on behalf
+// of everyone who came before it: campaigns hosted before the directory
+// existed were never shown the question, and a restart would publish them.
+func TestUpgradeDoesNotListWhatNobodyChose(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+
+	// back to the schema of a deployment that predates the directory, with
+	// the rows such a deployment holds: a campaign preparing quietly, and a
+	// hosting request whose author never saw the checkbox
+	execAsMaintenance(t, s, "ALTER TABLE orgs DROP COLUMN listed")
+	execAsMaintenance(t, s, "ALTER TABLE hosting_requests DROP COLUMN listed")
+	createOrg(t, s, "ancienne", "Campagne Ancienne")
+	execAsMaintenance(t, s,
+		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
+			"requester_name, message, state, ts) "+
+			"VALUES($1,$2,'{}'::jsonb,$3,$4,'',$5,'2026-08-01')",
+		"attendue", "Campagne Attendue", "porteur@exemple.fr", "Porteur",
+		RequestPending)
+
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := orgSchema(context.Background(), tx); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='ancienne'") {
+		t.Error("the upgrade listed a campaign that was never asked")
+	}
+	if scalar[bool](t, s,
+		"SELECT listed FROM hosting_requests WHERE slug='attendue'") {
+		t.Error("the upgrade listed a request whose author never saw the choice")
+	}
+	// and the apex says so: the directory is the observable consequence
+	apex := clientOn(t, srv, "paraphe.test")
+	code, rep := apex.call(http.MethodGet, "/api/campaigns", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/campaigns: %d %v", code, rep)
+	}
+	campaigns, _ := rep["campaigns"].([]any)
+	for _, c := range campaigns {
+		if c.(map[string]any)["slug"] == "ancienne" {
+			t.Error("a campaign hosted before the directory is advertised by it")
+		}
+	}
+
+	// the default itself is unchanged: a campaign born after the migration
+	// is listed unless it says otherwise, which is what the form offers
+	createOrg(t, s, "nouvelle", "Campagne Nouvelle")
+	if !scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='nouvelle'") {
+		t.Error("a campaign created after the upgrade is not listed by default")
 	}
 }
 
