@@ -98,6 +98,7 @@ tasks:
       - task: lint-shell
       - task: lint-docker
       - task: lint-ci
+      - task: lint-vendor
 
   lint-fix:
     desc: Applique ce que les linters savent corriger seuls
@@ -117,14 +118,24 @@ tasks:
   lint-shell:
     desc: shellcheck sur les scripts du dépôt
     # -print0/-0 : un chemin peut contenir une espace, et `find | xargs`
-    # sans ça découpe le nom au lieu du fichier
+    # sans ça découpe le nom au lieu du fichier.
+    # api/vendor est du code tiers : on le construit, on ne le corrige pas.
     cmds:
-      - 'find . -name "*.sh" -not -path "./node_modules/*" -not -path "./.devbox/*" -print0 | xargs -0 -r shellcheck'
+      - 'find . -name "*.sh" -not -path "./node_modules/*" -not -path "./.devbox/*" -not -path "./api/vendor/*" -print0 | xargs -0 -r shellcheck'
 
   lint-docker:
     desc: hadolint sur les Dockerfiles
     cmds:
-      - 'find . -name "Dockerfile*" -not -path "./node_modules/*" -print0 | xargs -0 -r hadolint'
+      - 'find . -name "Dockerfile*" -not -path "./node_modules/*" -not -path "./api/vendor/*" -print0 | xargs -0 -r hadolint'
+
+  lint-vendor:
+    desc: api/vendor est à jour avec go.mod (le build ne télécharge rien)
+    dir: api
+    cmds:
+      - go mod vendor
+      # pas de backquotes dans la chaîne : entre guillemets doubles le shell
+      # les exécuterait au lieu de les citer
+      - 'git diff --exit-code -- vendor go.mod go.sum || (echo "api/vendor a dérivé de go.mod — relancez go mod vendor et committez"; exit 1)'
 
   lint-ci:
     desc: actionlint sur les workflows, yamllint sur tout le YAML

@@ -1,8 +1,7 @@
 # Deployment of ONE campaign on a simple server.
 #
-# Two images: the interface serves the pages and proxies /api to the API,
-# which answers JSON and nothing else. Only the interface is published — the
-# API is reached through it, on the internal network.
+# ONE image and one process: it serves the pages and the JSON. Published on
+# loopback only, behind whatever TLS proxy the host already runs.
 #
 # Real values live in .env (git-ignored) — see .env.exemple. Nothing
 # sensitive may be written in this file, it is versioned.
@@ -43,9 +42,12 @@ services:
       # here and not in .env: `environment` wins over `env_file`, so
       # setting it in .env would have no effect and nobody would see why
       PARAPHE_DATABASE_URL: postgresql://paraphe:${PARAPHE_PG_PASSWORD}@postgres:5432/paraphe
-    # NO port published: the API is reached through the interface, on the
-    # internal network. Published as well, it would answer the same routes
-    # beside the proxy, with none of its headers.
+    ports:
+      # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
+      # compose on a public-IP VPS behind a TLS proxy, and "8047:8047" would
+      # expose the sign-in form in the clear there, bypassing the
+      # certificate.
+      - "127.0.0.1:8047:8047"
     env_file:
       # absent = the app starts and says clearly what is missing, rather
       # than failing `docker compose config`
@@ -53,21 +55,6 @@ services:
         required: false
     restart: unless-stopped
 
-  web:
-    build:
-      context: .
-      dockerfile: web/Dockerfile
-    depends_on:
-      - api
-    environment:
-      PARAPHE_API_UPSTREAM: http://api:8047
-    ports:
-      # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
-      # compose on a public-IP VPS behind a TLS proxy, and "8080:8080"
-      # would expose the sign-in form in the clear there, bypassing the
-      # certificate.
-      - "127.0.0.1:8047:8080"
-    restart: unless-stopped
 
 volumes:
   paraphe-pg:

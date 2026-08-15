@@ -95,12 +95,12 @@ else:
 - `outils/` — **TypeScript run by Node**, no compilation
   (`node outils/build.ts`): the crossing of the open sources and the mass
   mailing.
-- `api/` — **Go**: the team application's JSON API. Stateless, several
-  instances in front of one database. It renders no HTML and generates no
-  message.
-- `web/` — **React + Vite**: the interface, in its modes. It has its own
-  image, which serves the pages and passes `/api` to the API's — two images,
-  always at the same tag.
+- `api/` — **Go**: the team application. It serves the JSON API and the
+  pages that consume it, from one process. Stateless, several instances in
+  front of one database. It generates no message.
+- `web/` — **React + Vite**: the interface, in its modes. Built into the
+  single image, and published on its own to GitHub Pages for the browser
+  version.
 - `outils/telecharger.sh` — bash, because downloading four files deserves no
   more.
 

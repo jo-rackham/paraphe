@@ -1,13 +1,7 @@
-# sources brutes : seules les listes construites entrent dans l'image
-data/
-out/messages/
-out/02_anciens_parrains.csv
-out/03_non_apparies.csv
-out/rapport.md
-# travail de l'équipe et secrets : ne doivent jamais entrer dans une image.
-# Le « * » de Docker ne traverse PAS les « / », contrairement à celui de
-# .gitignore : sans « **/ », app/data.sqlite entrait dans le contexte de build
-# et dans le cache de la CI.
+# What must NEVER enter an image: the team's work and the secrets.
+#
+# Docker's "*" does NOT cross a "/", unlike .gitignore's: without the "**/",
+# app/data.sqlite entered the build context and the CI cache.
 **/*.sqlite*
 **/*.sql
 **/*.db
@@ -17,23 +11,41 @@ app/
 .env.*
 !.env.exemple
 config/campagne.local.yaml
-# artefacts de construction de l'hôte : recopiés dans l'image, ils entrent en
-# conflit avec ceux que les étages construisent (pnpm refuse de démarrer sur un
-# node_modules qu'il n'a pas installé lui-même) et embarquent des binaires
-# compilés pour une autre plateforme
+
+# Raw sources: only the built lists go into the image.
+data/
+out/messages/
+out/02_anciens_parrains.csv
+out/03_non_apparies.csv
+out/rapport.md
+
+# Host build artefacts. Copied in, they collide with what the stages build
+# (pnpm refuses to start on a node_modules it did not install itself) and
+# they carry binaries compiled for another platform.
+#
+# api/vendor is NOT here, and that is the point: it is committed, and the
+# build stage uses it instead of downloading modules.
 node_modules/
 web/node_modules/
 outils/node_modules/
 web/dist/
 web/public/donnees/
 api/paraphe-api
-# outillage et identifiants locaux
+api/api
+
+# Not part of the application: transferring them costs build time and
+# invalidates the context for nothing.
+e2e/
+chart/
+.github/
+.plans/
 .claude/
 .gh-*/
 .repos/
 .git/
 .venv/
 .devbox/
+.playwright-mcp/
 .pytest_cache/
 __pycache__/
 tests/

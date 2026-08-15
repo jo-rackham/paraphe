@@ -167,18 +167,18 @@ describe("the deployment files", () => {
     ).toBeGreaterThan(10);
   });
 
-  // The API sets these on what it answers; nginx serves the PAGES, and a
-  // middleware in Go never sees them. The Content-Security-Policy is what
-  // constrains where the page may connect and load from, and frame-ancestors
-  // is its clickjacking guard — a page served without them is not protected
-  // by the API having a policy.
-  //
-  // Read from both files rather than restated here: the point is that the
-  // two say the same thing.
-  it("serve the same security headers from nginx as from the API", () => {
+  // The pages and the JSON come from ONE process, so `securityHeaders`
+  // wraps both and there is no second implementation to hold in step. What
+  // remains checkable here is that the middleware is still what wraps the
+  // router — the day it wraps something narrower, the pages lose their
+  // policy again, which is exactly what splitting the images did once.
+  it("wrap the whole router in the security headers", () => {
     const go = readFileSync(join(ROOT, "api", "main.go"), "utf8");
-    const conf = readFileSync(join(ROOT, "web", "nginx.conf.template"), "utf8");
-    // the policy as Go concatenates it, quotes and comments removed
+    expect(
+      go,
+      "the router is no longer wrapped in securityHeaders: whatever " +
+        "it stops covering is served without a Content-Security-Policy",
+    ).toMatch(/Handler:\s*securityHeaders\(s\.routes\(\)\)/);
     const block = /const policy = ([\s\S]*?)\n\treturn /.exec(go);
     expect(
       block,
@@ -187,47 +187,16 @@ describe("the deployment files", () => {
     const policy = [...block![1].matchAll(/"([^"]*)"/g)]
       .map((m) => m[1])
       .join("");
-    expect(
-      policy.length,
-      "an empty policy would match an empty config",
-    ).toBeGreaterThan(80);
-    expect(
-      conf,
-      "nginx serves the pages with a different policy than the API",
-    ).toContain(policy);
+    expect(policy.length, "an empty policy protects nothing").toBeGreaterThan(
+      80,
+    );
     for (const header of [
       "X-Content-Type-Options",
       "Referrer-Policy",
       "Cross-Origin-Opener-Policy",
+      "frame-ancestors",
     ]) {
-      expect(go, `${header} is no longer set by the API`).toContain(header);
-      expect(
-        conf,
-        `${header} is set by the API but not by nginx, which is ` +
-          "what serves the pages",
-      ).toContain(header);
-    }
-    // every location that serves content, not just the first
-    const locations = [
-      ...conf.matchAll(/location ([^ ]+) \{([\s\S]*?)\n {4}\}/g),
-    ].filter(([, path]) => !path.startsWith("/api"));
-    expect(
-      locations.length,
-      "no content location found to check",
-    ).toBeGreaterThan(1);
-    for (const [, path, body] of locations) {
-      // comments stripped: a commented-out add_header still contains the
-      // header's name, and nginx does not read it
-      const live = body
-        .split("\n")
-        .filter((l) => !l.trim().startsWith("#"))
-        .join("\n");
-      expect(
-        live,
-        `location ${path} sets no Content-Security-Policy. nginx ` +
-          "does NOT inherit add_header into a block that declares one of its " +
-          "own",
-      ).toMatch(/add_header Content-Security-Policy/);
+      expect(go, `${header} is no longer set`).toContain(header);
     }
   });
 
@@ -237,17 +206,15 @@ describe("the deployment files", () => {
   // cannot silently drop a volunteer into browser mode and have them write
   // their team's work to local storage.
   //
-  // The API serves no pages, so the interface image stamps it at build time.
-  // That puts the same string in two files, which is a divergence waiting to
-  // happen: both are read here, and so is what the interface looks for.
+  // The process that serves the page is the one that stamps it, in memory,
+  // at startup — markInterface. One spelling, in one file, and the interface
+  // reads that same string.
   it("stamp the mode marker the interface looks for", () => {
     const marker = /<meta name="paraphe-mode" content="team">/;
-    for (const file of ["api/main.go", "web/Dockerfile"]) {
-      expect(
-        readFileSync(join(ROOT, file), "utf8"),
-        `${file} no longer carries the marker the interface reads`,
-      ).toMatch(marker);
-    }
+    expect(
+      readFileSync(join(ROOT, "api/main.go"), "utf8"),
+      "api/main.go no longer carries the marker the interface reads",
+    ).toMatch(marker);
     // …and the interface still reads that attribute, under that name
     const reader = readFileSync(join(ROOT, "web", "src", "api.ts"), "utf8");
     expect(
@@ -396,8 +363,6 @@ describe("the deployment files", () => {
       ".github/workflows/ci.yml",
       ".github/workflows/release.yml",
       "api/Dockerfile",
-      "web/Dockerfile",
-      "web/nginx.conf.template",
       ".env.exemple",
       "chart/paraphe/values.yaml",
       "chart/paraphe/Chart.yaml",
@@ -445,8 +410,6 @@ describe("the deployment surfaces name real variables", () => {
     "Taskfile.yml",
     ".github/workflows",
     "api/Dockerfile",
-    "web/Dockerfile",
-    "web/nginx.conf.template",
     "e2e",
   ];
 

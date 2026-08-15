@@ -36,31 +36,44 @@ hall's contact details — so a 2027 campaign can approach them first.
 - `GUIDE.md` — the method, for the team. Imported verbatim by the interface
   (`?raw` + marked), so it renders in every mode, and it is the landing page
   after sign-in.
-- `DEPLOYMENT.md`, the two Dockerfiles, `docker-compose.yml`, `chart/`.
+- `DEPLOYMENT.md`, `api/Dockerfile`, `docker-compose.yml`, `chart/`.
 
-## Two images, one tag
+## One image, one process
 
-`api/Dockerfile` and `web/Dockerfile`, **amd64**. `<repo>/web` serves the
-pages and passes `/api` to `<repo>/api`, which answers JSON only. In
-Kubernetes they are two containers of the SAME pod: the hop never leaves it,
-and the API has no port in the Service. In compose, likewise, only the
-interface publishes one.
+`api/Dockerfile`, **amd64**, `FROM scratch`: 22 MB holding the binary, the
+built interface, the templates and the mayor list. One container in the pod,
+one service in compose, one port.
 
-Both always carry the same tag. An interface of one version talking to an API
-of another is the failure that buys.
+It was two images — one nginx serving the pages and proxying `/api` to the
+other — held together by the discipline of tagging them alike. Merging them
+buys three things, and the first is why:
 
-- **nginx passes `Host` through untouched.** The API resolves which campaign
-  a request speaks for from that header; replaced by the upstream's name,
-  every request lands on the same campaign.
-- **The interface image stamps the mode marker** (`<meta name="paraphe-mode"
-  content="team">`) at build time. Without it, a passing failure of
-  `/api/config` drops a volunteer into browser mode and their team's work
-  goes to IndexedDB. The string lives in `web/Dockerfile` and in
-  `api/main.go`; `outils/deploiement.test.ts` checks both against what the
-  interface reads.
-- `PARAPHE_WEB_DIR` empty means "no interface here", which is what the API
-  image sets. Unset, the API serves a locally built `web/dist` — that is how
-  `task api` works in development.
+- **Whoever serves a response is who sets its headers.** Splitting them once
+  left every PAGE without a Content-Security-Policy while the API kept its
+  own, and it took a measurement on the built image to notice.
+  `securityHeaders` now wraps the whole router, pages included, and there is
+  no second implementation to hold in step.
+- **The page-serving path the tests exercise is the one production runs.**
+  With nginx in front, the 35 end-to-end journeys drove Go's
+  `serveInterface` and production drove an nginx template.
+- An interface of one version talking to an API of another stops being a
+  failure to avoid and becomes a situation that does not exist.
+
+- **The mode marker** (`<meta name="paraphe-mode" content="team">`) is
+  injected at STARTUP, in memory, by `markInterface`. Without it, a passing
+  failure of `/api/config` drops a volunteer into browser mode and their
+  team's work goes to IndexedDB.
+- **`PARAPHE_WEB_DIR` unreadable FAILS the start.** One image serves both, so
+  an interface that cannot be read is a broken image, not a deployment shape
+  — answering 404 on every page while `/api` works is what a readiness probe
+  calls healthy and a volunteer calls a blank screen. Set EXPLICITLY empty,
+  it means "JSON only", which is what a developer has before the first
+  `task web-build`.
+- **The assets are precompressed at build time**, brotli and gzip beside each
+  original; the server negotiates on `Accept-Encoding`. 357 kB of bundle
+  leaves as 90. nginx shipped `#gzip on;` commented out and served all 357.
+- **Nothing is written to disk.** The final stage has no shell, no package
+  manager and no writable filesystem; the chart mounts no volume at all.
 
 ## Sources (all open)
 

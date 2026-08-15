@@ -1,20 +1,29 @@
-// Command paraphe-api: the JSON API of the team application.
+// Command paraphe-api: the team application — the JSON API, and the pages
+// that consume it.
 //
-// It renders no HTML and generates no message: the texts meant for mayors
-// are produced by the front end (noyau/messages.ts), the same engine as the
-// browser version. Two message paths already share that single engine (mass
-// mailing and both interface modes); a second implementation would be one
-// more occasion to say "thank you for your endorsement" to someone who
-// never endorsed anyone.
+// It generates no MESSAGE: the texts meant for mayors are produced by the
+// front end (noyau/messages.ts), the same engine as the browser version. Two
+// message paths already share that single engine (mass mailing and both
+// interface modes); a second implementation would be one more occasion to
+// say "thank you for your endorsement" to someone who never endorsed anyone.
+//
+// It does serve the pages, and that is deliberate. Serving them from a
+// second image meant the interface a volunteer loads came from one process
+// and the API it talks to from another, with the version discipline holding
+// them together; and it meant the page path exercised by every test was not
+// the one production ran. One process, one artefact, one place where a
+// response gets its headers.
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +34,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -44,6 +54,9 @@ type Server struct {
 	webDir        string
 	// marked index.html: see markInterface
 	landingPage []byte
+	// the same page, gzipped once at startup: it is served on every load
+	// and compressing it per request would be work repeated for nothing
+	landingPageGz []byte
 }
 
 // Mode marker, injected into the page served by the API.
@@ -67,6 +80,23 @@ func markInterface(dir string) ([]byte, error) {
 			"the first failure", dir)
 	}
 	return []byte(strings.Replace(page, "</head>", modeMarker+"\n</head>", 1)), nil
+}
+
+// gzipBytes compresses once, at startup. BestCompression because this runs
+// exactly one time for a document served on every load.
+func gzipBytes(raw []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	z, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := z.Write(raw); err != nil {
+		return nil, err
+	}
+	if err := z.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func main() {
@@ -158,18 +188,30 @@ func run() error {
 		now:           time.Now,
 		webDir:        Get("web_dir"),
 	}
-	// No interface is the DEPLOYED shape: the interface image serves the
-	// pages and proxies /api back here, and serving them from both would be a
-	// second copy nobody rebuilds. It is also what a developer sees before
-	// the first `task web-build`. One message covers both, because nothing
-	// here can tell them apart — an environment variable set to the empty
-	// string reads exactly like one nobody set.
-	if landingPage, err := markInterface(s.webDir); err != nil {
-		log.Printf("no interface served here (%s: %v): this binary answers "+
-			"JSON. In a deployment the interface image serves the pages; "+
-			"locally, `task web-build` builds one.", s.webDir, err)
+	// One image serves the pages AND the JSON, so an unreadable interface is
+	// a broken image and not a shape anybody deploys: it FAILS the start.
+	// Answering 404 on every page while /api works is the kind of half-alive
+	// process a readiness probe calls healthy and a volunteer calls a blank
+	// screen.
+	//
+	// An EMPTY web_dir is the exception, and it is explicit: it means "no
+	// pages here", which is what a developer has before the first
+	// `task web-build`.
+	if s.webDir == "" {
+		log.Print("no interface served (web_dir is empty): this process " +
+			"answers JSON only")
 	} else {
+		landingPage, err := markInterface(s.webDir)
+		if err != nil {
+			return fmt.Errorf("interface unreadable in %s: %w\n"+
+				"This image serves the pages as well as the API, so there is "+
+				"nothing to serve. Build one with `task web-build`, or set "+
+				"web_dir empty to answer JSON only", s.webDir, err)
+		}
 		s.landingPage = landingPage
+		if s.landingPageGz, err = gzipBytes(landingPage); err != nil {
+			return fmt.Errorf("compressing the landing page: %w", err)
+		}
 	}
 
 	addr := Get("host") + ":" + Get("port")
@@ -424,6 +466,11 @@ func admitSignIn(next http.HandlerFunc) http.HandlerFunc {
 // serveInterface serves web/dist. No directory listing, and fallback to
 // index.html for extension-less paths (the application is a single page: a
 // reload on /team must render the application, not 404).
+//
+// This binary serves the pages AND the JSON, which is why securityHeaders
+// wraps the whole router: whoever serves a response is who sets its headers,
+// and splitting the two once left every page without a Content-Security-
+// Policy while the API kept its own.
 func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Clean(r.URL.Path)
 	if path == "/" || filepath.Ext(path) == "" {
@@ -451,10 +498,10 @@ func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// never cached: a volunteer holding an index.html from before a
+		// deployment loads asset names that no longer exist
 		w.Header().Set("Cache-Control", "no-store")
-		if _, err := w.Write(s.landingPage); err != nil {
-			log.Printf("landing page not served: %v", err)
-		}
+		s.writePage(w, r)
 		return
 	}
 	info, err := os.Stat(abs)
@@ -463,7 +510,97 @@ func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 			"Interface introuvable (%s). Construire avec `task web-build`.", path)
 		return
 	}
+	// Everything under /assets/ is content-hashed by the build, so its name
+	// changes whenever its bytes do and it can be kept for ever. Everything
+	// else — the favicon, robots.txt — carries a stable name and must not be.
+	if strings.HasPrefix(path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	s.serveFile(w, r, abs)
+}
+
+// encodings: the precompressed variants the build produces, best first. They
+// are built once at image build time rather than compressed per request:
+// brotli at quality 11 is far too slow to run on the fly, and it is what
+// takes the interface bundle from 357 kB to 90.
+var encodings = []struct{ token, suffix string }{
+	{"br", ".br"},
+	{"gzip", ".gz"},
+}
+
+// serveFile answers with a precompressed variant when the client accepts one
+// and it exists beside the original.
+//
+// Content-Type comes from the ORIGINAL name: index-a1b2.js.br is JavaScript,
+// and http.ServeFile would call it application/x-brotli. Vary is required or
+// a cache serves the compressed bytes to a client that asked for none.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, abs string) {
+	w.Header().Set("Vary", "Accept-Encoding")
+	accepted := r.Header.Get("Accept-Encoding")
+	for _, e := range encodings {
+		if !acceptsEncoding(accepted, e.token) {
+			continue
+		}
+		variant := abs + e.suffix
+		info, err := os.Stat(variant)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		w.Header().Set("Content-Type", contentType(abs))
+		w.Header().Set("Content-Encoding", e.token)
+		http.ServeFile(w, r, variant)
+		return
+	}
 	http.ServeFile(w, r, abs)
+}
+
+// acceptsEncoding: does this Accept-Encoding name the token, other than to
+// refuse it? `gzip;q=0` is a client saying NOT gzip, and serving it gzip is
+// how a response arrives unreadable.
+func acceptsEncoding(header, token string) bool {
+	for _, part := range strings.Split(header, ",") {
+		fields := strings.Split(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(fields[0]), token) {
+			continue
+		}
+		for _, p := range fields[1:] {
+			if q := strings.TrimSpace(p); strings.HasPrefix(q, "q=") &&
+				(q == "q=0" || strings.HasPrefix(q, "q=0.0")) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func contentType(name string) string {
+	if t := mime.TypeByExtension(filepath.Ext(name)); t != "" {
+		return t
+	}
+	return "application/octet-stream"
+}
+
+// writePage serves the marked index.html, gzipped when the client accepts
+// it. Only gzip: the page is compressed once at startup, in memory, and
+// compress/gzip is in the standard library — bringing a brotli encoder into
+// the module to save two kilobytes on one document would be a dependency
+// bought for nothing. The assets, where the bytes actually are, get brotli
+// from the build.
+func (s *Server) writePage(w http.ResponseWriter, r *http.Request) {
+	if s.landingPageGz != nil && acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+		if _, err := w.Write(s.landingPageGz); err != nil {
+			log.Printf("landing page not served: %v", err)
+		}
+		return
+	}
+	if _, err := w.Write(s.landingPage); err != nil {
+		log.Printf("landing page not served: %v", err)
+	}
 }
 
 // answerOnPanic: a panic in a handler must still leave the client with an

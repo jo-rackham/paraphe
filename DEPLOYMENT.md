@@ -26,11 +26,10 @@ parrainages.mydomain.fr {
 the same environment variables — in that mode the API serves the interface
 itself and there is nothing else to install.)
 
-**Two images, one tag.** `…/web` serves the pages and passes `/api` to
-`…/api`, which answers JSON only. Only the interface publishes a port; the API
-is reached through it, on the internal network. Both always carry the same
-version: an interface of one version talking to an API of another is exactly
-the failure that common tag prevents.
+**One image.** It serves the pages and the JSON, from one process, on one
+port. There is no interface version and API version to keep in step, because
+there is one artefact. Nothing is written to disk: the image is built `FROM
+scratch` and the chart mounts no volume.
 
 ## Runtime configuration (environment variables)
 

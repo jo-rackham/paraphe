@@ -12,6 +12,8 @@ ignore: |
   api/vendor/
   .devbox/
   .playwright-mcp/
+  .claude/
+  .gh-local/
   .plans/
   # Helm templates are not YAML until they are rendered: `{{ .Values.x }}`
   # is a syntax error to any parser, and there is no configuration that

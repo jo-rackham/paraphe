@@ -11,6 +11,10 @@
 
 pre-commit:
   parallel: true
+  # api/vendor is third-party code, committed so the build downloads nothing.
+  # It is built, not fixed: linting it would report other people's style.
+  exclude:
+    - "api/vendor/**"
   jobs:
     - name: biome
       glob: "*.{ts,tsx,js,mjs,json}"

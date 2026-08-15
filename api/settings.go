@@ -59,7 +59,7 @@ var Settings = []Setting{
 	{Key: "csv", Env: "PARAPHE_CSV", Flag: "csv",
 		Default: "out/04_base_complete.csv", Help: "the mayor list to import"},
 	{Key: "web_dir", Env: "PARAPHE_WEB_DIR", Flag: "web-dir", Default: "web/dist",
-		Help: "built interface to serve; empty means the interface image serves it"},
+		Help: "built interface to serve; empty means answer JSON only"},
 	{Key: "base_domain", Env: "PARAPHE_BASE_DOMAIN", Flag: "base-domain",
 		Help: "domain of the campaign subdomains; empty means a single campaign"},
 	{Key: "org_slug", Env: "PARAPHE_ORG_SLUG", Flag: "org-slug",
