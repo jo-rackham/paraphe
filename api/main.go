@@ -13,8 +13,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -226,22 +228,55 @@ func waitForDatabase(ctx context.Context, dsn string, timeout time.Duration) err
 	}
 }
 
+// pathParam reads a route parameter, UNESCAPED.
+//
+// chi matches on the raw path whenever it differs from the decoded one, so
+// `chi.URLParam` hands back what the client sent — an email arrives as
+// `someone%40example.fr`. Every parameter here is compared against stored
+// data, so every one of them has to be decoded.
+func pathParam(r *http.Request, name string) string {
+	raw := chi.URLParam(r, name)
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
+}
+
+// guard adapts the package's middleware — all `http.HandlerFunc ->
+// http.HandlerFunc` — to what chi stacks with Use.
+func guard(m func(http.HandlerFunc) http.HandlerFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(m(next.ServeHTTP))
+	}
+}
+
+// routes: the guards are declared BY GROUP, not per route.
+//
+// Written route by route, a new one is a line that has to remember its own
+// `jsonOnly`, its own `inCampaign` and its own role check — and forgetting
+// one is invisible, because the route works. Under a group the guard is
+// already there, and TestEveryAPIRouteIsGuarded walks the tree to say so.
 func (s *Server) routes() http.Handler {
-	mux := http.NewServeMux()
+	return answerOnPanic(refuseUnstorableText(s.router()))
+}
+
+// router: the tree alone, without the wrappers routes() puts around it, so
+// TestEveryAPIRouteRefusesAnAnonymousCaller walks exactly what is served.
+func (s *Server) router() chi.Router {
+	r := chi.NewRouter()
 
 	// Liveness probe: does NOT touch the database. A database outage makes
 	// the app useless but it recovers on its own as soon as the database is
 	// back; restarting it would turn a 30 s failure into CrashLoopBackOff.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		replyJSON(w, http.StatusOK, map[string]string{"state": "ok"})
 	})
 
 	// READINESS probe: it touches the database, because a pod that cannot
-	// see it must not receive traffic. It resolves NO campaign: a
-	// Kubernetes probe addresses the pod's IP, whose hostname matches no
-	// subdomain — /api/config would answer 404 and the pod would never
-	// become ready.
-	mux.HandleFunc("GET /health/db", func(w http.ResponseWriter, r *http.Request) {
+	// see it must not receive traffic. It resolves NO campaign: a Kubernetes
+	// probe addresses the pod's IP, whose hostname matches no subdomain —
+	// /api/config would answer 404 and the pod would never become ready.
+	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.pool.Ping(r.Context()); err != nil {
 			log.Printf("readiness probe: database unreachable: %v", err)
 			errorJSON(w, http.StatusServiceUnavailable, "Base injoignable.")
@@ -250,53 +285,75 @@ func (s *Server) routes() http.Handler {
 		replyJSON(w, http.StatusOK, map[string]string{"state": "ok"})
 	})
 
-	mux.HandleFunc("GET /api/config", s.inScope(s.routeConfig))
-	mux.HandleFunc("POST /api/session", jsonOnly(admitSignIn(s.inScope(s.routeSignIn))))
-	mux.HandleFunc("DELETE /api/session", s.routeSignOut)
-	mux.HandleFunc("GET /api/me", s.signedIn(s.routeMe))
-	mux.HandleFunc("POST /api/me/personal_note", jsonOnly(s.signedIn(s.routePersonalNote)))
-
-	mux.HandleFunc("GET /api/dashboard", s.inCampaign(s.routeDashboard))
-	mux.HandleFunc("GET /api/facets", s.inCampaign(s.routeFacets))
-	mux.HandleFunc("GET /api/mayors", s.inCampaign(s.routeMayors))
-	mux.HandleFunc("GET /api/mayors/{insee}", s.inCampaign(s.routeCard))
-	mux.HandleFunc("POST /api/mayors/{insee}/status",
-		jsonOnly(s.inCampaign(s.routeStatus)))
-	mux.HandleFunc("POST /api/batch", jsonOnly(s.inCampaign(s.routeBatch)))
-	mux.HandleFunc("GET /api/export.csv", s.inCampaign(s.routeExport))
-
-	mux.HandleFunc("GET /api/team", s.managers(s.routeTeam))
-	mux.HandleFunc("POST /api/team/group",
-		jsonOnly(s.coordinationOnly(s.routeCreateTeam)))
-	mux.HandleFunc("POST /api/team/account",
-		jsonOnly(s.managers(s.routeCreateAccount)))
-	mux.HandleFunc("POST /api/team/account/{email}/active",
-		jsonOnly(s.managers(s.routeToggleAccount)))
-	// Read by the browser version from ANOTHER origin: no session, no
-	// cookie, only the campaign a mayor already reads in every message.
-	mux.HandleFunc("GET /api/campaign/public",
-		publicToEveryOrigin(s.inScope(s.routePublicCampaign)))
-	mux.HandleFunc("POST /api/campaign",
-		jsonOnly(s.coordinationOnly(s.routeUpdateCampaign)))
-
-	// The instance landing page: requesting a campaign, moderating requests.
-	mux.HandleFunc("POST /api/request", jsonOnly(s.instanceOnly(s.routeHostingRequest)))
-	mux.HandleFunc("GET /api/admin/requests", s.administrationOnly(s.routeHostingQueue))
-	mux.HandleFunc("POST /api/admin/requests/{id}",
-		jsonOnly(s.administrationOnly(s.routeDecideHosting)))
-
-	// everything else: the interface. An unknown /api/ route returns JSON,
-	// not the landing page — otherwise a typo in the front end shows up as
-	// "unexpected token < in JSON", which tells nobody anything.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+	r.Route("/api", func(r chi.Router) {
+		// An unknown /api route answers JSON, not the landing page:
+		// otherwise a typo in the front end surfaces as "unexpected token <
+		// in JSON", which tells nobody anything.
+		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			errorJSON(w, http.StatusNotFound, "Route inconnue : %s %s.",
 				r.Method, r.URL.Path)
-			return
-		}
-		s.serveInterface(w, r)
+		})
+		r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+			errorJSON(w, http.StatusMethodNotAllowed,
+				"Méthode refusée : %s %s.", r.Method, r.URL.Path)
+		})
+
+		// No session yet: what the page needs to know before anyone signs in.
+		r.With(guard(s.inScope)).Get("/config", s.routeConfig)
+		r.With(guard(jsonOnly), guard(admitSignIn), guard(s.inScope)).
+			Post("/session", s.routeSignIn)
+		r.Delete("/session", s.routeSignOut)
+		// Read by the browser version from ANOTHER origin: no session, no
+		// cookie, only the campaign a mayor already reads in every message.
+		r.With(guard(publicToEveryOrigin), guard(s.inScope)).
+			Get("/campaign/public", s.routePublicCampaign)
+
+		// Signed in, whatever the scope.
+		r.Group(func(r chi.Router) {
+			r.Use(guard(s.signedIn))
+			r.Get("/me", s.routeMe)
+			r.With(guard(jsonOnly)).Post("/me/personal_note", s.routePersonalNote)
+		})
+
+		// Inside a campaign: everything a volunteer works with.
+		r.Group(func(r chi.Router) {
+			r.Use(guard(s.inCampaign))
+			r.Get("/dashboard", s.routeDashboard)
+			r.Get("/facets", s.routeFacets)
+			r.Get("/mayors", s.routeMayors)
+			r.Get("/mayors/{insee}", s.routeCard)
+			r.Get("/export.csv", s.routeExport)
+			r.With(guard(jsonOnly)).Post("/mayors/{insee}/status", s.routeStatus)
+			r.With(guard(jsonOnly)).Post("/batch", s.routeBatch)
+		})
+
+		// Managing the campaign's own teams and accounts.
+		r.Route("/team", func(r chi.Router) {
+			r.With(guard(s.managers)).Get("/", s.routeTeam)
+			r.With(guard(jsonOnly), guard(s.coordinationOnly)).
+				Post("/group", s.routeCreateTeam)
+			r.With(guard(jsonOnly), guard(s.managers)).
+				Post("/account", s.routeCreateAccount)
+			r.With(guard(jsonOnly), guard(s.managers)).
+				Post("/account/{email}/active", s.routeToggleAccount)
+		})
+		r.With(guard(jsonOnly), guard(s.coordinationOnly)).
+			Post("/campaign", s.routeUpdateCampaign)
+
+		// The instance landing page: requesting a campaign, moderating.
+		r.With(guard(jsonOnly), guard(s.instanceOnly)).
+			Post("/request", s.routeHostingRequest)
+		r.Route("/admin/requests", func(r chi.Router) {
+			r.Use(guard(s.administrationOnly))
+			r.Get("/", s.routeHostingQueue)
+			r.With(guard(jsonOnly)).Post("/{id}", s.routeDecideHosting)
+		})
 	})
-	return answerOnPanic(refuseUnstorableText(mux))
+
+	// Everything else is the interface, when this binary serves one.
+	r.NotFound(s.serveInterface)
+
+	return r
 }
 
 // refuseUnstorableText: PostgreSQL refuses U+0000 in any text value AND

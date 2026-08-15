@@ -221,7 +221,10 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 // account.
 func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 	me := accountOf(r)
-	target := strings.ToLower(strings.TrimSpace(r.PathValue("email")))
+	// UNESCAPED: chi matches on the raw path when it differs from the decoded
+	// one, so an address arrives as `someone%40example.fr`. Compared as is, it
+	// matches no account and the call answers 404 while looking like it worked.
+	target := strings.ToLower(strings.TrimSpace(pathParam(r, "email")))
 	if target == me.Email {
 		errorJSON(w, http.StatusBadRequest, "On ne désactive pas son propre compte.")
 		return

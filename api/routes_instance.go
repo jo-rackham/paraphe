@@ -221,7 +221,7 @@ type hostingDecision struct {
 // POST /api/admin/requests/{id} — accept (hence create the campaign) or
 // refuse.
 func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := strconv.ParseInt(pathParam(r, "id"), 10, 64)
 	if err != nil {
 		errorJSON(w, http.StatusBadRequest, "Identifiant de demande illisible.")
 		return

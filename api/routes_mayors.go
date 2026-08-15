@@ -280,7 +280,7 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/mayors/{insee} — the card, with the team's shared history.
 func (s *Server) routeCard(w http.ResponseWriter, r *http.Request) {
-	insee := r.PathValue("insee")
+	insee := pathParam(r, "insee")
 	card, ok := s.cardAndNotes(w, r, insee)
 	if !ok {
 		return
@@ -330,7 +330,7 @@ type statusRequest struct {
 
 // POST /api/mayors/{insee}/status — setting a status claims the card.
 func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
-	insee := r.PathValue("insee")
+	insee := pathParam(r, "insee")
 	m, ok := s.loadMayor(w, r, insee)
 	if !ok {
 		return
