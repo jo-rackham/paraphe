@@ -148,6 +148,31 @@ test.describe
       ).toBeVisible();
     });
 
+    test("the home lists the hosted campaigns, searchable", async ({
+      page,
+    }) => {
+      await page.goto(`${API_ORIGIN}/`);
+      await expect(
+        page.getByRole("heading", { name: "Les campagnes hébergées" }),
+      ).toBeVisible();
+      // every campaign this journey opened is findable
+      await expect(
+        page.getByRole("link", { name: "Campagne Seconde" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: "Campagne ouverte en direct" }),
+      ).toBeVisible();
+      // typing narrows the list as you go
+      await page.getByLabel("Rechercher une campagne").fill("direct");
+      await expect(
+        page.getByRole("link", { name: "Campagne Seconde" }),
+      ).toBeHidden();
+      await expect(
+        page.getByRole("link", { name: "Campagne ouverte en direct" }),
+      ).toBeVisible();
+      await expect(page.getByText("1/3 campagne(s)")).toBeVisible();
+    });
+
     test("the instance administrator never sees a campaign's work", async ({
       page,
     }) => {

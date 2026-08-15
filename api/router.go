@@ -160,6 +160,10 @@ func (s *Server) router() chi.Router {
 		r.With(guard(s.administrationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/admin/campaigns", s.routeCreateCampaign)
+		// The public directory of the hosted campaigns, apex only. Names
+		// and addresses are public by construction: every subdomain answers.
+		r.With(guard(s.instanceOnly)).
+			Get("/campaigns", s.routeCampaignDirectory)
 	})
 
 	// The account-less browser version. Its /navigateur/api/* paths are

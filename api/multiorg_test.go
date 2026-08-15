@@ -442,6 +442,49 @@ func TestDirectCreationOpensCampaign(t *testing.T) {
 	}
 }
 
+// The apex tells which campaigns it hosts — active ones, and nothing more
+// than the name and address every subdomain already tells.
+func TestApexListsHostedCampaigns(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	createOrg(t, s, "autre", "Autre campagne")
+	suspended := createOrg(t, s, "suspendue", "Campagne suspendue")
+	execAsMaintenance(t, s,
+		"UPDATE orgs SET state=$1 WHERE id=$2", OrgSuspended, suspended)
+
+	apex := clientOn(t, srv, "paraphe.test")
+	code, rep := apex.call(http.MethodGet, "/api/campaigns", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/campaigns on the apex: %d %v", code, rep)
+	}
+	campaigns, _ := rep["campaigns"].([]any)
+	slugs := map[string]bool{}
+	for _, c := range campaigns {
+		slugs[c.(map[string]any)["slug"].(string)] = true
+	}
+	if !slugs[testSlug] || !slugs["autre"] {
+		t.Fatalf("active campaigns missing from the directory: %v", slugs)
+	}
+	// a suspended campaign is not advertised: its address answers nobody
+	if slugs["suspendue"] {
+		t.Fatal("a suspended campaign is advertised on the home page")
+	}
+	// name and slug, and NOTHING else — a column added to orgs must not
+	// leak here by accident
+	for _, c := range campaigns {
+		for key := range c.(map[string]any) {
+			if key != "slug" && key != "name" {
+				t.Fatalf("the directory exposes %q: only slug and name are public", key)
+			}
+		}
+	}
+	// the directory lives on the apex, not on campaign hosts
+	campaign := clientOn(t, srv, testSlug+".paraphe.test")
+	if code, _ := campaign.call(http.MethodGet, "/api/campaigns", nil); code != http.StatusNotFound {
+		t.Errorf("/api/campaigns on a campaign host: %d, want 404", code)
+	}
+}
+
 // A suspended campaign keeps its work, but nobody gets in.
 func TestSuspendedCampaignAcceptsNoRequest(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")

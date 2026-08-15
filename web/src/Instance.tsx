@@ -150,6 +150,7 @@ function Accueil({
         la sienne.
       </p>
       <Demande config={config} />
+      <Annuaire />
       {config.browser_version_url && (
         <>
           <h2>Essayer sans compte</h2>
@@ -168,6 +169,88 @@ function Accueil({
           Se connecter
         </button>
       </p>
+    </>
+  );
+}
+
+// The public directory: what this instance hosts, filtered as you type.
+// It says nothing a visitor could not learn one subdomain at a time — the
+// point is to make the campaigns findable, not to reveal them.
+function Annuaire() {
+  const [campaigns, setCampaigns] = useState<
+    { slug: string; name: string }[] | null
+  >(null);
+  const [baseDomain, setBaseDomain] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const rep = await API.publicCampaigns();
+        setCampaigns(rep.campaigns);
+        setBaseDomain(rep.base_domain);
+      } catch {
+        // said out loud rather than an empty list passing for "none"
+        setFailed(true);
+      }
+    })();
+  }, []);
+
+  if (failed) {
+    return (
+      <>
+        <h2>Les campagnes hébergées</h2>
+        <p className="gris">L'annuaire n'a pas pu être chargé.</p>
+      </>
+    );
+  }
+  if (campaigns === null) return null;
+  if (campaigns.length === 0) {
+    return (
+      <>
+        <h2>Les campagnes hébergées</h2>
+        <p className="gris">Aucune campagne pour l'instant.</p>
+      </>
+    );
+  }
+
+  const needle = q.trim().toLowerCase();
+  const shown = campaigns.filter(
+    (c) =>
+      c.name.toLowerCase().includes(needle) ||
+      c.slug.toLowerCase().includes(needle),
+  );
+  return (
+    <>
+      <h2>Les campagnes hébergées</h2>
+      <div className="carte">
+        <p>
+          <label>
+            Rechercher une campagne
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
+        </p>
+        {/* one node, updated in place: a live region announces reliably
+            only when its content changes inside an existing element */}
+        <p className="gris" role="status">
+          {shown.length}/{campaigns.length} campagne(s)
+        </p>
+        <ul>
+          {shown.map((c) => (
+            <li key={c.slug}>
+              <a href={`https://${c.slug}.${baseDomain}/`}>{c.name}</a>{" "}
+              <code>
+                {c.slug}.{baseDomain}
+              </code>
+            </li>
+          ))}
+        </ul>
+      </div>
     </>
   );
 }

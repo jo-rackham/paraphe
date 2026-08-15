@@ -280,6 +280,11 @@ export const decideRequest = (
 }> =>
   call(`admin/requests/${id}`, { method: "POST", body: { decision, reason } });
 
+export const publicCampaigns = (): Promise<{
+  campaigns: { slug: string; name: string }[];
+  base_domain: string;
+}> => call("campaigns");
+
 export const createCampaign = (creation: {
   slug: string;
   name: string;

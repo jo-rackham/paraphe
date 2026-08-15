@@ -45,6 +45,7 @@ var routeLimits = map[string]string{
 	"GET /api/admin/requests":               "none: authenticated read",
 	"POST /api/admin/requests/{id}":         "write_account",
 	"POST /api/admin/campaigns":             "write_account",
+	"GET /api/campaigns":                    "none: public read, same class as /api/config",
 }
 
 func TestEveryRouteDeclaresItsCeiling(t *testing.T) {

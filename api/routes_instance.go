@@ -468,3 +468,20 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		"password": password,
 	})
 }
+
+// GET /api/campaigns — the public directory of hosted campaigns, on the
+// apex. Name and address only, active campaigns only: both facts are
+// already public by construction — the subdomain answers, and its public
+// campaign endpoint says the name.
+func (s *Server) routeCampaignDirectory(w http.ResponseWriter, r *http.Request) {
+	campaigns, err := s.rows(r,
+		"SELECT slug, name FROM orgs WHERE state=$1 ORDER BY name, slug",
+		OrgActive)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusOK, map[string]any{
+		"campaigns": campaigns, "base_domain": BaseDomain(),
+	})
+}
