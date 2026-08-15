@@ -3,58 +3,60 @@
    ni bloc « RF », ni Système de design de l'État : ce site n'est pas
    officiel et ne doit jamais en avoir l'air. */
 :root {
+  /* One palette, both schemes: each variable carries its light and dark
+     value in ONE declaration (light-dark()), so the schemes cannot drift
+     apart. color-scheme is what the theme toggle drives — left to
+     `light dark`, the OS decides; pinned by [data-theme], the choice wins. */
+  color-scheme: light dark;
   --jaune: #f5c400; --jaune-vif: #ffd400; --noir: #141210;
   --bleu: #000091; --rouge: #e1000f;
-  --fond: #fbfaf5; --carte: #ffffff; --trait: #e4e0d2; --texte: #141210;
-  --texte-sec: #6b6559; --accent: #f5c400; --accent-txt: #141210;
-  --entete: #141210; --entete-txt: #efe9d8; --entete-hover: #2a2620;
+  --fond: light-dark(#fbfaf5, #12100a);
+  --carte: light-dark(#fff, #1d1a12);
+  --trait: light-dark(#e4e0d2, #332e22);
+  --texte: light-dark(#141210, #f2ecdb);
+  --texte-sec: light-dark(#6b6559, #a09883);
+  --accent: light-dark(#f5c400, #ffd400);
+  --accent-txt: #141210;
+  --entete: light-dark(#141210, #0a0906);
+  --entete-txt: #efe9d8; --entete-hover: #2a2620;
   /* the alert box is THE urgency surface: its border is what says "this
      paragraph is a warning" to eyes that cannot read it yet, and yellow
-     read 1.5:1 on the alert background. Olive holds 4.6:1; the error bar
-     keeps the red (4.7:1 here — too dark for the dark scheme, which
-     overrides both). */
-  --alerte-fond: #fff8d6; --alerte-trait: #8a6d00;
-  --alerte-erreur-trait: #e1000f; --champ: #ffffff;
-  --lien: #8a6d00;
+     read 1.5:1 on the alert background. Olive holds 4.6:1 in light; the
+     error bar keeps the red, too dark for the dark scheme's values. */
+  --alerte-fond: light-dark(#fff8d6, #3a3007);
+  --alerte-trait: light-dark(#8a6d00, #ffd400);
+  --alerte-erreur-trait: light-dark(#e1000f, #ff5560);
+  --champ: light-dark(#fff, #12100a);
+  --lien: light-dark(#8a6d00, #ffd400);
   /* focus ring: yellow reads 1.6:1 against the light background, below the
      3:1 WCAG floor for non-text indicators — olive is the palette's own
-     dark yellow and reads 4.7:1 */
-  --focus: #8a6d00;
+     dark yellow and reads 4.7:1. On dark, yellow itself reads. */
+  --focus: light-dark(#8a6d00, #ffd400);
   /* the gauge track: the fill against the track IS the information, and
      yellow on the card border grey read 1.24:1. Yellow on near-black reads
      11:1 — and is the stripes' own pairing */
-  --piste: #141210;
+  --piste: light-dark(#141210, #332e22);
   /* field borders: the border is the only thing that says "a field is
      here" (the field background equals the card's), and the card border
      grey read 1.32:1 against it. This tone reads 3.6:1 and stays for
      controls only — cards and table rules keep the light rule */
-  --champ-trait: #8a8477;
+  --champ-trait: light-dark(#8a8477, #6b6559);
   /* cards float a hair off the page in light; in dark the border alone
-     carries the edge — a shadow there only muddies it */
-  --ombre: 0 1px 2px rgba(20, 18, 16, .06);
+     carries the edge — there, the shadow colour goes transparent */
+  --ombre: light-dark(rgba(20, 18, 16, .06), transparent);
   /* status dots, one hue per state, stepped per scheme */
-  --pastille-gris: #64748b; --pastille-bleu: #2563eb;
-  --pastille-indigo: #4f46e5; --pastille-ambre: #b45309;
-  --pastille-vert: #15803d; --pastille-vert-fort: #166534;
-  --pastille-orange: #c2410c; --pastille-rouge: #b91c1c;
+  --pastille-gris: light-dark(#64748b, #94a3b8);
+  --pastille-bleu: light-dark(#2563eb, #60a5fa);
+  --pastille-indigo: light-dark(#4f46e5, #a5b4fc);
+  --pastille-ambre: light-dark(#b45309, #fbbf24);
+  --pastille-vert: light-dark(#15803d, #4ade80);
+  --pastille-vert-fort: light-dark(#166534, #86efac);
+  --pastille-orange: light-dark(#c2410c, #fb923c);
+  --pastille-rouge: light-dark(#b91c1c, #f87171);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fond: #12100a; --carte: #1d1a12; --trait: #332e22; --texte: #f2ecdb;
-    --texte-sec: #a09883; --accent: #ffd400; --entete: #0a0906;
-    --alerte-fond: #3a3007; --alerte-trait: #ffd400;
-    --alerte-erreur-trait: #ff5560; --champ: #12100a;
-    --lien: #ffd400;
-    --focus: #ffd400;
-    --piste: #332e22;
-    --champ-trait: #6b6559;
-    --ombre: none;
-    --pastille-gris: #94a3b8; --pastille-bleu: #60a5fa;
-    --pastille-indigo: #a5b4fc; --pastille-ambre: #fbbf24;
-    --pastille-vert: #4ade80; --pastille-vert-fort: #86efac;
-    --pastille-orange: #fb923c; --pastille-rouge: #f87171;
-  }
-}
+/* the explicit choices (ThemeToggle, persisted); no attribute = the OS */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
        margin: 0; background: var(--fond); color: var(--texte); }
@@ -79,6 +81,13 @@ main:focus { outline: none; }
 
 header { background: var(--entete); color: #fff; padding: .55rem 1rem;
          display: flex; flex-wrap: wrap; gap: .4rem .9rem; align-items: center; }
+/* the theme toggle: an icon button at the header's edge. Alone (signed-out
+   apex) it takes the auto margin itself; beside .qui it sits flush. */
+header .theme { margin-left: auto; background: none; border: 0; cursor: pointer;
+                color: var(--entete-txt); opacity: .85; line-height: 0;
+                padding: .35rem; border-radius: .45rem; }
+header .theme:hover { background: var(--entete-hover); opacity: 1; }
+header .qui ~ .theme { margin-left: 0; }
 header .qui { margin-left: auto; font-size: .85rem; color: var(--entete-txt);
               opacity: .85; }
 .marque { display: flex; align-items: center; gap: .5rem; font-weight: 700;
@@ -116,7 +125,7 @@ a { color: var(--lien); }
    instead of pushing the whole page sideways */
 .carte { background: var(--carte); border: 1px solid var(--trait);
          border-radius: .6rem; padding: 1rem 1.2rem; margin: .9rem 0;
-         overflow-x: auto; box-shadow: var(--ombre); }
+         overflow-x: auto; box-shadow: 0 1px 2px var(--ombre); }
 /* sign-in: two fields lost on a 64 rem line — a narrow centred card */
 .carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
 /* Status chip: a dot in the status hue, a quiet border, the theme's own
@@ -186,7 +195,7 @@ form.enligne { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
 form.enligne > div { flex: 1; min-width: 12rem; }
 details { border: 1px solid var(--trait); border-radius: .6rem;
           background: var(--carte); margin: .7rem 0;
-          box-shadow: var(--ombre); }
+          box-shadow: 0 1px 2px var(--ombre); }
 details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600;
                   border-radius: .6rem; }
 details summary:hover { background: var(--fond); }

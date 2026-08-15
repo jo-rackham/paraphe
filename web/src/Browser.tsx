@@ -18,6 +18,7 @@ import {
   RenderGuard,
   rescueFocusAfterCommit,
   SkipLink,
+  ThemeToggle,
   useViewFocus,
 } from "./common.tsx";
 import { LISTS, type ListKey, loadList, type Progress } from "./data.ts";
@@ -377,6 +378,7 @@ export default function Browser() {
           onTab={setTab}
         />
         <span className="qui">aucune donnée ne quitte ce navigateur</span>
+        <ThemeToggle />
       </header>
       <div className="rayures" aria-hidden="true" />
       <RenderGuard>

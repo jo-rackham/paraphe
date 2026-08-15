@@ -16,6 +16,7 @@ import {
   PiedDePage,
   RenderGuard,
   SkipLink,
+  ThemeToggle,
   useViewFocus,
 } from "./common.tsx";
 import { GestionEquipe } from "./TeamAdmin.tsx";
@@ -366,6 +367,7 @@ function Coquille({
             </button>
           </span>
         )}
+        <ThemeToggle />
       </header>
       <div className="rayures" aria-hidden="true" />
       <RenderGuard>

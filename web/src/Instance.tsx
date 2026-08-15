@@ -6,6 +6,7 @@ import {
   PiedDePage,
   RenderGuard,
   SkipLink,
+  ThemeToggle,
   useViewFocus,
 } from "./common.tsx";
 import { Moderation } from "./InstanceModeration.tsx";
@@ -93,6 +94,7 @@ export default function Instance({ config }: { config: InstanceConfig }) {
             </button>
           </span>
         )}
+        <ThemeToggle />
       </header>
       <div className="rayures" aria-hidden="true" />
       <RenderGuard>

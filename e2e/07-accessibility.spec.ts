@@ -47,14 +47,20 @@ async function checkA11y(page: Page, screen: string) {
   );
 }
 
-/** WCAG relative luminance of a `#rrggbb` colour. */
-function luminance(hex: string): number {
+/** WCAG relative luminance of a `#rrggbb` or computed `rgb(r, g, b)`
+ *  colour — the palette resolves through a real property now
+ *  (light-dark()), and computed colours come back in rgb() form. */
+function luminance(colour: string): number {
   const lin = (c: number) =>
     c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
-  const n = Number.parseInt(hex.slice(1), 16);
-  return (
-    0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
-  );
+  const rgb = colour.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  const [r, g, b] = rgb
+    ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+    : (() => {
+        const n = Number.parseInt(colour.slice(1), 16);
+        return [n >> 16, (n >> 8) & 255, n & 255];
+      })();
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
 function contrast(a: string, b: string): number {
@@ -131,9 +137,17 @@ test.describe
       for (const scheme of ["light", "dark"] as const) {
         await page.emulateMedia({ colorScheme: scheme });
         const vars = await page.evaluate(() => {
-          const s = getComputedStyle(document.documentElement);
-          const v = (name: string) => s.getPropertyValue(name).trim();
-          return {
+          // a custom property read raw comes back UNRESOLVED — for the
+          // light-dark() palette that is the function text, not a colour.
+          // Resolution happens when the value lands in a real property:
+          // the probe does exactly that, per variable, in the live scheme.
+          const probe = document.createElement("div");
+          document.body.appendChild(probe);
+          const v = (name: string) => {
+            probe.style.color = `var(${name})`;
+            return getComputedStyle(probe).color;
+          };
+          const out = {
             jaune: v("--jaune"),
             piste: v("--piste"),
             champ: v("--champ"),
@@ -142,6 +156,8 @@ test.describe
             alerteTrait: v("--alerte-trait"),
             alerteErreurTrait: v("--alerte-erreur-trait"),
           };
+          probe.remove();
+          return out;
         });
         expect(
           contrast(vars.jaune, vars.piste),
