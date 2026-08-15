@@ -2,7 +2,7 @@
 //
 // That is the whole security of the pre-fill: the instance domain is baked
 // at build time, so the values that will fill thousands of messages to
-// mayors can only come from a campaign that was requested, moderated and
+// mayors can only come from a campaign requested, moderated and
 // approved there. A parameter carrying the configuration itself, or a URL
 // to fetch it from, would let a forged link put an attacker's contact
 // details under a real candidate's name.
@@ -111,14 +111,14 @@ describe("what counts as a campaign", () => {
   });
 });
 
-// The offer is for a campaign NOBODY has touched. "Not complete" was the
+// The offer is for a campaign NOBODY has touched. "Not complete" is the
 // wrong test: a volunteer who had filled eight fields of nine — their own
-// name under « Qui signe les emails », their own phone — was offered a link
+// name under « Qui signe les emails », their own phone — is offered a link
 // that replaced all nine, and `signataire` is the signature at the bottom
 // of every email to a mayor.
 describe("when the offer may appear at all", () => {
   // untouchedCampaign is what the SCREEN calls. Rewriting the predicate
-  // here made the test a tautology: reinstating the defect it was written
+  // here would make the test a tautology: reinstating the defect it is written
   // for left it green.
   it("appears on a campaign nobody has typed into", () => {
     expect(untouchedCampaign(EMPTY_CFG)).toBe(true);
@@ -127,7 +127,7 @@ describe("when the offer may appear at all", () => {
   it.each(["signataire", "contact_email", "candidat"])(
     "does NOT appear once %s is the volunteer's own", (key) => {
       const cfg = { ...EMPTY_CFG, [key]: "Jeanne Bénévole" };
-      // still incomplete — and that is exactly the state that used to be
+      // still incomplete — and that is exactly the state that must not be
       // offered a link replacing all nine fields
       expect(unfilledKeys(cfg).length).toBeGreaterThan(0);
       expect(untouchedCampaign(cfg),

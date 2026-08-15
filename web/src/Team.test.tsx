@@ -147,7 +147,7 @@ describe("unsent card work in team mode", () => {
   it("does not follow the computer to the next person", async () => {
     // Alice arrives by COOKIE — the scenario the guard exists for: a
     // shared computer, a session left open overnight. That path never
-    // called onSignedIn, so the account was never recorded and the store
+    // called onSignedIn, the account is never recorded and the store
     // was never cleared.
     vi.mocked(API.me).mockResolvedValueOnce(ALICE);
     await act(async () => { root.render(<Team config={CONFIG} />); });

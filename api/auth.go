@@ -71,12 +71,11 @@ func (q *query) p(v any) string {
 // scoped opens a query already bound to the campaign, which is therefore
 // ALWAYS $1 — so the SQL can name it literally.
 //
-// Written `"org_id="+req.p(scopeOrg(r))`, the campaign was bound correctly
-// but the placeholder existed only at runtime: read from the source, the
-// predicate was `org_id=` with no right-hand side. The canary had to accept
-// "a right-hand side I cannot read" as bounded, and a one-line helper
-// returning "org_id" then produced a tautology it declared compliant. The
-// campaign is $1 by construction here, and there is nothing left to trust.
+// Bound anywhere else, the placeholder would exist only at run time: read
+// from the source the predicate would be `org_id=` with nothing on its right,
+// and the canary would have to accept "a right-hand side I cannot read" as
+// bounded — which any one-line helper could then satisfy with a tautology.
+// Here the campaign is $1 by construction, and there is nothing to trust.
 func scoped(r *http.Request) *query {
 	q := &query{}
 	q.p(scopeOrg(r)) // $1, and the SQL below says so in full

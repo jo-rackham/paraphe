@@ -2,7 +2,7 @@
 //
 // The synthetic dataset builds and starts the image in CI. If it does not
 // provide exactly the columns the API expects, everything is green here and
-// the published image dies at startup — it happened.
+// the published image dies at startup.
 
 import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -135,10 +135,9 @@ describe("the deployment files", () => {
   // cannot silently drop a volunteer into browser mode and have them write
   // their team's work to local storage.
   //
-  // The API used to inject it while serving index.html. It serves nothing
-  // now, so the interface image stamps it at build time — the same string in
-  // two files, which is a divergence waiting to happen. Both are read here,
-  // and so is what the interface looks for.
+  // The API serves no pages, so the interface image stamps it at build time.
+  // That puts the same string in two files, which is a divergence waiting to
+  // happen: both are read here, and so is what the interface looks for.
   it("stamp the mode marker the interface looks for", () => {
     const marker = /<meta name="paraphe-mode" content="team">/;
     for (const file of ["api/main.go", "web/Dockerfile"]) {
@@ -154,15 +153,14 @@ describe("the deployment files", () => {
 
   // A ":" in an unquoted command makes YAML read the line as a mapping:
   // GitHub rejects the ENTIRE workflow, and without a remote nothing
-  // signals it. The Taskfile paid exactly this trap, ci.yml too.
-  // Checked on the PARSED document, not on the text. The regex version of
-  // this test only knew the GitHub Actions shape (`run:`), and Task writes
-  // its commands as bare list items under `cmds:` — which is the very
-  // shape the defect was paid in. The invariant is simply: a command is a
-  // string. YAML turning one into a mapping is the whole failure.
+  // signals it.
+  // Checked on the PARSED document, not on the text: a regex knowing only the
+  // GitHub Actions shape (`run:`) misses Task, which writes its commands as
+  // bare list items under `cmds:`. The invariant is simply that a command is
+  // a string, and YAML turning one into a mapping is the whole failure.
   it("write commands YAML does not read back as mappings", () => {
-    // Globbed, not listed: a workflow added later was invisible to a
-    // hardcoded list, and GitHub rejects the whole file for this.
+    // Globbed, not listed: a hardcoded list cannot see a workflow added
+    // later, and GitHub rejects the whole file for this.
     const workflows = readdirSync(join(ROOT, ".github", "workflows"))
       .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
       .map((f) => join(".github", "workflows", f));
@@ -259,7 +257,7 @@ describe("the deployment files", () => {
   });
 
   it("keep no leftover of the project's former names", () => {
-    // the project was called citoyen then parrainages before paraphe; a
+    // the project carried other names before paraphe; a
     // leftover produces a database or an image that does not exist,
     // invisible until deployment
     const watched = ["docker-compose.yml", ".github/workflows/ci.yml",
@@ -290,7 +288,7 @@ describe("the deployment surfaces name real variables", () => {
     "chart/paraphe/templates/deployment.yaml",
     "chart/paraphe/values.yaml",
     ".env.exemple",
-    "DEPLOIEMENT.md",
+    "DEPLOYMENT.md",
     "docker-compose.yml",
   ];
   const READ_IN = [

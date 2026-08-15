@@ -63,7 +63,7 @@ whenBuilt("the mass-mailing file", () => {
 
   // The "found by name" fallback only holds when the signed commune said
   // nothing. When it is in the RNE with another mayor, a departmental
-  // namesake won: 12 mayors thanked for an endorsement that was not
+  // namesake wins: 12 mayors thanked for an endorsement that is not
   // theirs.
   it("only invokes \"renamed/merged commune\" when it truly is", () => {
     const rne = parseRecords(readFileSync(join(ROOT, "data", "raw", "rne_maires.csv"), "utf8"));
@@ -80,7 +80,7 @@ whenBuilt("the mass-mailing file", () => {
       .filter((r) => {
         const insee = byDept.get(norm(r.department))?.get(norm(r.commune));
         // the letter's commune exists in the RNE but under ANOTHER INSEE
-        // code: it was therefore neither renamed nor merged
+        // code: it is therefore neither a rename nor a merger
         return insee !== undefined && insee !== r.insee_code;
       });
     expect(suspicious.map((r) => `${r.insee_code} ${r.last_name}`)).toEqual([]);
@@ -90,9 +90,9 @@ whenBuilt("the mass-mailing file", () => {
   // have a town hall and no mayor row. Invoking the fallback there thanked
   // Régine THOMAS, mayor of Robécourt, for an endorsement signed 130 km
   // away in Le Puid — a commune that never merged and still owns INSEE
-  // 88362. The letter was in out/messages/ when this was found.
+  // 88362.
   it("does not invoke a merger when the signed commune still exists", () => {
-    // The SIGNED commune is the whole point, and file 01 no longer carries
+    // The SIGNED commune is the whole point, and file 01 does not carry
     // it — it names the commune the mayor serves today. It has to come
     // back from the endorsement sources, or this test asserts nothing:
     // "Robécourt owns 88390" is trivially true, "Le Puid owns 88362 and is

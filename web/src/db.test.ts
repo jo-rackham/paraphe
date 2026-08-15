@@ -74,7 +74,7 @@ describe("the import", () => {
   // Per key, not all-or-nothing. The first visit downloads a list on its
   // own and records which one, so the settings store is never empty
   // afterwards: a guard on "the store is empty" stopped protecting anything
-  // the moment the app had been opened once, and the campaign came back at
+  // the moment the app has been opened once, and the campaign comes back at
   // its template values.
   it("takes the settings it does not hold, and keeps those it does", async () => {
     await DB.writeSetting("liste", "light"); // written by the first visit

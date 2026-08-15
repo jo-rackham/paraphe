@@ -152,9 +152,10 @@ func reservedSlug(s string) bool { return reservedSlugs[s] }
 // mayors.
 // It must decide EXACTLY like unfilledKeys() of noyau/messages.ts: this
 // one arms the server's refusal, that one the banner the volunteer sees.
-// The weaker of the two is the one that counts, and Go was the weaker —
-// blind to "{candidat}", to a decomposed accent and to a zero-width
-// space. TestUnfilledKeysAgreesWithTheEngine holds them together.
+// The weaker of the two is the one that counts — a template value one side
+// misses ("{candidat}", a decomposed accent, a zero-width space) is a
+// template value that goes out. TestUnfilledKeysAgreesWithTheEngine holds
+// them together.
 func UnfilledKeys(campaign map[string]string) []string {
 	unfilled := []string{}
 	for _, k := range CampaignKeys {

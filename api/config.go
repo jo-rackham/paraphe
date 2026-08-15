@@ -87,7 +87,7 @@ type Config struct {
 	// opposed to those read from the file. Only these may reapply
 	// themselves over what coordination edited in the application.
 	Overrides map[string]string `json:"-"`
-	// BatchSizeOverride: nil unless PARAPHE_BATCH_SIZE was given. The file
+	// BatchSizeOverride: nil unless PARAPHE_BATCH_SIZE is set. The file
 	// value seeds a new campaign; it must not overwrite what coordination
 	// set in the application.
 	BatchSizeOverride *int `json:"-"`

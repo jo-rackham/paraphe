@@ -39,7 +39,7 @@ export default function Browser() {
   // unmounted by a tab switch, and an unsaved draft is the volunteer's
   // work — it must survive a look at the Guide. No effect resyncs it from
   // `cfg` either: an effect cannot tell an adoption from a save landing,
-  // and it reverted keystrokes typed while a save was in flight. The
+  // and it reverts keystrokes typed while a save is in flight. The
   // writers below (accept, import, erase) reset it explicitly instead.
   const [draft, setDraft] = useState<Campaign>(EMPTY_CFG);
   const [noteDraft, setNoteDraft] = useState("");
@@ -48,7 +48,7 @@ export default function Browser() {
   const cardDrafts = useRef<Record<string, CardDraft>>({});
 
   // safety: React strict mode mounts twice in development, and a double
-  // 2 MB download on a slow connection would be paid by the user
+  // a 2 MB download on a slow connection is paid by the user
   const inFlight = useRef<ListKey | null>(null);
 
   const fetchList = useCallback(async (key: ListKey) => {
@@ -124,13 +124,13 @@ export default function Browser() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(cfg)
     || noteDraft !== personalNote;
 
-  // nine fields filled and the tab closed without « Enregistrer » was a
+  // nine fields filled and the tab closed without « Enregistrer » is a
   // silent total loss — and a rewritten card email or a half-typed call
   // note is dearer still. The browser's own dialog is the only word we
   // get. The card store is a ref: read at event time, not render time.
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      // Every touched entry, whatever campaign it was taken under. A
+      // Every touched entry, whatever campaign it is taken under. A
       // campaign change does NOT condemn a rewrite: `ville_envoi` and the
       // long presentation appear in no email at all, so filtering on the
       // campaign let a still-intact rewrite be closed without a word. The
@@ -190,7 +190,7 @@ export default function Browser() {
       const rows = DB.parseCsv(await file.text());
       if (!rows.length) throw new Error("fichier vide");
       const stored = await DB.replaceMayors(rows);
-      // Announced, and recorded: only fetchList used to set this, so the
+      // Announced, and recorded: set by fetchList alone, the
       // application went on claiming the priority list while showing a
       // personal file — and offered to replace it with "all 34 826", which
       // would have destroyed the file the volunteer deliberately loaded.
@@ -395,7 +395,7 @@ export default function Browser() {
                 await DB.writeSetting("campagne", next);
                 await DB.writeSetting("argument", note);
                 // cfg only: the draft may already carry keystrokes typed
-                // while these writes were in flight, and they must stay —
+                // while these writes are in flight, and they must stay —
                 // the `dirty` marker then reappears on its own
                 setCfg(next); setPersonalNote(note);
                 setMessage({ tone: "ok", text: "Campagne enregistrée dans ce navigateur." });
@@ -699,7 +699,7 @@ function Donnees({ counts, onExport, onImport, onCsv, onDemo, onErase,
               : loadedList === "personnel"
                 ? "votre propre fichier"
                 // read from a backup the user supplies: an unknown key
-                // must not throw where the screen used to say something
+                // must not throw where the screen says something
                 : LISTS[loadedList]?.name ?? "une liste inconnue")
             : "aucune"}. Changer de liste ne touche pas à
           votre suivi : il est indexé par code INSEE.

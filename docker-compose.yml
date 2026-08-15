@@ -62,7 +62,7 @@ services:
     environment:
       PARAPHE_API_UPSTREAM: http://api:8047
     ports:
-      # loopback ONLY, like the database: DEPLOIEMENT.md prescribes this
+      # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
       # compose on a public-IP VPS behind a TLS proxy, and "8080:8080"
       # would expose the sign-in form in the clear there, bypassing the
       # certificate.

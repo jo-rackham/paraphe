@@ -29,7 +29,7 @@ export default function Team({ config }: { config: ServerConfig }) {
   // dearest text there is — the browser's dialog is the only word we get
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      // every touched entry, whatever campaign it was taken under: a
+      // every touched entry, whatever campaign it is taken under: a
       // campaign field that appears in no email condemns nothing, and
       // filtering on it closed the tab on intact work without a word
       if (Object.values(cardDrafts.current)

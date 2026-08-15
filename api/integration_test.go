@@ -413,9 +413,8 @@ func TestBatchNeverGivesSameMayorTwice(t *testing.T) {
 	// The sum of the ANNOUNCED batches is what must be measured: a card
 	// allocated twice still has a single volunteer column (the second write
 	// overwrites the first), so counting rows would reveal nothing. What
-	// shows is that two volunteers were told "you have 2 mayors" for the
-	// same card — and one of the two will write to an elected official who
-	// is no longer theirs.
+	// shows is two volunteers told "you have 2 mayors" for the same card —
+	// and one of them writing to an elected official who is not theirs.
 	var announced int64
 	var wg sync.WaitGroup
 	for _, c := range clients {
@@ -836,7 +835,7 @@ func TestImportKeepsWhatTheTeamHasWorkedOn(t *testing.T) {
 
 // A campaign whose only coordination account has been DEACTIVATED is just
 // as unenterable as one with no account at all — no route reactivates it —
-// and the `active` half of the predicate was untested.
+// and the `active` half of the predicate goes untested.
 func TestStartupRefusesADeactivatedCoordination(t *testing.T) {
 	pool := testDatabase(t)
 	t.Setenv("PARAPHE_ADMIN_EMAIL", "")
@@ -905,7 +904,7 @@ func TestBatchServesTheBestScoresFirst(t *testing.T) {
 
 // A list the API would accept: the exact columns of api/vocabulary.go, and
 // INSEE codes that do NOT overlap the seeded ones — the point of these
-// tests is what happens to a target the CSV no longer carries.
+// tests is what happens to a target the CSV stops carrying.
 func writeMayorCSV(t *testing.T, path string, rows int) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -977,7 +976,7 @@ func countMayors(t *testing.T, s *Server) int {
 
 // `cp .env.exemple .env` leaves PARAPHE_ADMIN_PASSWORD empty. The
 // application then started, served every route, and offered a sign-in form
-// that no password opens — with nothing in the logs. DEPLOIEMENT.md and
+// that no password opens — with nothing in the logs. DEPLOYMENT.md and
 // CLAUDE.md both promise it refuses to open instead.
 func TestStartupRefusesACampaignNobodyCanEnter(t *testing.T) {
 	pool := testDatabase(t)
@@ -1016,11 +1015,11 @@ func orgOfSlug(t *testing.T, pool *pgxpool.Pool, slug string) int {
 	return id
 }
 
-// The import used to skip everything when the row count was unchanged —
-// and the routine change is precisely count-preserving: a corrected email,
-// a revised score, a false positive whose rank drops. The commune-not-
+// Skipping the import when the row count is unchanged would skip precisely
+// the routine change, which is count-preserving: a corrected email, a
+// revised score, a false positive whose rank drops. The commune-not-
 // merged fix is exactly that shape: 34 826 rows before and after, one
-// mayor no longer thanked for an endorsement that was not theirs. On a
+// mayor stops being thanked for an endorsement that is not theirs. On a
 // count check, that correction never reaches a running instance and the
 // volunteer keeps sending it.
 func TestImportRefreshesWhenTheCountDoesNotChange(t *testing.T) {
@@ -1063,7 +1062,7 @@ func TestImportRefreshesWhenTheCountDoesNotChange(t *testing.T) {
 	}
 
 	// and an unchanged file is still skipped — the replica optimisation the
-	// count check was there for
+	// count check exists for
 	if err := withTx(t, s, func(tx pgx.Tx) error {
 		return importList(context.Background(), tx, second)
 	}); err != nil {
@@ -1161,7 +1160,7 @@ func TestPagingSkipsNobodyWhileTheTeamWorks(t *testing.T) {
 		after = next
 	}
 
-	// every seeded mayor was served at least once
+	// every seeded mayor is served at least once
 	var missing []string
 	for i := range 120 {
 		insee := fmt.Sprintf("01%03d", i)
@@ -1535,7 +1534,7 @@ func TestAPublicRequestCannotSquatWithAnUnacceptableEmail(t *testing.T) {
 		t.Fatalf("oversized requester email: %d %v — the acceptance would "+
 			"answer 500 and the slug would stay pending for ever", code, body)
 	}
-	// nothing was filed, so the name is still available to its campaign
+	// nothing is filed, so the name is still available to its campaign
 	code, body = c.call(http.MethodPost, "/api/request", map[string]any{
 		"slug": "camille2027", "name": "Camille Réel",
 		"requester_email": "camille@exemple.fr",
@@ -1679,7 +1678,7 @@ func TestAPublicRequestCannotFillTheDisk(t *testing.T) {
 }
 
 // The moderation screen reads the queue with LIMIT 200 and no search: a
-// real campaign's request was pushed off the only page that can accept
+// real campaign's request being pushed off the only page that can accept
 // it by 200 anonymous requests on distinct slugs.
 func TestTheModerationQueueCannotBeDrowned(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
@@ -1700,7 +1699,7 @@ func TestTheModerationQueueCannotBeDrowned(t *testing.T) {
 			"unbounded, and no request is ever deleted", filed, maxPendingRequests)
 	}
 	// The invariant that matters is not « a cap exists » — the first
-	// version of this cap was itself the defect. It is that a filed
+	// a cap on storage is not one. What is guaranteed is that a filed
 	// request is NEVER hidden from the only screen that can accept it.
 	// the administration lives in the INSTANCE scope, not in a campaign
 	email := "admin@paraphe.test"
@@ -1795,9 +1794,8 @@ func TestTheBodyCeilingHoldsBothEdges(t *testing.T) {
 }
 
 // One row per status write, never deleted, and re-read on every write:
-// this is the most frequent write in the app and it was the only
-// unbounded one left behind authentication. 300 posts from one ordinary
-// volunteer held 386 MB of heap.
+// this is the most frequent write in the app. Unbounded, 300 posts from one
+// ordinary volunteer hold 386 MB of heap.
 func TestACardHistoryIsBounded(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 1, "01")
@@ -1818,7 +1816,7 @@ func TestACardHistoryIsBounded(t *testing.T) {
 			code, body)
 	}
 
-	// and the history a card carries is bounded whatever was written
+	// and the history a card carries is bounded whatever is written
 	org := orgID(t, s, testSlug)
 	for i := range 250 {
 		execAsMaintenance(t, s,
@@ -1868,8 +1866,8 @@ func TestATeamIdBeyondInt4IsRefused(t *testing.T) {
 // already travels in every message to a mayor.
 func TestThePublicCampaignLeaksNothingOperational(t *testing.T) {
 	// Without a base domain EVERY host resolves to the bootstrap campaign,
-	// so the host below was decorative and the apex branch was covered by
-	// nothing.
+	// without it the host below is decorative and the apex branch is covered
+	// by nothing.
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
 	// a campaign at its template values pre-fills nothing

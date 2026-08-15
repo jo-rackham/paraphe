@@ -165,5 +165,5 @@ avez, pas l'inverse.
   copie quotidienne (`task backup` en déploiement Docker).
 - **Technique** (une personne suffit) : `task api` lance l'application ;
   la mettre en ligne = un petit serveur + un tunnel ou reverse-proxy HTTPS,
-  voir `DEPLOIEMENT.md`. Créer le compte de coordination au premier
+  voir `DEPLOYMENT.md`. Créer le compte de coordination au premier
   démarrage, puis les équipes et leurs référents depuis l'app.

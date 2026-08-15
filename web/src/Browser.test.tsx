@@ -44,7 +44,7 @@ const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0))
 /**
  * Waits, one macrotask at a time, until the screen shows a condition. A
  * single flush is a race: the mount effect chains five IndexedDB reads
- * and a fetch, and under CI load one tick was not always enough — the
+ * and a fetch, and under CI load one tick is not always enough — the
  * suite failed one run in ten, making a real regression look like noise.
  */
 async function until(pred: () => boolean, what: string) {
@@ -159,7 +159,7 @@ describe("the offer banner, rendered", () => {
     await type(firstCampaignField(), "Jeanne Bénévole");
     await click("Enregistrer");
     // prove the save LANDED first: asserting absence before it did would
-    // pass whatever the guard does — the banner was already hidden by the
+    // pass whatever the guard does — the banner is hidden by the
     // typing itself
     await until(() => text().includes("Campagne enregistrée"), "the save lands");
     expect(text()).not.toContain("Reprendre la campagne");
@@ -202,7 +202,7 @@ describe("unsent work on a card", () => {
     await click("Les maires");
     await click("Bourg-Réel");
     // text addressed to a NAMED mayor: regenerating it from the template
-    // because a tab was clicked is the same loss the campaign draft
+    // because a tab is clicked is the same loss the campaign draft
     // already survives
     expect(emailBody().value).toBe("Phrase écrite à la main pour ce maire.");
     const noteBack = [...container.querySelectorAll("label")]
@@ -284,7 +284,7 @@ describe("unsent work on a card", () => {
         "the touch must reach the email of a card opened before it was written")
         .toContain("j'ai grandi dans une commune de 300 habitants");
       // and the call note, which derives from no campaign field at all,
-      // is still there: tying it to the render threw away what was said
+      // is still there: tying it to the render throws away what was said
       // on the phone at the first unrelated change
       const noteBack = [...container.querySelectorAll("label")]
         .find((l) => l.textContent?.startsWith("Note"))!.querySelector("textarea")!;
@@ -363,7 +363,7 @@ describe("unsent work on a card", () => {
     await type(emailBody(), "Texte fondé sur les valeurs de gabarit.");
     await click("Reprendre cette campagne");
     await until(() => text().includes("reprise"), "the adoption lands");
-    // the kept draft was written under « Prénom NOM »: restoring it after
+    // the kept draft is written under « Prénom NOM »: restoring it after
     // adoption would re-arm the very mailto the round-12 fix disarms
     expect(emailBody().value).toContain(OFFERED.candidat);
     expect(emailBody().value).not.toContain("Texte fondé sur les valeurs");
@@ -388,11 +388,11 @@ describe("the draft in « Ma campagne »", () => {
     await type(firstCampaignField(), "Jeanne");
     await click("Enregistrer");
     // typed before the two IndexedDB writes settle: a resync-from-cfg
-    // effect used to revert this to « Jeanne » under the volunteer's hands
+    // an effect reverting this to « Jeanne » under the volunteer's hands
     await type(firstCampaignField(), "Jeanne Bénévole");
     await until(() => text().includes("Campagne enregistrée"), "the save lands");
     expect(firstCampaignField().value).toBe("Jeanne Bénévole");
-    // the save stored what was clicked, and the screen must NOT pretend
+    // the save stores what was clicked, and the screen must NOT pretend
     // the newer keystrokes are saved: the marker tells them apart
     const stored = await DB.readSetting<Record<string, string>>("campagne", {});
     expect(stored.candidat).toBe("Jeanne");
@@ -428,7 +428,7 @@ describe("the draft in « Ma campagne »", () => {
     await click("Ma campagne");
     await type(firstCampaignField(), "Jeanne Bénévole");
     // quota, private window, base blocked by a stale tab: the write
-    // rejects, and the button used to silently do nothing at all
+    // rejects, and the button must not silently do nothing at all
     vi.mocked(DB.writeSetting).mockRejectedValueOnce(new Error("QuotaExceededError"));
     await click("Enregistrer");
     await until(() => text().includes("Enregistrement impossible"),
@@ -444,7 +444,7 @@ describe("the draft in « Ma campagne »", () => {
     await until(() => text().includes("reprise"), "the adoption lands");
     // subject/body are controlled state reset per mayor: keyed on the
     // mayor alone, the mailto stayed armed with « Prénom NOM » while the
-    // letter already showed the real candidate — and the warning was gone
+    // letter already shows the real candidate — and the warning is gone
     const bodies = [...container.querySelectorAll("textarea")].map((t) => t.value);
     expect(bodies.some((b) => b.includes(OFFERED.candidat)),
       "the email body must be rebuilt from the adopted campaign").toBe(true);
@@ -459,7 +459,7 @@ describe("the draft in « Ma campagne »", () => {
     await until(() => text().includes("Reprise impossible"),
       "the failed adoption is announced");
     expect(text()).not.toContain("reprise. Elle reste");
-    // nothing was adopted: the campaign is still untouched and the offer
+    // nothing is adopted: the campaign is still untouched and the offer
     // still stands
     expect(text()).toContain("Reprendre la campagne");
   });
@@ -478,7 +478,7 @@ describe("the draft in « Ma campagne »", () => {
   });
 });
 
-// The nine campaign fields were described TWICE — a map in Browser.tsx and a
+// The nine campaign fields must not be described TWICE — a map in Browser.tsx and a
 // tuple list in Team.tsx — and the two had already drifted: they disagreed on
 // what ville_envoi does, and one told the volunteer to type "(email,
 // téléphone)" into a one-line description of the candidate. A second list
@@ -517,7 +517,7 @@ describe("the campaign fields are described once", () => {
 
     // `key: "some string"`, and not the bare word: French prose says
     // "candidat", "site" and "signataire" all the time, and a first attempt
-    // that keyed on the quoted key was written around by an object literal
+    // that keys on the quoted key is written around by an object literal
     // whose keys are unquoted — the very shape a label map has.
     const offenders = scanned.filter((n) => {
       const src = readFileSync(join(dir, n), "utf8");

@@ -18,10 +18,8 @@ import (
 // of them signed in, every read and every write exercised, and NOTHING of the
 // neighbour coming back — neither a row, nor a count, nor a string.
 //
-// It used to run under a privileged role to neutralise row-level security and
-// show the application's own filters holding alone. There is no second wall
-// to neutralise any more: this one runs as production does, and what it
-// proves is the whole guarantee.
+// It runs as production does, under the same role, and what it proves is the
+// whole guarantee: there is no second wall behind it.
 func TestNoCampaignSeesAnother(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
@@ -54,9 +52,8 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			"VALUES($1,$2,'Bénévole de B','x','volunteer',true)",
 		b, neighbourVolunteer)
 	// Three more of B's rows, PROMISED and SIGNED: a leak in a counter carries
-	// none of the strings above, and the first version of this test grepped
-	// for strings alone. A mutation making the promised-departments filter
-	// always true passed it, while leaking B's coverage into A's dashboard.
+	// none of the strings above, so the numeric assertions below are what
+	// catch a filter that stops filtering.
 	for i, st := range []string{"promised", "signed", "signed"} {
 		execAsMaintenance(t, s,
 			"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
@@ -87,10 +84,9 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	execAsMaintenance(t, s,
 		"UPDATE accounts SET personal_note=$1 WHERE org_id=$2 AND email=$3",
 		neighbourOwnNote, b, shared)
-	// …and give that address work in A. Without it no join ever reaches the
+	// …and give that address work in A. Without it no join reaches the
 	// account: the card, the notes and the export all join accounts through
-	// `assignments.volunteer`, so the homonym was only ever exercised by
-	// /api/team.
+	// `assignments.volunteer`, and only /api/team would exercise the homonym.
 	// `email_sent`, not `signed`: this row exists to make the joins reach the
 	// account, not to give A coverage — the counters below assert that every
 	// promise and every signature visible to A belongs to B.
@@ -124,10 +120,10 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			t.Errorf("%s: the same address exists in both campaigns, and the "+
 				"neighbour's name is the one that came back", what)
 		}
-		// Everything else B holds that a route could hand over. Each of these
-		// was written by the setup and tested by nothing: a mutation putting
-		// B's candidate, B's personal note, B's name or B's slug into
-		// /api/config or /api/me passed the whole file.
+		// Everything else B holds that a route could hand over. The setup
+		// writes each of them, so each needs a marker: B's candidate, its
+		// personal note, its name and its slug all travel through
+		// /api/config or /api/me.
 		for marker, what2 := range map[string]string{
 			neighbourCandidate: "candidate",
 			neighbourOwnNote:   "personal note",
@@ -177,8 +173,8 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 		t.Fatalf("A can no longer draw a batch: %d %v", code, rep)
 	}
 	// An EMPTY BODY, not nil: `client.request` only sets Content-Type when a
-	// body is given, and jsonOnly then answers 415 — so `toggle == 200` was
-	// never true and the assertion certified itself.
+	// body is given, and jsonOnly then answers 415 — which would make the
+	// assertion below true of a request that never wrote anything.
 	toggle, _ := c.call(http.MethodPost,
 		"/api/team/account/"+neighbourVolunteer+"/active", map[string]any{})
 	if toggle != http.StatusNotFound && toggle != http.StatusForbidden {
@@ -191,17 +187,15 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	// protected it and its WHERE clause is the only wall there is.
 	// The code, asserted like every other probe here: refused, this handler
 	// writes nothing, and "the neighbour is untouched" then holds for a
-	// reason that has nothing to do with a wall. Discarded, a mutation that
-	// answered 400 to every request left the teams wall unexercised.
+	// reason that has nothing to do with a wall.
 	if code, rep := c.call(http.MethodPost, "/api/team/group",
 		map[string]any{"name": "Équipe de A",
 			"departments": []string{"01"}}); code != http.StatusCreated {
 		t.Fatalf("A can no longer create a team of its own: %d %v", code, rep)
 	}
 	// An address held by NEITHER campaign, and the code asserted. Aimed at
-	// the shared address, this answered 409 — the account already exists in
-	// A — so nothing was written and the count check that follows was
-	// falsifiable by nothing: a real crossing was masked by the unique key.
+	// the shared address it answers 409 — the account already exists in A —
+	// so nothing is written and the unique key masks whatever the wall does.
 	if code, rep := c.call(http.MethodPost, "/api/team/account",
 		map[string]any{"email": "nouveau-chez-a@exemple.fr", "name": "Nouveau",
 			"role": "volunteer"}); code != http.StatusCreated {
@@ -229,9 +223,8 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	}
 	// Who the shared address IS, on A. readAccount runs on every authenticated
 	// request and decides the name, the role and the team; unfiltered, it
-	// returns B's account under A's subdomain. The only route this client
-	// called answers with neither, so the identity check was walled by the
-	// static canary alone — and each wall is supposed to hold on its own.
+	// returns B's account under A's subdomain. No other route this client
+	// calls answers with any of the three, so nothing else here would notice.
 	if code, rep := sharedClient.call(http.MethodGet, "/api/me", nil); code != http.StatusOK {
 		t.Fatalf("/api/me on the shared address: %d %v", code, rep)
 	} else {

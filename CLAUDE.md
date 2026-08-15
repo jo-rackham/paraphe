@@ -1,418 +1,304 @@
-# paraphe — maires parrains de petits candidats (présidentielle)
+# paraphe — reaching the mayors who endorse small candidates
 
-Objectif : identifier les maires qui ont parrainé des candidats peu connus /
-marginaux malgré la publicité des parrainages (depuis 2017), et qui sont
-**toujours en poste** (post-municipales mars 2026), avec les contacts de leur
-mairie — pour les solliciter en priorité pour les présentations 2027.
+Find the mayors who endorsed little-known candidates since 2017, who are
+**still in office** after the March 2026 municipal elections, with their town
+hall's contact details — so a 2027 campaign can approach them first.
 
-`devbox install && task` — `task all` refait tout (download + build) ;
-`task messages` = publipostage de masse (out/messages/) ; `task api` = API
-d'équipe sur http://127.0.0.1:8047, qui sert aussi l'interface construite
-(`task web-build`) ; `task web` = interface en développement sur :5180, avec
-/api proxyfié vers l'API.
+`devbox install && task` lists every command. `task all` rebuilds everything
+(download + build), `task messages` produces the mass mailing in
+`out/messages/`, `task api` serves the team API on http://127.0.0.1:8047,
+`task web` serves the interface on :5180 with `/api` proxied to it.
 
-## Outils de campagne
-- `config/campagne.yaml` : candidat, signataire, contacts — À REMPLIR.
-- `modeles/*.txt` : textes à trous (email/courrier/téléphone), éditables sans
-  toucher au code ; les {placeholders} sont vérifiés (erreur explicite si
-  inconnu). `modeles/*.md` = notes de stratégie par canal.
-- `noyau/` (TypeScript, sans dépendance) : moteur de messages **unique**
-  (salutation genrée, date fr, touche personnelle du bénévole), lecture/
-  écriture CSV, normalisation des noms et port fidèle de
-  `difflib.SequenceMatcher`. Partagé par `web/` et `outils/`.
-- `outils/` (TypeScript lancé par Node, sans compilation) : `build.ts`
-  (croisement des sources), `messages-masse.ts` (publipostage), `faux-jeu.ts`
-  (jeu synthétique pour la CI), `telecharger.sh` (bash).
-- `api/` : **API JSON en Go** (pgx, `PARAPHE_DATABASE_URL` ; `task db` démarre
-  une base en local). Elle ne rend aucun HTML et ne génère aucun message.
-  Sans état : plusieurs instances devant la même base.
-  **Deux images, un seul tag** (`api/Dockerfile`, `web/Dockerfile`, amd64) :
-  `<dépôt>/web` sert les pages et relaie `/api` vers `<dépôt>/api`. En
-  Kubernetes, deux conteneurs du MÊME pod — le saut ne quitte pas le pod et
-  l'API n'a aucun port dans le Service. Le tag commun est ce qui interdit
-  une interface d'une version parlant à une API d'une autre.
-  En développement, `task api` sert encore `web/dist` lui-même ;
-  `PARAPHE_WEB_DIR` vide dit « pas d'interface ici », et c'est ce que pose
-  l'image.
-- `web/` : **interface React + TypeScript, trois modes**. `App.tsx` interroge
-  `/api/config` au chargement : une API répond avec une campagne → mode
-  équipe ; elle répond « instance » (apex d'une instance multi-campagnes) →
-  accueil public et modération (`Instance.tsx`) ; rien ne répond (GitHub
-  Pages) → mode navigateur, tout en IndexedDB. Le choix se fait à
-  l'exécution, pas à la compilation — une version construite avec le mauvais
-  drapeau ne se remarquerait qu'en production. `common.tsx` porte la fiche
-  (donc la génération des messages) et le guide, partagés par les deux modes.
-  Mode équipe, pour bénévoles non-techniciens : lots de 10 réservés (les
-  mieux notés d'abord), fiche par maire (email retouchable + mailto, lettre
-  imprimable, script d'appel avec horaires), statuts + notes partagés, suivi
-  30 départements / plafond 50, export CSV, défilement infini.
-  Le travail d'équipe vit en base PostgreSQL — À SAUVEGARDER (`task backup`).
-- **Comptes et équipes locales** : accès par compte individuel (email + mot
-  de passe hashé), trois rôles — coordination (voit tout, crée les équipes
-  et les référents), référent (ouvre les accès bénévoles de SON équipe),
-  bénévole. Une équipe = un nom + des départements ; elle ne pioche que dans
-  son périmètre, ne voit que ses réservations, et une fiche réservée
-  ailleurs lui est refusée (403). Les compteurs de campagne restent visibles
-  par tous, sans noms. Amorçage par `PARAPHE_ADMIN_EMAIL` /
-  `_PASSWORD` : sans compte de coordination, l'app refuse d'ouvrir plutôt
-  que de laisser entrer.
-- Hébergement : petit VPS + reverse-proxy HTTPS (caddy) ou tunnel
-  (cloudflared/tailscale) devant le port 8047.
-- `GUIDE.md` : méthodo complète pour l'équipe (importé tel quel par
-  l'interface — `?raw` + marked — donc rendu dans les DEUX modes, et page
-  d'atterrissage après connexion). Inclut les règles d'envoi qui
-  évitent le classement en spam (adresse perso par bénévole, 20-25/jour) et
-  la cagnotte courrier via le mandataire financier.
-- `DEPLOIEMENT.md` + les deux `Dockerfile` + `docker-compose.yml` : toute la config
-  de campagne est surchargeable au runtime par `PARAPHE_*` (candidat,
-  descriptions, contacts, taille de lot, comptes, secret, HTTPS).
-  Config au gabarit = refus de générer le publipostage, bandeau
-  d'avertissement dans l'app.
-- Tag `parrainage_theme_democratique` (142 cibles) : a parrainé une
-  candidature portant sur le fonctionnement démocratique
-  (Marchandise/LaPrimaire, Egger/RIC, Koenig/subsidiarité, Jardin, Nikonoff,
-  Faudot, Troadec). Le tag qualifie **un acte public constaté**, jamais une
-  conviction — ne pas le renommer en « sensibilité » : on ne présume pas de
-  la sincérité d'un élu. Filtrable dans la liste et à la prise de lot.
-- **Base complète `out/04_base_complete.csv` (34 826 maires), 3 rangs** :
-  `has_endorsed` (~1 960, filtre par défaut dans l'app) / `commune_has_endorsed` (3 049 :
-  la commune a un précédent, le maire a changé) / `no_signal` (29 805).
-  Nécessaire : ~1 960 cibles à 10-15 % de conversion ne produisent pas 500
-  signatures. Un rang « a parrainé à gauche et à droite » a été essayé puis
-  retiré : 11 maires seulement, pour une table de familles politiques
-  éditorialement contestable — le coût dépassait le signal.
-  **Le rang commande le modèle de message** (`modeles/*_decouverte.txt`) :
-  « vous avez présenté X » n'est dit qu'au rang `has_endorsed`. `task messages` ne
-  publiposte QUE le fichier 01 — 34 800 emails de masse seraient du spam.
+## Layout
 
-## Sources (toutes ouvertes ; domaine public pour les parrainages du
-## Conseil constitutionnel, Licence Ouverte/Etalab pour le RNE)
-- Parrainages validés 2017 et 2022 : Conseil constitutionnel via data.gouv.fr
-  (publication finale nominative : élu, mandat, commune, candidat).
-- Répertoire national des élus (RNE), fichier maires : ministère de
-  l'Intérieur, data.gouv.fr, mis à jour en continu (état post-municipales 2026).
-- Annuaire de l'administration (DILA, api-lannuaire.service-public.fr) :
-  email / adresse / téléphone / site de chaque mairie, clé = code INSEE.
-  C'est LA base de contacts — pas besoin de scraper les sites municipaux.
+- `config/campagne.yaml` — candidate, signatory, contacts. **To be filled in.**
+- `modeles/*.txt` — the message templates (email, letter, phone), editable
+  without touching code. Placeholders are checked: an unknown one raises.
+  `modeles/*.md` are the per-channel strategy notes. Single source, imported
+  by both the interface and the mass mailing.
+- `noyau/` — TypeScript, **no dependencies**. The message engine (gendered
+  salutation, French dates, the volunteer's personal touch), CSV reading and
+  writing, name normalisation, and a port of `difflib.SequenceMatcher`.
+  Shared by `web/` and `outils/`.
+- `outils/` — TypeScript run by Node, no compilation: `build.ts` crosses the
+  sources, `messages-masse.ts` does the mailing, `faux-jeu.ts` builds the
+  synthetic dataset for CI, `telecharger.sh` downloads.
+- `api/` — **Go JSON API** (pgx, `PARAPHE_DATABASE_URL`; `task db` starts a
+  local database). It renders no HTML and generates no message. Stateless:
+  several instances in front of one database.
+- `web/` — **React + TypeScript**, three modes. `App.tsx` asks `/api/config`
+  at load: an API answering with a campaign → team mode; answering
+  "instance" → the public apex and its moderation (`Instance.tsx`); nothing
+  answering → browser mode, everything in IndexedDB. The mode is chosen at
+  RUN time, not at build time — a build with the wrong flag would only show
+  in production. `common.tsx` holds the mayor card (hence message
+  generation) and the guide, shared by every mode.
+- `GUIDE.md` — the method, for the team. Imported verbatim by the interface
+  (`?raw` + marked), so it renders in every mode, and it is the landing page
+  after sign-in.
+- `DEPLOYMENT.md`, the two Dockerfiles, `docker-compose.yml`, `chart/`.
 
-## Décisions verrouillées
-- **Tout le code est en anglais** (identifiants, commentaires, SQL, clés
-  JSON, routes, en-têtes CSV, valeurs de statut/rang/rôle) — réécriture
-  prouvée à l'octet près contre l'ancienne.
-  Les variables d'environnement `PARAPHE_*` en font partie : elles
-  s'adressent à qui exploite le service, pas à un bénévole
-  (`PARAPHE_PG_PASSWORD`, `PARAPHE_BASE_DOMAIN`, `PARAPHE_BATCH_SIZE`…).
-  `PARAPHE_BASE_PATH` est le chemin de base Vite, à ne pas confondre avec
-  `PARAPHE_BASE_DOMAIN` — d'où le suffixe.
-  **Restent en français** : les chaînes affichées aux utilisateurs, les
-  {placeholders} des modèles, les clés de `campagne.yaml`, les commentaires
-  de `chart/values.yaml` et `.env.exemple` (lus par l'opérateur de
-  campagne), les noms des fichiers générés
-  (`01_maires_cibles_prioritaires.csv`…), `rapport.md`, GUIDE.md et
-  DEPLOIEMENT.md.
-- Classification des candidats dans `outils/build.ts` (TIER_A/TIER_B),
-  transparente et ajustable ; le rapport liste chaque candidat avec son total
-  et sa classe. A = vrais candidats (≥5 parrainages) non qualifiés, hors
-  personnalités mainstream ; B = outsiders qualifiés de justesse
-  (Arthaud, Poutou, Lassalle, Cheminade, Asselineau 2017) + Taubira 2022.
-  Les parrainages « d'appel » à des non-candidats (Pesquet, Hollande 2022…)
-  et les personnalités d'appareil (Juppé, Yade…) ne comptent pas.
-- Score : A=2, B=1, +1 si parrainage petit candidat en 2017 ET 2022.
-  P1 = au moins un A. Un signataire B des deux années (score 3) passe devant
-  un A isolé (score 2) : la récidive prédit mieux que l'intensité.
-- Cible = personne (le maire), pas la commune : si le maire a changé, la
-  commune sort de la liste (fichier 02 pour mémoire).
-- Sorties en CSV `;` UTF-8-BOM (Excel/LibreOffice-friendly). Le fichier 01
-  contient les 3 canaux (email, téléphone + horaires_mairie, adresse postale)
-  et deux colonnes de publipostage (candidat_recent en prose, annee_recente).
-- `modeles/` : trames email / courrier / téléphone pour la sollicitation,
-  séquencement décrit dedans (email à l'échelle → courrier P1/récidivistes
-  tôt → téléphone en relance ciblée pendant la fenêtre).
+## Two images, one tag
 
-## Pièges payés
-- **L'identité d'un parrain = commune + nom + PRÉNOM, partout.** Trois
-  endroits distincts l'ont oublié, chacun produisant de faux « merci pour
-  votre parrainage » : (1) la clé d'agrégation des parrainages — sans
-  prénom, Mélina et Gilles Gardien fusionnent et le maire actuel hérite du
-  parrainage de l'autre (5 faux positifs purs) ; (2) le rapprochement au
-  RNE — le nom seul sur-matche les successions (63 cas) ; (3) la dédup par
-  INSEE. Un INSEE dupliqué en sortie = assert.
-- **Le code sexe du RNE (colonne 8) est le discriminant décisif** : il
-  tranche Christian→Christine (ratio 0.89, invisible à l'orthographe) et
-  autorise en retour une tolérance basse sur les coquilles (Henry/Henri).
-  Il fournit aussi la civilité de sortie : celle du Conseil constitutionnel
-  contredit le RNE sur 2 lignes.
-- **Comparer les prénoms ENTIERS** : réduits au premier jeton, Marie-Cécile
-  et Marie-Ève deviennent la même personne. Troncature admise
-  (Jean-Louis ⊇ Louis), contradiction refusée.
-- **Outre-mer** : Martinique, Guyane, Polynésie, Nouvelle-Calédonie et SPM
-  ont un libellé de département VIDE au RNE — leur nom est dans la colonne
-  « collectivité à statut particulier ». Sans ce repli, 139 communes sont
-  inatteignables (12 cibles perdues, dont 7 P1 parrains d'Oscar Temaru).
-- **Ne jamais affirmer ce qui n'est pas établi** : un rapprochement de
-  commune approximatif (fuzzy à 0.87 confond Goncourt/Voncourt) suivi d'un
-  nom différent ne prouve pas une succession. Cutoff à 0.93, et le doute va
-  en 03 « à vérifier », jamais en 02 « successeur en place ».
-- État civil + département de sortie = ceux du RNE (les fichiers
-  parrainages varient : noms composés, « Corse du Sud »/« Corse-du-Sud »).
-- Le CSV parrainages 2022 a des doubles espaces dans certains noms de
-  candidats (« SMATI  Rafik ») → tout passe par collapse().
-- RNE : noms parfois composés (nom de naissance + usage) → match « un des
-  tokens » ; communes fusionnées/renommées depuis 2017 → fallback fuzzy
-  (difflib ≥0.87) puis recherche de la personne dans tout le département.
-- Annuaire : `pivot like "mairie"` attrape aussi annexes/déléguées → filtre
-  type_service_local ∈ {mairie, mairie_com} + dédup par INSEE (nom le plus
-  court = fiche principale).
-- Les champs annuaire (telephone, adresse, site) sont du JSON embarqué dans
-  le CSV.
+`api/Dockerfile` and `web/Dockerfile`, **amd64**. `<repo>/web` serves the
+pages and passes `/api` to `<repo>/api`, which answers JSON only. In
+Kubernetes they are two containers of the SAME pod: the hop never leaves it,
+and the API has no port in the Service. In compose, likewise, only the
+interface publishes one.
 
-- **Réécriture Python -> TypeScript, prouvée par l'octet** : le croisement,
-  le publipostage et le jeu synthétique ont été portés, puis validés en
-  comparant les sorties aux fichiers produits par la version Python — les
-  quatre CSV, `emails.csv`, `courriers.html` et `sans_email.csv` sont
-  identiques octet pour octet sur les 34 826 lignes réelles. Le seul écart
-  est voulu : `a_verifier.csv` n'affiche plus un `repr` Python (`['x']`) mais
-  la liste des adresses en clair. **Refaire cette comparaison** avant de
-  toucher au croisement.
-- **`difflib.SequenceMatcher` n'a pas d'équivalent hors Python.** Le seuil de
-  0,93 sur les noms de communes a été réglé contre SON `ratio()` : une autre
-  distance change les rapprochements, donc les maires ciblés, sans rien
-  signaler. Le port est dans `noyau/texte.ts`, vérifié à zéro écart sur
-  4 000 paires réelles et 3 120 recherches de plus proche voisin, et figé par
-  `noyau/texte.test.ts`. L'heuristique « autojunk » (b ≥ 200 éléments) n'est
-  pas reproduite : le port lève plutôt que de diverger en silence.
-- **Le CSV de Python finit ses lignes en CRLF** (`csv.writer`, dialecte
-  excel). `noyau/csv.ts` fait pareil — sans quoi la comparaison octet pour
-  octet ci-dessus était impossible.
-- **`FOR UPDATE SKIP LOCKED` ne protège pas une ligne qui n'existe pas.**
-  Le travail vivant désormais dans `assignments`, une fiche libre n'a AUCUNE
-  ligne à verrouiller : l'attribution est l'INSERT lui-même, avec
-  `ON CONFLICT (org_id, insee_code) DO UPDATE … WHERE volunteer IS NULL`.
-  PostgreSQL n'en laisse aboutir qu'un, le perdant n'est pas compté.
-- **Un tour d'attribution vide ne signifie pas « vivier épuisé ».** Tous les
-  bénévoles visent les mieux notés : le perdant d'une course voit son
-  instantané entièrement pris et repartirait avec « le vivier est épuisé »
-  devant un vivier plein. D'où la boucle bornée (8 tours) et la question posée
-  explicitement — reste-t-il des fiches ? — avant d'afficher ce message.
-- **Une sonde Kubernetes s'adresse à l'IP du pod**, donc avec un `Host` qui ne
-  correspond à aucun sous-domaine. `/api/config` lui répond 404 en
-  multi-campagnes et AUCUN pod ne devient prêt : d'où `/health/db`, qui
-  interroge la base sans résoudre de campagne.
-- **Un « : » non protégé dans un `run:` casse le fichier YAML ENTIER.**
-  Le Taskfile l'a payé, `.github/workflows/ci.yml` le portait encore :
-  GitHub aurait rejeté le workflow complet, invisible tant que rien n'était
-  poussé. Un test (`outils/deploiement.test.ts`) balaie désormais les
-  workflows et le Taskfile.
-- **`web/src/modeles/` était une copie de `modeles/`** : deux jeux de textes
-  identiques, donc une divergence en attente. Une seule source désormais,
-  importée depuis la racine par l'interface comme par le publipostage.
+Both always carry the same tag. An interface of one version talking to an API
+of another is the failure that buys.
 
-## Vérifications faites (12/08/2026)
-- Totaux parrainages = chiffres officiels (13 427 en 2022, 14 296 en 2017).
-- Rétention plausible : 52 % des signataires 2022 encore maires, 22 % des
-  signataires 2017-seul (deux municipales plus tard).
-- Échantillon de 8 « maire différent » : tous de vraies successions.
-- 3 emails recontrôlés en live contre l'API annuaire : identiques.
-- **Revue adversariale (3 agents, opus, effort max)** sur les données, la
-  génération de messages et l'app+déploiement. Données : 3 findings
-  critiques + 2 hauts, tous reproduits puis corrigés (cf. pièges payés) ;
-  1 951 → 1 972 cibles (−6 faux positifs, +12 outre-mer, +4 variantes de
-  prénom récupérées). Messages : gabarit non rempli qui partait en clair
-  (1 934 emails), 15 adresses email invalides, 1 lettre non distribuable —
-  corrigés, écarts désormais listés dans out/messages/a_verifier.csv. App :
-  aucun finding critique ni haut ; bypass d'auth, double attribution de
-  lot, XSS stocké et injection SQL attaqués et réfutés par exécution ;
-  4 durcissements bas appliqués (offset borné, SameSite, cookie Secure via
-  PARAPHE_HTTPS, PARAPHE_SECRET_KEY indépendant de tout secret saisi par un humain).
+- **nginx passes `Host` through untouched.** The API resolves which campaign
+  a request speaks for from that header; replaced by the upstream's name,
+  every request lands on the same campaign.
+- **The interface image stamps the mode marker** (`<meta name="paraphe-mode"
+  content="team">`) at build time. Without it, a passing failure of
+  `/api/config` drops a volunteer into browser mode and their team's work
+  goes to IndexedDB. The string lives in `web/Dockerfile` and in
+  `api/main.go`; `outils/deploiement.test.ts` checks both against what the
+  interface reads.
+- `PARAPHE_WEB_DIR` empty means "no interface here", which is what the API
+  image sets. Unset, the API serves a locally built `web/dist` — that is how
+  `task api` works in development.
 
-## Revue adversariale, tour 3 (13/08/2026) — six agents, six surfaces
-- **Un faux positif nominatif partait vraiment** : une commune absente du
-  RNE n'est PAS une commune fusionnée (912 communes ont une mairie et aucune
-  ligne RNE). Le repli « retrouvé par nom » attribuait alors le parrainage à
-  un homonyme du département — Régine THOMAS, maire de Robécourt,
-  remerciée d'une signature donnée à 130 km, au Puid, commune jamais
-  fusionnée qui possède toujours l'INSEE 88362. **L'INSEE de la commune
-  signée tranche** : identique = renommage (Vertus et Blancs-Coteaux sont
-  tous deux 51612), différent = deux communes. Les mairies **déléguées**
-  sont exclues de l'index : elles gardent le code historique, et les
-  compter refuserait les fusions que le repli existe pour traiter.
-- **Choisir le modèle par le rang ne suffit pas** : `fields()` fournissait
-  `candidat_recent`/`annee_recente` à tous les rangs, donc coller la phrase
-  de remerciement dans un modèle `_decouverte` imprimait « En , vous avez
-  présenté . » à 32 866 maires, en silence. Les placeholders de parrain
-  n'existent plus que pour un parrain, ceux de découverte que pour les
-  autres — le collage lève désormais en nommant le modèle.
-- **Le garde-fou de gabarit existait en double, et le plus faible commandait** :
-  Go était aveugle à `{candidat}`, à un accent décomposé et à une espace de
-  largeur nulle, et c'est Go qui arme le bandeau. `noyau/gabarit-cases.json`
-  est lu par les deux langages ; ajouter un cas oblige les deux à répondre.
-- **Les sources sont lues PAR POSITION** (r[4] = commune, r[8] = code sexe) :
-  une colonne insérée en amont décalait toutes les identités et produisait
-  34 826 lignes de charabia, exit 0, CI verte, publication sur Pages. En-têtes
-  vérifiées à l'index lu + plancher de rendement. Au passage : les deux
-  fichiers de parrainages n'écrivent PAS leur dernière colonne pareil
-  (« Candidat » en 2022, « Candidat-e parrainé-e » en 2017).
-- **IndexedDB ne remodèle une base que si la VERSION monte.** Les magasins
-  renommés à version constante laissaient toute base déjà ouverte sur
-  l'ancien schéma : chaque lecture levait, l'export de secours compris.
-- **Quatre tests certifiaient sans rien prouver** (trouvés par mutation) :
-  le canari YAML ignorait la forme `cmds:` du Taskfile — celle où le bug
-  avait été payé ; « l'écriture chez le voisin est refusée » était vacante
-  sur 3 tables sur 4 (les contraintes NOT NULL refusaient à la place de la
-  politique) ; le chemin d'import n'avait aucun test alors qu'il est le seul
-  à SUPPRIMER dans `mayors` ; l'ordre « les mieux notés d'abord » n'était
-  affirmé nulle part.
-- **Deux parcours e2e écrits le matin même verrouillaient un défaut** : la
-  sauvegarde n'affirmait que le suivi (la campagne ne revenait pas), l'autre
-  affirmait « volunteer » à l'écran. Un test qui passe pour une mauvaise
-  raison est pire que pas de test.
-- Reste : rôles affichés en français, signataire câblé (les emails d'équipe
-  partaient signés d'un autre), en-tête du CSV vérifiée en mode navigateur,
-  démarrage refusé sans compte de coordination.
+## Sources (all open)
 
-## Boucle adversariale, tours 4 à 7 (13/08/2026) — la leçon
-**Chaque correctif important a demandé un tour de plus pour être juste.**
-C'est le résultat principal de la journée, et la raison de ne pas conclure
-sur un tour vert :
-- garde-fou de gabarit : Go aveugle à l'espace insécable → corrigé → JS
-  aveugle à U+0085, dans l'autre sens (`\s` diffère entre les deux
-  langages). `noyau/gabarit-cases.json` est lu par Go ET par TS ; ajouter
-  un cas oblige les deux à répondre.
-- sauvegarde navigateur : garde « magasin vide » qui ne se déclenchait
-  jamais (la première visite écrit la clé `liste`) → fusion clé par clé.
-- écran bloqué sur « Chargement… » : promesse qui ne se résout jamais →
-  promesse qui rejette → **écran identique**, l'appelant n'attrapait pas.
-- config de campagne écrasée au redémarrage : corrigée dans le code (les
-  `PARAPHE_*` explicites seuls surchargent), puis **réarmée par le chart**,
-  qui émettait les neuf clés du gabarit inconditionnellement. Les valeurs
-  de `chart/values.yaml` et de `.env.exemple` sont vides à dessein.
-- élision : ajoutée → fausse sur le h (la toponymie communale française est
-  germanique/normande, donc h aspiré : « de Havange », pas « d'Havange »).
-- pagination : OFFSET sautait un maire → keyset → curseur illisible qui
-  rejouait la page 1 et bouclait à l'infini.
-- **Six tests écrits le même jour certifiaient sans rien prouver** — dont
-  une garde CI sur `process.env.CI` qui rendait le job `outils` rouge à
-  chaque push, et `release.yml` passe par la CI : plus rien n'aurait pu
-  être publié.
-- Le défilement infini rejouait une page en échec 60 fois/s : 599 requêtes
-  en 10 s depuis un seul onglet, un déni de service auto-infligé.
-Méthode qui a tout trouvé : **muter le code et exiger que le test rougisse**.
+Public domain for the Conseil constitutionnel endorsements, Etalab open
+licence for the RNE.
 
-## Boucle adversariale sur le cloisonnement, 7 tours (14-15/08/2026)
+- **Endorsements 2017 and 2022**: Conseil constitutionnel via data.gouv.fr —
+  the final nominative publication (official, office, commune, candidate).
+- **RNE, mayors file**: Ministry of the Interior via data.gouv.fr, updated
+  continuously (state after the 2026 municipal elections).
+- **Public service directory** (DILA, api-lannuaire.service-public.fr):
+  email, address, phone and website of each town hall, keyed by INSEE code.
+  This is THE contact source — no need to scrape municipal websites.
 
-**67 défauts corrigés, AUCUN dans le produit.** Tous dans les garde-fous
-censés le prouver. C'est le résultat, et il vaut plus que la liste :
+## Locked decisions
 
-- **Le canari SQL est une heuristique de regex** — pas d'analyseur, choix
-  mesuré et verrouillé. Sept tours lui ont trouvé **46 contournements**.
-  Depuis le retrait de RLS il est le seul mur : le tenir aiguisé n'est pas
-  optionnel.
-- **Trois motifs sont revenus à chaque tour**, et il faut les chercher par
-  leur nom :
-  1. *Un jeton « je n'ai pas su lire » compté comme une preuve* (`$?`, `$SUB`).
-     Un échec de lecture ne prouve rien : ou le code devient lisible, ou le
-     site est déclaré.
-  2. *Une écriture assérée par ce qui n'a PAS changé* — sonde à 415, codes
-     de retour jetés, sonde à 409, relecture d'une colonne sur trois,
-     politique qu'aucune sonde n'exerçait. Toujours asserter le code de
-     retour AVANT de conclure d'une absence, et se demander si le marqueur
-     serait ATTEIGNABLE sans le mur.
-  3. *Le canari et PostgreSQL lisant le même texte différemment* :
-     `NOT (org_id=$1)`, commentaires `/* imbriqués */`, `E'\'échappé'`,
-     `DO $$…$$`.
-- **Un garde-fou qui s'auto-vérifie ne garde rien.** `walledTables` décidait
-  à la fois ce qui était muré et ce que les tests contrôlaient. La base
-  répond désormais (`TestEveryPerCampaignTableIsWalled`). Chercher ce motif
-  ailleurs avant d'ajouter une liste.
-- **Un garde-fou qui PANIQUE n'examine rien après**, et ne rougit même pas
-  sur ce qu'il avait déjà trouvé. Un index de groupe hors bornes a suffi.
-- **Alterner les modèles entre les tours change ce qui est trouvé.** Le tour
-  7 (fable) a sorti 12 défauts sur un code que six tours d'opus venaient de
-  durcir, dont deux régressions du tour précédent.
-- Méthode, invariable : **muter le code et exiger que le test rougisse SUR
-  SON ASSERTION**. Rouge ailleurs, ou rouge sur un `t.Fatal(err)` générique,
-  ne prouve rien. Et vérifier par `grep -c` que la mutation s'est appliquée :
-  une édition qui ne prend pas rend le test vert et fait conclure à tort.
-- Piège d'outillage payé ici : **`git checkout <fichier>` sur un fichier non
-  commité** annule TOUT le travail en cours dessus, pas la seule mutation.
-  Sauvegarder par `cp` avant de muter.
+- **All code and technical documentation are in English**: identifiers,
+  comments, SQL, JSON keys, routes, CSV headers, status/rank/role values,
+  `PARAPHE_*` variables, `CLAUDE.md`, `README.md`, `DEPLOYMENT.md`,
+  `APPROACH.md`.
+  **French is for what the end user sees**: interface strings, error messages
+  shown in the app, the `{placeholders}` of the templates, the keys of
+  `campagne.yaml`, the comments of `chart/values.yaml` and `.env.exemple`
+  (read by whoever runs a campaign), the generated file names
+  (`01_maires_cibles_prioritaires.csv`…), `rapport.md`, `GUIDE.md` and
+  `modeles/*.md`.
+  `PARAPHE_BASE_PATH` is Vite's base path, not to be confused with
+  `PARAPHE_BASE_DOMAIN` — hence the suffix.
+- **Candidate classification** lives in `outils/build.ts` (TIER_A / TIER_B),
+  transparent and adjustable; the report lists every candidate with its total
+  and its class. A = real candidates (≥5 endorsements) who did not qualify,
+  excluding mainstream figures. B = outsiders who qualified narrowly
+  (Arthaud, Poutou, Lassalle, Cheminade, Asselineau 2017) plus Taubira 2022.
+  Endorsements "calling on" non-candidates (Pesquet, Hollande 2022…) and
+  party figures (Juppé, Yade…) do not count.
+- **Score**: A=2, B=1, +1 for endorsing a small candidate in BOTH 2017 and
+  2022. P1 = at least one A. A B signatory of both years (score 3) ranks above
+  a lone A (score 2): repetition predicts better than intensity.
+- **The target is a person, not a commune.** If the mayor changed, the commune
+  leaves the list (file 02 keeps the record).
+- **Output is CSV `;` UTF-8-BOM** (Excel and LibreOffice friendly). File 01
+  carries the three channels (email, phone + opening hours, postal address)
+  and two mail-merge columns (`candidat_recent` as prose, `annee_recente`).
+- **Full base `out/04_base_complete.csv` (34,826 mayors), three ranks**:
+  `has_endorsed` (~1,960, the app's default filter), `commune_has_endorsed`
+  (3,049 — the commune has a precedent, the mayor changed), `no_signal`
+  (29,805). Necessary: ~1,960 targets at 10-15 % conversion do not produce
+  500 signatures.
+  **The rank chooses the template** (`modeles/*_decouverte.txt`): "you
+  endorsed X" is said at rank `has_endorsed` and nowhere else, and the
+  endorser placeholders exist only for an endorser. `task messages` mails
+  file 01 ONLY — 34,800 bulk emails would be spam.
+- Tag `parrainage_theme_democratique` (142 targets): endorsed a candidacy
+  about how democracy works (Marchandise/LaPrimaire, Egger/RIC,
+  Koenig/subsidiarity, Jardin, Nikonoff, Faudot, Troadec). The tag describes
+  **a public act on record**, never a conviction — do not rename it to
+  "leaning": an elected official's sincerity is not ours to presume.
 
-## Multi-campagnes (une instance, plusieurs organisations)
-- `PARAPHE_BASE_DOMAIN` vide = **mono-campagne**, comportement d'origine :
-  tout hôte sert la campagne d'amorçage. Renseigné = chaque campagne sur
-  `<slug>.<domaine>`, l'apex servant l'accueil public et la modération.
-  Le mode ne se choisit pas à la compilation : il se lit dans l'en-tête
-  `Host` de chaque requête.
-- **La liste des maires reste COMMUNE et en lecture seule** (donnée publique,
-  identique pour tous). Seules les colonnes de travail sont sorties de
-  `mayors` vers `assignments(org_id, insee_code, team_id, volunteer,
-  status, updated_at)`. Dupliquer 34 826 lignes par campagne serait le
-  mauvais choix.
-- **Le cloisonnement est UN mur : toute requête touchant une table
-  par-campagne nomme la campagne** (`scopeOrg(r)`, lié en `$1` par le
-  constructeur `scoped(r)`). RLS PostgreSQL a existé en second mur, puis a
-  été retiré : décision de Jo, le 15/08/2026. Ne pas le réintroduire sans
-  la rouvrir.
-  Ce n'est pas une propriété qu'on tient à la discipline sur 30 sites — deux
-  tests la portent, et ils sont désormais tout ce qu'il y a :
-  1. `TestEveryQueryOnAWalledTableNamesTheCampaign` lit le paquet en AST et
-     exige, **par alias de table**, le prédicat `org_id`. Un seul croisement
-     est exempté, `db.go:removeStale`, parce que la liste des maires est
-     commune et qu'y supprimer une ligne doit tenir compte de TOUTES les
-     campagnes. Il refuse aussi `TRUNCATE`, `LOCK`, `DROP`, `ALTER`, `COPY`
-     et les blocs `DO $$…$$` : aucun prédicat ne peut les borner.
-  2. `TestNoCampaignSeesAnother` fait tourner deux campagnes sur une
-     instance, exerce chaque route, et vérifie qu'aucune ligne, aucun
-     compteur et aucune chaîne de la voisine ne revient.
-  **Ce canari est une heuristique de regex, pas un analyseur SQL** (choix
-  mesuré, cf. plus bas), et sept tours de revue lui ont trouvé 46
-  contournements. C'est le prix du mur unique : le tenir aiguisé n'est pas
-  optionnel.
-  `walledTables` ne s'auto-vérifie plus : `TestEveryPerCampaignTableIsWalled`
-  demande à la base quelles tables portent une colonne `org_id` et exige que
-  la liste corresponde — sans quoi retirer un nom supprimait le mur et sa
-  preuve d'un seul geste.
-  Dans `assignmentJoin`, le prédicat est dans la **condition de jointure**,
-  jamais dans le `WHERE` : en `WHERE`, la jointure externe devient interne et
-  tous les maires que personne n'a encore pris disparaissent.
-  La revue avait déjà trouvé deux trous de périmètre dans ce code
-  (`/export.csv`, `/statut`) ; un troisième entre campagnes ferait fuiter le
-  travail d'une campagne chez une autre.
-- **Deux périmètres sentinelles**, impossibles en base (les identités
-  commencent à 1) : `0` = instance (apex, ne voit AUCUNE ligne de travail),
-  `-1` = maintenance (import et migrations, traversent les campagnes).
-  Aucune requête HTTP ne peut atteindre `-1` : la résolution ne rend que des
-  identifiants lus en base ou `0`.
-- Rôle `administration` : valide les demandes d'hébergement, vit dans le
-  périmètre d'instance, ne lit aucune donnée de campagne. Il ne s'obtient que
-  par amorçage — `validRole` ne connaît que les trois rôles de campagne, ce
-  qui empêche une coordination de se le fabriquer.
-- La configuration de campagne vit **en base, par organisation**, éditable par
-  la coordination (onglet « Mon équipe »). Les `PARAPHE_*` de campagne
-  n'amorcent plus que la première.
-- Formulaire public de demande + modération : une demande ne crée rien.
-  Sans ça, le premier abus est le squat du nom d'un candidat, sans recours
-  pour la campagne squattée.
+## Data rules that decide the crossing
 
-## Sécurité et exploitation
-- Modèle d'accès = **comptes individuels** (email + mot de passe hashé) avec
-  cloisonnement par équipe locale, et par campagne quand l'instance en héberge
-  plusieurs. `PARAPHE_ADMIN_EMAIL`/`_PASSWORD` amorcent la
-  coordination, `PARAPHE_INSTANCE_ADMIN_*` l'administration d'instance.
-  `PARAPHE_HTTPS=1` derrière un proxy TLS (cookie Secure).
-  `PARAPHE_SECRET_KEY` : obligatoire en multi-instance ; sinon un secret
-  aléatoire est tiré au premier démarrage et conservé en base. Les valeurs
-  d'exemple du dépôt sont refusées au démarrage (elles sont publiques).
-- **Les valeurs réelles ne vont JAMAIS dans un fichier versionné** :
-  `.env` (compose) et `config/campagne.local.yaml` (surcharge locale) sont
-  ignorés ; `docker-compose.yml` et `config/campagne.yaml` sont des
-  gabarits publics.
-- L'import au démarrage est un UPSERT : les données (email, score, tags)
-  sont rafraîchies, les colonnes de travail (volunteer, status, updated_at) jamais
-  touchées ; une cible retirée du CSV est supprimée si intacte, signalée
-  « RETIRÉ » si déjà travaillée. Schéma migré par ALTER TABLE.
-- **Un seul rôle PostgreSQL**, celui que CNPG génère, propriétaire des tables :
-  l'application fait son propre DDL au démarrage. Ses privilèges n'ont plus
-  d'incidence sur le cloisonnement depuis le retrait de RLS — le mur est dans
-  les requêtes, pas dans la base. Les tests d'intégration tournent tout de
-  même sous un rôle sans privilège : c'est ce que fait la production.
+- **An endorser's identity is commune + surname + FIRST NAME, everywhere**:
+  the endorsement aggregation key, the RNE match, and the INSEE dedup. Drop
+  the first name and Mélina and Gilles Gardien merge, so a sitting mayor
+  inherits someone else's endorsement; the surname alone over-matches
+  successions. A duplicate INSEE in the output is an assert.
+- **The RNE's sex code (column 8) is the decisive discriminator.** It settles
+  Christian vs Christine (0.89 ratio, invisible to spelling) and in exchange
+  allows a low tolerance on typos (Henry/Henri). It also gives the output
+  civility — the Conseil constitutionnel's contradicts the RNE on two rows.
+- **Compare WHOLE first names.** Reduced to their first token, Marie-Cécile
+  and Marie-Ève are the same person. Truncation is accepted (Jean-Louis ⊇
+  Louis), contradiction is not.
+- **Overseas**: Martinique, Guyane, Polynésie, Nouvelle-Calédonie and SPM
+  have an EMPTY department label in the RNE — their name is in the "special
+  status collectivity" column. Without that fallback, 139 communes are
+  unreachable.
+- **Never assert what is not established.** A fuzzy commune match (0.87
+  confuses Goncourt and Voncourt) followed by a different name does not prove
+  a succession. The cutoff is 0.93, and doubt goes to file 03 "to check",
+  never to file 02 "successor in office".
+- **The INSEE code of the signed commune settles a rename from a merger**:
+  identical means renamed (Vertus and Blancs-Coteaux are both 51612),
+  different means two communes. A commune missing from the RNE is NOT a
+  merged commune — 912 have a town hall and no RNE row. Delegated town halls
+  are excluded from the index: they keep the historical code, and counting
+  them would refuse the very mergers the fallback exists for.
+- Civil status and output department come from the RNE. The endorsement files
+  vary (compound names, "Corse du Sud" vs "Corse-du-Sud"), and the 2022 file
+  has double spaces in some candidate names — everything goes through
+  `collapse()`.
+- RNE surnames are sometimes compound (birth name + used name) → match on
+  "one of the tokens". Communes merged or renamed since 2017 → fuzzy fallback
+  (difflib ≥0.87), then a search for the person across the whole department.
+- Directory: `pivot like "mairie"` also catches annexes and delegated town
+  halls → filter `type_service_local ∈ {mairie, mairie_com}` and dedup by
+  INSEE (shortest name = the main record). Its `telephone`, `adresse` and
+  `site` fields are JSON embedded in the CSV.
+- **`difflib.SequenceMatcher` has no equivalent outside Python.** The 0.93
+  commune threshold is tuned against ITS `ratio()`: another distance changes
+  which mayors are targeted, silently. The port is `noyau/texte.ts`, frozen
+  by `noyau/texte.test.ts`. Its "autojunk" heuristic (b ≥ 200 elements) is
+  not reproduced — the port raises rather than diverge in silence.
+- **`noyau/csv.ts` ends its lines with CRLF**, which is what Excel and
+  LibreOffice expect from a `;` file.
+- **The sources are read BY POSITION** (r[4] = commune, r[8] = sex code). A
+  column inserted upstream would shift every identity and produce 34,826
+  lines of nonsense with exit 0. Headers are checked at the index actually
+  read, and a yield floor guards the total. The two endorsement files do not
+  spell their last column the same way ("Candidat" in 2022, "Candidat-e
+  parrainé-e" in 2017).
+
+## Multi-campaign
+
+One instance can host several campaigns, one per subdomain.
+
+- `PARAPHE_BASE_DOMAIN` empty = **single campaign**: every host serves the
+  bootstrap campaign. Set = each campaign on `<slug>.<domain>`, the apex
+  serving the public home page and moderation. The mode is read from the
+  `Host` header of each request, not chosen at build time.
+- **The mayor list stays COMMON and read-only** — public data, identical for
+  everyone. Only the work columns move out of `mayors` into
+  `assignments(org_id, insee_code, team_id, volunteer, status, updated_at)`.
+- **Isolation is ONE wall: every query touching a per-campaign table names
+  the campaign**, bound as `$1` by the single constructor `scoped(r)`.
+  PostgreSQL row-level security was a second wall and was removed on
+  15/08/2026 — do not reintroduce it without reopening that decision.
+  Two tests carry the whole guarantee:
+  1. `TestEveryQueryOnAWalledTableNamesTheCampaign` reads the package as an
+     AST and demands the `org_id` predicate **per table alias**. One crossing
+     is exempt, `db.go:removeStale`, because the mayor list is common and
+     deleting a row there must account for EVERY campaign. It also refuses
+     `TRUNCATE`, `LOCK`, `DROP`, `ALTER`, `COPY` and `DO $$…$$` blocks: no
+     predicate can bound them.
+  2. `TestNoCampaignSeesAnother` runs two campaigns on one instance,
+     exercises every route, and checks that no row, no count and no string of
+     the neighbour comes back.
+  **That canary is a regular-expression heuristic, not a SQL parser** (a
+  measured decision — `pg_query_go` brings cgo into a project that has none,
+  `postgresql-parser` brings 180 transitive modules against 4 direct ones).
+  Seven adversarial rounds walked past it 46 times. It is the only wall:
+  keeping it sharp is not optional.
+  `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
+  asks the database which tables carry an `org_id` column and requires the
+  list to match.
+  In `assignmentJoin` the predicate sits in the JOIN CONDITION, never in the
+  `WHERE`: in a `WHERE`, the outer join becomes inner and every mayor nobody
+  has taken disappears.
+- **Two sentinel scopes**, impossible in the database (identities start at 1):
+  `0` = instance (the apex, which sees no work row), `-1` = maintenance
+  (import and migrations, crossing campaigns). No HTTP request can reach
+  `-1`: resolution only returns identifiers read from the database, or `0`.
+- Role `administration` validates hosting requests, lives in the instance
+  scope and reads no campaign data. It is obtained by bootstrap only —
+  `validRole` knows the three campaign roles and nothing else, so a
+  coordination cannot mint one.
+- Campaign configuration lives **in the database, per organisation**, edited
+  by coordination ("Mon équipe"). The campaign `PARAPHE_*` only bootstrap the
+  first one.
+- A public request form plus moderation: a request creates NOTHING until an
+  instance administrator approves it. Without that, the first abuse is
+  squatting a candidate's name, with no recourse for the campaign squatted.
+
+## Accounts and teams
+
+Access is by individual account (email + hashed password), three roles:
+coordination (sees everything, creates teams and leads), lead (opens
+volunteer access for THEIR team), volunteer. A team is a name plus
+departments; it draws only within its perimeter, sees only its own
+reservations, and a card reserved elsewhere is refused (403). Campaign
+counters stay visible to all, without names. `PARAPHE_ADMIN_EMAIL` /
+`_PASSWORD` bootstrap coordination: with no coordination account the app
+refuses to open rather than let anyone in.
+
+## Security and operations
+
+- `PARAPHE_INSTANCE_ADMIN_*` bootstrap the instance administration.
+  `PARAPHE_HTTPS=1` behind a TLS proxy (Secure cookie). `PARAPHE_SECRET_KEY`
+  is mandatory on a multi-campaign instance; otherwise a random secret is
+  drawn at first start and kept in the database. The repository's example
+  values are refused at startup — they are public.
+- **Real values never go in a versioned file**: `.env` (compose) and
+  `config/campagne.local.yaml` are ignored; `docker-compose.yml` and
+  `config/campagne.yaml` are public templates.
+- One PostgreSQL role, the one CloudNativePG generates, owner of the tables:
+  the application runs its own DDL at startup. Its privileges have no bearing
+  on isolation — the wall is in the queries.
+- Startup import is an UPSERT: data (email, score, tags) is refreshed, work
+  columns (volunteer, status, updated_at) are never touched. A target removed
+  from the CSV is deleted if untouched, flagged "RETIRÉ" if already worked on.
+  Schema migrated by ALTER TABLE.
+- **The team's work lives in PostgreSQL and is the only irreplaceable data**
+  — `task backup`.
+
+## Non-obvious constraints
+
+- **`FOR UPDATE SKIP LOCKED` does not protect a row that does not exist.**
+  Work lives in `assignments`, so a free card has NO row to lock: the
+  assignment IS the insert, with `ON CONFLICT (org_id, insee_code) DO UPDATE
+  … WHERE volunteer IS NULL`. PostgreSQL lets exactly one through.
+- **An empty assignment round does not mean the pool is empty.** Every
+  volunteer aims at the best-scored cards, so the loser of a race sees its
+  whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit
+  question — are there cards left? — before saying the pool is exhausted.
+- **A Kubernetes probe addresses the pod's IP**, so with a `Host` matching no
+  subdomain. `/api/config` answers it 404 in multi-campaign mode and no pod
+  ever becomes ready — hence `/health/db`, which queries the database without
+  resolving a campaign.
+- **An unquoted `:` in a `run:` breaks the WHOLE YAML file**, and GitHub
+  rejects the entire workflow. `outils/deploiement.test.ts` sweeps the
+  workflows and the Taskfile for it.
+- **IndexedDB only reshapes a database when the VERSION goes up.** Stores
+  renamed at a constant version leave every already-open database on the old
+  schema, and every read raises — the emergency export included.
+- **Third-party GitHub Actions are referenced by commit, never by tag.**
+  A tag is movable by whoever owns the repository, onto code that reads the
+  workflow's secrets. `outils/deploiement.test.ts` refuses a floating one.
+
+## How to work on the guards
+
+The isolation guards have been through seven adversarial rounds. What those
+rounds found, stated as rules rather than as a story:
+
+- **A "could not read this" token is not proof.** When the canary fails to
+  resolve an expression it marks it; accepting that marker as a bounding
+  predicate is how tautologies get declared compliant. Either the code
+  becomes readable, or the site is declared.
+- **Never assert a write by what did NOT change.** Assert the return code
+  first: a handler answering 400, 409 or 415 writes nothing, and "the
+  neighbour is untouched" then holds for a reason unrelated to any wall. And
+  ask whether the marker would be REACHABLE without the wall.
+- **The canary and PostgreSQL must read the same text the same way.**
+  `NOT (…)`, nested `/* /* */ */` comments, `E'\'escaped'` strings and
+  `DO $$…$$` bodies are where they disagree.
+- **A guard that verifies itself guards nothing** — one list deciding both
+  what is protected and what is checked loses both in a single edit.
+- **A guard that panics examines nothing after it**, and does not even fail
+  on what it already found.
+- **Mutate the code and require the test to go red ON ITS OWN ASSERTION.**
+  Red elsewhere, or red on a bare `t.Fatal(err)`, proves nothing. Check with
+  `grep -c` that the mutation applied: an edit that did not take leaves the
+  test green and the conclusion wrong.

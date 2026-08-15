@@ -112,7 +112,7 @@ export async function replaceMayors(rows: Mayor[]): Promise<number> {
   s.clear();
   for (const r of rows) s.put(r);
   await settle(t);
-  // what was STORED, not what was handed over: two rows sharing an INSEE
+  // what is STORED, not what is handed over: two rows sharing an INSEE
   // code are one record, and announcing the file's line count told a
   // volunteer they had mayors the list does not contain
   return new Set(rows.map((r) => r.insee_code)).size;

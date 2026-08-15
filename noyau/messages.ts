@@ -160,8 +160,8 @@ export function context(mayor: Mayor): string {
   const cited = readableHistory(clean(mayor.endorsement_history));
   if (!cited) return "";
   const who = proseName(clean(mayor.predecessor));
-  // "la municipalité précédente" only holds if the endorser was THE mayor:
-  // a deputy mayor may still be in office today
+  // "la municipalité précédente" only holds if the endorser held the mayor's
+  // office: a deputy mayor may still be in office today
   const wasMayor = clean(mayor.predecessor_mayor) === "oui";
   let lead: string;
   if (who && wasMayor) lead = `sous la municipalité précédente : ${who} avait présenté `;

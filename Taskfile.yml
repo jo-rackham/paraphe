@@ -40,7 +40,7 @@ tasks:
     cmds: [go build -o paraphe-api .]
 
   deploy:
-    desc: Construit et (re)lance l'app en Docker (cf. DEPLOIEMENT.md)
+    desc: Construit et (re)lance l'app en Docker (cf. DEPLOYMENT.md)
     # The password is required to START, never to stop or inspect: compose
     # interpolates the whole file for every command, so making it mandatory
     # there broke `docker compose down`.

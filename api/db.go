@@ -308,12 +308,11 @@ func importList(ctx context.Context, tx pgx.Tx, path string) error {
 	// re-import one after another and the last would exceed the timeout.
 	//
 	// The skip is decided on the CONTENT, never on the row count. Counting
-	// looked equivalent and is not: the routine change is a corrected
-	// email, a revised score, or a false positive whose rank drops — all
-	// count-preserving. The commune-not-merged fix of today is exactly
-	// that: 34 826 rows before and after, one mayor no longer thanked for
-	// an endorsement that was not theirs. On a count check, that fix never
-	// reaches a running instance, and the volunteer keeps sending it.
+	// looks equivalent and is not: the routine change is a corrected email,
+	// a revised score, or a false positive whose rank drops — all
+	// count-preserving. A correction that stops one mayor being thanked for
+	// someone else's endorsement leaves 34 826 rows before and after, and a
+	// count check would never let it reach a running instance.
 	digest, err := fileDigest(path)
 	if err != nil {
 		return err
@@ -333,10 +332,9 @@ func importList(ctx context.Context, tx pgx.Tx, path string) error {
 	// takes the whole list down with a 500 — every screen of every
 	// volunteer, on one bad row. Refused here, named, at startup.
 	for _, r := range rows {
-		// The empty string is the one non-integer that actually arrives, and
-		// it was let through here while two routes cast it without NULLIF:
-		// one row of 34 826 answered 500 on "take a batch", for the whole
-		// campaign. The casts are tolerant now AND this refuses it, because
+		// The empty string is the one non-integer that actually arrives. One
+		// such row in 34 826 answers 500 on "take a batch", for the whole
+		// campaign. The casts downstream are tolerant AND this refuses it:
 		// an empty score is a crossing that went wrong, not a value.
 		// int32, not int: the column is cast to PostgreSQL's `int`, so a
 		// value Atoi accepts happily — 3000000000 — still answers "out of
@@ -531,7 +529,7 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 		// enter. `cp .env.exemple .env` leaves PARAPHE_ADMIN_PASSWORD
 		// empty, and the application then came up, answered every request,
 		// and offered a sign-in form no password opens — with nothing in
-		// the logs. DEPLOIEMENT.md promises the opposite.
+		// the logs. DEPLOYMENT.md promises the opposite.
 		return fmt.Errorf("no coordination account, and none can be created: "+
 			"set PARAPHE_ADMIN_EMAIL and PARAPHE_ADMIN_PASSWORD (currently "+
 			"%q and %s). Without them nobody could ever sign in",

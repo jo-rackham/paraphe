@@ -78,8 +78,8 @@ campagne:
 	if cfg.BatchSize != 25 {
 		t.Errorf("batch_size = %d instead of 25", cfg.BatchSize)
 	}
-	// campagne.yaml was not touched: that is what guarantees no real value
-	// ends up in the repository
+	// campagne.yaml is untouched: that is what keeps a real value out of the
+	// repository
 	raw, err := os.ReadFile(filepath.Join(d, "campagne.yaml"))
 	if err != nil || string(raw) != shippedTemplate {
 		t.Error("the versioned template was modified")

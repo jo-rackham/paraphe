@@ -16,5 +16,5 @@ campagne:
 
 app:
   # nombre de maires attribués par « prendre un lot »
-  # (l'accès se fait par compte individuel : voir DEPLOIEMENT.md)
+  # (l'accès se fait par compte individuel : voir DEPLOYMENT.md)
   taille_lot: 10

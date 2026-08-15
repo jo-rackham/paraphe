@@ -96,8 +96,8 @@ test.describe.serial("the written messages", () => {
 
   // The card advertises a retouchable email. The two fields were
   // uncontrolled: "Copier" read the edited DOM, the mailto link kept the
-  // pristine text, and everything the volunteer had rewritten was dropped
-  // on the one path that opens their mail client.
+  // pristine text, dropping everything the volunteer rewrote on the one path
+  // that opens their mail client.
   test("what the volunteer rewrites is what the mail client receives",
     async ({ page }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
@@ -114,7 +114,7 @@ test.describe.serial("the written messages", () => {
       expect(decodeURIComponent(href ?? "")).toContain("Objet réécrit");
 
       // and addressed to THIS mayor: the link opens a mail client aimed at
-      // a named elected official, and the recipient was asserted nowhere
+      // a named elected official, so the recipient has to be asserted
       const shown = await page.locator("p", { hasText: /^Email :/ }).first()
         .innerText();
       const address = shown.replace(/^Email\s*:\s*/, "").trim();

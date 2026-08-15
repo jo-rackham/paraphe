@@ -15,7 +15,7 @@ import { CURRENT_STORES, VERSION } from "./db.ts";
 /**
  * A database at the CURRENT version, holding the stores this build
  * expects. Seeding at version 1 proved only that 1 → 2 upgrades — a
- * transition that can no longer regress — while the defect being guarded
+ * transition that cannot regress — while the defect being guarded
  * against is a store renamed WITHOUT raising the version, which leaves
  * every returning volunteer at the current version, reading stores that no
  * longer exist.

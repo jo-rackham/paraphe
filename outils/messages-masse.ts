@@ -6,7 +6,7 @@
 //   courriers.html   the deliverable letters, one per page, ready to print
 //                    (address positioned for a window envelope)
 //   sans_email.csv   the mayors to handle by postal mail only
-//   a_verifier.csv   what was SET ASIDE and why (invalid email, undeliverable
+//   a_verifier.csv   what is SET ASIDE and why (invalid email, undeliverable
 //                    address, missing field) — to handle by hand, never
 //                    silently
 //

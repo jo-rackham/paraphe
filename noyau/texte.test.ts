@@ -1,8 +1,7 @@
 // The difflib port must stay FAITHFUL to Python: the 0.93 threshold on
-// commune names was tuned against its implementation. These reference
-// values were computed by `difflib.SequenceMatcher(None, a, b).ratio()` —
-// if they stop matching, different mayors enter the list, and nothing else
-// would signal it.
+// commune names is tuned against its implementation. The reference values
+// come from `difflib.SequenceMatcher(None, a, b).ratio()`: if they stop
+// matching, different mayors enter the list and nothing else signals it.
 
 import { describe, expect, it } from "vitest";
 import { closestMatch, norm, ratio, sexFromTitle, stripControls, titleCase } from "./texte.ts";
@@ -74,9 +73,8 @@ describe("normalisation", () => {
 
 describe("stripControls()", () => {
   // The table only covered 11 of the 27 CP1252 positions: "L'Haÿ-les-Roses"
-  // came out "L'Ha-les-Roses". The same defect already paid for Œting, one
-  // code point further — and Ÿ is present in the national register of
-  // elected officials.
+  // comes out "L'Ha-les-Roses". Œ sits one code point further, and Ÿ is
+  // present in the national register of elected officials.
   it.each([
     ["\u009f", "Ÿ"], ["\u008c", "Œ"], ["\u009c", "œ"], ["\u0080", "€"],
     ["\u0092", "’"], ["\u009e", "ž"],

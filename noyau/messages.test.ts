@@ -96,7 +96,7 @@ describe("campaign values", () => {
 
 describe("the rank", () => {
   // The fallback failed on the wrong side: one uppercase letter in the
-  // column was enough to route 3,047 mayors to the thanking template.
+  // column is enough to route 3,047 mayors to the thanking template.
   it.each(["Autre", "AUTRE", "inconnu", "gauche_droite", "constructor"])(
     "%s does not resolve into \"they endorsed\"", (value) => {
       expect(rank({ rank: value })).toBe("no_signal");
@@ -201,7 +201,7 @@ describe("the unfilled-template guard, shared with the API", () => {
 });
 
 // "au service de Ambléon" — 257 of the 1 959 priority communes begin with a
-// vowel, so the last sentence a mayor reads was ungrammatical. Communes
+// vowel, or the last sentence a mayor reads is ungrammatical. Communes
 // carry their article in their name, and the elision depends on it.
 describe("the commune in the closing line", () => {
   it.each([
@@ -214,7 +214,7 @@ describe("the commune in the closing line", () => {
     ["L'Haÿ-les-Roses", "de L'Haÿ-les-Roses"],
     // French communal toponymy is Germanic, Frankish or Norman: its h is
     // aspirated. The 665 communes beginning with one cluster in Moselle,
-    // Alsace, Nord and Picardie, and eliding them was wrong on 44 letters.
+    // Alsace, Nord and Picardie, and eliding them is wrong on 44 letters.
     ["Havange", "de Havange"],
     ["Le Havre", "du Havre"],
     ["Honfleur", "de Honfleur"],
@@ -234,8 +234,8 @@ describe("the commune in the closing line", () => {
   });
 
   // GUIDE.md promises the personal touch is inserted automatically; the
-  // letter templates never carried the placeholder, so it was dropped on
-  // the printed channel without a word.
+  // a letter template that does not carry the placeholder drops it on the
+  // printed channel without a word.
   // the first line visible through the envelope window
   it.each([
     ["Le Havre", "Mairie du Havre"],

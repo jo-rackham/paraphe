@@ -388,8 +388,8 @@ export function compareFirstNames(a: string, b: string): string {
  * The identity of an endorser, as the aggregation groups them. The first
  * name is PART of it: without it two namesakes of the same commune — a
  * predecessor and their successor, two spouses — merge into one person,
- * and the current mayor inherits the other's endorsements. Five false
- * « merci pour votre parrainage » were traced to exactly that.
+ * and the current mayor inherits the other's endorsements — five false
+ * « merci pour votre parrainage » on the real data.
  *
  * Grouped on the FIRST TOKEN, because one person is written two ways
  * across the two years — « Jean-Claude » in 2017 and « Jean-Claude
@@ -559,7 +559,7 @@ export function main(): void {
     // fallback exists for.
     if (/délégu|annexe/i.test(c.cardName)) continue;
     // "Mairie - Le Puid" and the address's own commune name: two spellings
-    // of the same place, and either may be the one that was signed
+    // of the same place, and either may be the one signed
     const label = c.cardName.replace(/^mairie[^-]*-\s*/i, "");
     for (const name of [label, c.city]) {
       const key = norm(name);
@@ -662,14 +662,14 @@ export function main(): void {
       // This fallback only holds when the signed commune said nothing.
       // When it is in the RNE with another mayor, we have proof the
       // endorser is gone: letting a departmental namesake win thanked 12
-      // mayors for an endorsement that was not theirs, under the
+      // mayors for an endorsement that is not theirs, under the
       // "renamed/merged commune" label the data contradicts.
       // A commune absent from the RNE is not thereby a merged commune: it
       // may simply have no mayor row this month — 912 communes have a town
       // hall in the directory and no RNE row. Taking the fallback there
       // hands the endorsement to a departmental namesake 130 km away, and
       // the letter thanks them for it. If the signed commune still owns an
-      // INSEE code of its own, it was neither renamed nor merged.
+      // INSEE code of its own, it is neither a rename nor a merger.
       // successor in place: the commune IS in the RNE, under someone else
       const counterProof = verdict === "different" && !approx;
       const hits = counterProof ? [] : (byPerson.get(deptN) ?? [])
@@ -716,7 +716,7 @@ export function main(): void {
 
   // dedup: the same person counted twice when the commune or name spelling
   // (compound, accents) differs between 2017 and 2022 -> merge. The first
-  // name was already checked against the RNE: at equal INSEE it is the same
+  // name is already checked against the RNE: at equal INSEE it is the same
   // person — otherwise it is a matching bug, which we want to see.
   const { kept, mergedSpellings } = dedupeByInsee(stillMayor);
 
@@ -751,7 +751,7 @@ export function main(): void {
     // constitutionnel civilities contradict the RNE
     const civ = rne.sex === "F" ? "Mme" : rne.sex === "M" ? "M." : r.civ;
     // The COMMUNE also comes from the RNE: the endorsement file's is the
-    // SIGNED commune, no longer the right one after a merger or when the
+    // SIGNED commune, which a merger makes the wrong one, as does the case where the
     // official changed town halls — 36 letters read "Mairie de
     // <elsewhere>". The spelling, though, is taken where it is best: the
     // directory first, then the endorsement file if it designates the same
@@ -841,7 +841,7 @@ export function main(): void {
         hist = [...past.small].sort(cmp).join(" | ");
         predecessor = `${past.firstName} ${past.lastName}`;
         // "sous la municipalité précédente" has to be true on both counts.
-        // A deputy mayor was not THE mayor — and a 2017 endorser led the
+        // A deputy mayor is not THE mayor — and a 2017 endorser led the
         // 2014-2020 term, two elections ago (2020, then March 2026), so
         // the sentence contradicts the year it cites. A local official
         // spots either one immediately. The RNE cannot settle it: all

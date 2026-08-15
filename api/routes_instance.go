@@ -29,9 +29,9 @@ const (
 
 // maxPendingRequests bounds STORAGE, nothing else: a request is never
 // deleted, and one costs at most ~92 KB now that its fields are bounded.
-// It was 100, chosen to sit below the queue screen's LIMIT — which turned
+// A ceiling low enough to sit below the queue screen's LIMIT would turn
 // « a request can be pushed off the page » into « no request can be filed
-// at all », closable by an attacker for 9 KB. The queue now returns every
+// at all », closable by an attacker for 9 KB. The queue returns every
 // pending request instead, so nothing is hidden and this ceiling is only
 // reached by an attack that has to pay 10x more for it.
 const maxPendingRequests = 1000
@@ -179,9 +179,9 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 	// identity.
 	//
 	// EVERY pending request, and only then the last decided ones. A single
-	// LIMIT over both pushed a real campaign's request off the only screen
-	// that can accept it — 200 anonymous requests were enough, and the
-	// campaign had no way to know.
+	// LIMIT over both would let 200 anonymous requests push a real
+	// campaign's off the only screen that can accept it, with no way for
+	// that campaign to know.
 	const queueColumns = "id, slug, name, requester_email, requester_name, " +
 		"message, state, COALESCE(reason,'') AS reason, COALESCE(ts,'') AS ts, " +
 		"COALESCE(decided_at,'') AS decided_at, " +

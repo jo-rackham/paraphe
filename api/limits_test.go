@@ -14,10 +14,9 @@ import (
 
 // Canaries over the SOURCE, not over a running server.
 //
-// Every defect these describe was found by an adversarial round, fixed at
-// the one site that had been noticed, and found again — somewhere else —
-// the round after. A test that exercises today's routes says nothing
-// about the route someone adds next month; these read the code and refuse
+// A test that exercises today's routes says nothing about the route someone
+// adds next month, and a defect fixed only where it is noticed
+// comes back somewhere else. These read the code and refuse
 // the shape itself.
 //
 // They have now been broken twice, and each break taught the same thing:
@@ -66,8 +65,8 @@ func apiPackage(t *testing.T) map[string]*ast.File {
 
 // stringValues: every identifier bound to a string the canary can read —
 // constants AND variables, at package level or inside a function. Reading
-// only constants was the second break: the card history's query was moved
-// into a local variable and its missing LIMIT went unseen.
+// only constants misses a query moved into a local variable, and with it
+// that query's missing LIMIT.
 func stringValues(files map[string]*ast.File) map[string]string {
 	known := map[string]string{}
 	learn := func(names []*ast.Ident, values []ast.Expr) {
@@ -122,9 +121,9 @@ func stringValues(files map[string]*ast.File) map[string]string {
 
 // sqlText reads a query expression BEST EFFORT: the parts it can resolve
 // are concatenated, the parts it cannot (a WHERE clause built at run time)
-// leave a gap. Giving up on the whole expression was the first break — the
-// card history's filter is a variable, so the query the canary exists for
-// was skipped entirely.
+// leave a gap. Giving up on the whole expression skips the card history's
+// query entirely, since its filter is a variable — and that query is what
+// this canary exists for.
 //
 // A LIMIT hidden inside such a gap is reported as missing. That is the
 // right bias: a ceiling on an append-only table is worth writing where it

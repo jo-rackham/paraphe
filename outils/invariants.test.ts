@@ -1,6 +1,6 @@
 // The guards this crossing rests on, pinned by construction.
 //
-// Each of these was found by mutation: removing the guard left all 237
+// Each of these is held by mutation: removing the guard leaves all 237
 // tests green. They protect the two claims the project cannot get wrong —
 // that a mayor is only ever thanked for an endorsement they made, and
 // that the files open correctly in the spreadsheet volunteers use.
@@ -77,7 +77,7 @@ describe("one row per INSEE", () => {
   it("reports the best-established match, whichever came first", () => {
     // One person can be matched twice, differently: the commune spelt as
     // signed in one year, found by the fuzzy fallback in the other. Taking
-    // whichever record was read first made the confidence shown to a
+    // whichever record is read first would make the confidence shown to a
     // volunteer depend on the order the source files are listed in.
     const weak = { ...target("88362", "Jean-Louis"), conf: "retrouvé par nom" };
     const strong = { ...target("88362", "Jean-Louis"), conf: "exact" };

@@ -31,7 +31,7 @@ export function validSlug(slug: string): boolean {
 
 /**
  * The offer is for a campaign NOBODY has typed into — not merely one that
- * is incomplete. A volunteer who filled eight fields of nine was offered a
+ * is incomplete. A volunteer who filled eight fields of nine is offered a
  * link that replaced all nine, and `signataire` is the signature at the
  * bottom of every email to a mayor.
  *

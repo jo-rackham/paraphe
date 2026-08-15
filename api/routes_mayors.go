@@ -184,10 +184,10 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(v.Get("q"))
 
 	// Keyset, not OFFSET. The team modifies the very set being paged: a card
-	// entering or leaving the filter between two pages shifted every
-	// following offset by one, so a mayor was SKIPPED — and in a campaign
-	// whose object is coverage, a skipped mayor is one nobody ever contacts.
-	// The cursor carries the last row of the previous page.
+	// entering or leaving the filter between two pages shifts every following
+	// offset by one, skipping a mayor — and in a campaign whose object is
+	// coverage, a skipped mayor is one nobody ever contacts. The cursor
+	// carries the last row of the previous page.
 	after, err := decodeCursor(v.Get("after"))
 	if err != nil {
 		errorJSON(w, http.StatusBadRequest, "Curseur de pagination illisible.")
@@ -307,9 +307,9 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 			req.p(accountOf(r).MyTeam()))
 	}
 	// LIMIT: this history is re-read on EVERY status write, so an unbounded
-	// one is paid again at each POST — 800 long notes answered a 96 MB body
-	// and took the server's heap from 1 to 320 MB for a single request.
-	// Nobody has contacted one mayor 200 times.
+	// one is paid again at each POST — 800 long notes make a 96 MB body and
+	// take the server's heap from 1 to 320 MB for a single request. Nobody
+	// has contacted one mayor 200 times.
 	notes, err := s.rows(r,
 		"SELECT COALESCE(c.name, n.volunteer) AS volunteer, n.status, n.note, n.ts "+
 			"FROM notes n LEFT JOIN accounts c "+
@@ -408,8 +408,9 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// the card is re-read INSIDE the transaction, before its commit: the
-	// answer then describes exactly what was recorded, and a failing commit
-	// can still be reported — after answering 200, it no longer could.
+	// answer then describes exactly what is recorded, and a failing commit
+	// can still be reported — which answering 200 first would make
+	// impossible.
 	card, ok := s.cardAndNotes(w, r, insee)
 	if !ok {
 		return
@@ -479,8 +480,8 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 
 	// scoped, not &query{}: the campaign is $1 by construction. Bound by
 	// hand among other parameters, `org_id=$1` meant whichever value
-	// happened to be first — reordering two of these lines was enough to
-	// filter on a team identifier, with every guard still green.
+	// happens to be first: reordering two of these lines is enough to filter
+	// on a team identifier, with every guard still green.
 	req := scoped(r)
 	org, team, me := "$1", req.p(c.MyTeam()), req.p(c.Email)
 	filters := criteria(req)

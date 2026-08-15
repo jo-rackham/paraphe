@@ -1,7 +1,7 @@
 // The message engine, bound to the repository's templates.
 //
 // The templates live in `modeles/` at the root, once: the mass mailing
-// reads the same files. Having had two identical copies was only a
+// reads the same files. Two identical copies would only be a
 // divergence in waiting — a text fixed on one side, sent from the other.
 
 import courrierTxt from "../../modeles/courrier.txt?raw";

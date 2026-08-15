@@ -12,19 +12,16 @@ import (
 	"testing"
 )
 
-// The lint half of the campaign wall: every query naming a walled table must
-// also name the campaign.
+// The campaign wall, read from the source: every query naming a per-campaign
+// table must also name the campaign.
 //
-// Its first version asked whether the string "org_id" appeared anywhere in
-// the statement. An adversarial pass wrote twelve queries that satisfied it
-// while leaking — the word in a SELECT list, in a comment, next to `OR TRUE`,
-// a table written `public.accounts` or `"accounts"`, a `DELETE … USING`, and
-// SQL the canary could not read at all and passed over IN SILENCE. Each is
-// closed below, and each has its case in canaryCases.
+// This is a regular-expression heuristic over the package's AST, not a SQL
+// parser, and has to be read as one: every rule below exists because some
+// shape of valid SQL slips past a simpler one, and says which shape.
 //
-// What it still cannot see: whether a predicate in a SUBQUERY constrains the
-// outer statement. That needs a real SQL parser; TestNoCampaignSeesAnother
-// is what covers it, by exercising every route against two campaigns.
+// What it cannot see: whether a predicate in a SUBQUERY constrains the outer
+// statement. TestNoCampaignSeesAnother covers that, by exercising every route
+// against two campaigns.
 
 // The list comes from multiorg.go, not from a copy, and the database is
 // asked whether it is complete — TestEveryPerCampaignTableIsWalled. A table
@@ -45,10 +42,9 @@ var (
 	// a tag never starts with a digit.
 	dollarOpen = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$`)
 	sqlSpaces  = regexp.MustCompile(`\s+`)
-	// A predicate whose RIGHT-hand side is bounded. Checking the equality
-	// alone accepted `org_id = org_id`, `org_id = COALESCE($1, org_id)` and
-	// `org_id = ANY(SELECT id FROM orgs)` — three ways of writing "every
-	// campaign" that read as a filter.
+	// A predicate whose RIGHT-hand side is bounded. The equality alone is not
+	// enough: `org_id = org_id`, `org_id = COALESCE($1, org_id)` and
+	// `org_id = ANY(SELECT id FROM orgs)` all mean "every campaign".
 	orgPredicate = regexp.MustCompile(
 		`(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID(?:::[A-Z]+)?\s*=\s*` +
 			`(\$SUB\d+|\$\d+|%\[?\d*\]?S|(?:([A-Z][A-Z0-9_]*)\s*\.\s*)?ORG_ID)`)
@@ -59,19 +55,17 @@ var (
 	dynamicTable = regexp.MustCompile(`(?:FROM|JOIN|INTO|USING|UPDATE)\s+%`)
 	// What makes a resolved string a statement rather than a value. Session
 	// commands count: `SET lock_timeout` reads no table, but it IS the
-	// statement of its call, and treating it as a value made three innocent
-	// sites look invisible.
+	// statement of its call.
 	sqlVerb = regexp.MustCompile(
 		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP|GRANT|TRUNCATE)\b`)
 )
 
 // normaliseSQL: what the canary reads. Comments and string literals are
-// REMOVED — "org_id" inside either is not a filter, and both were used to
-// walk past the first version.
+// REMOVED — "org_id" inside either is not a filter.
 func normaliseSQL(sql string) string {
-	// Literals FIRST. Run the other way round, the block-comment pattern
-	// spanned two strings — `WHERE a='/*' AND org_id=$1 AND b='*/'` — and ate
-	// the real predicate between them.
+	// Literals FIRST: the other way round, a block-comment pattern spans two
+	// strings — `WHERE a='/*' AND org_id=$1 AND b='*/'` — and eats the real
+	// predicate between them.
 	sql = stripDollarQuoted(sql)
 	sql = stripStringLiterals(sql)
 	sql = stripBlockComments(sql)
@@ -79,12 +73,10 @@ func normaliseSQL(sql string) string {
 	return sqlSpaces.ReplaceAllString(strings.ToUpper(sql), " ")
 }
 
-// stripStringLiterals removes single-quoted strings, ESCAPES INCLUDED. The
-// pattern `'[^']*'` closed on the first quote it met, so `E'\'org_id=$1'` —
-// one string as far as PostgreSQL is concerned — left `ORG_ID=$1` standing
-// outside it, and a comparison against a piece of text read as a filter.
-// A doubled `”` escapes a quote in any string; a backslash does too in the
-// E'…' form.
+// stripStringLiterals removes single-quoted strings, ESCAPES INCLUDED. A
+// pattern closing on the first quote it meets leaves `ORG_ID=$1` standing
+// outside a string PostgreSQL reads as one — the E'…' form escapes a quote
+// with a backslash, and any string escapes one by doubling it.
 func stripStringLiterals(sql string) string {
 	var out strings.Builder
 	for i := 0; i < len(sql); {
@@ -117,9 +109,8 @@ func stripStringLiterals(sql string) string {
 
 // stripBlockComments removes /* … */ COUNTING THE NESTING, which PostgreSQL
 // does and a non-greedy pattern does not. `/* /* */ org_id=$1 */` is entirely
-// a comment to the server; the pattern closed on the first `*/` and handed
-// the canary a predicate the database never sees — the query read as walled
-// and returned every campaign.
+// a comment to the server, so reading a predicate out of it credits the query
+// with a filter the database never applies.
 func stripBlockComments(sql string) string {
 	var out strings.Builder
 	depth := 0
@@ -142,12 +133,12 @@ func stripBlockComments(sql string) string {
 	return out.String()
 }
 
-// sqlTextMarked is sqlText with a difference that matters: an expression it
-// cannot resolve becomes the marker `$?` instead of vanishing. Dropped, a
-// bound parameter written `"org_id="+req.p(org)` left the text reading
-// `ORG_ID=` — no right-hand side — and a predicate that IS bound looked like
-// one that is not. The marker counts as bound; a right-hand side the
-// resolver CAN read is judged on its merits.
+// sqlTextMarked is sqlText with one difference: an expression it cannot
+// resolve becomes the marker `$?` instead of vanishing. Dropped, a bound
+// parameter written `"org_id="+req.p(org)` leaves the text reading `ORG_ID=`
+// with no right-hand side, so a bound predicate looks unbound. The marker
+// counts as bound; a right-hand side the resolver CAN read is judged on its
+// merits.
 func sqlTextMarked(expr ast.Expr, values map[string]string) string {
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
@@ -172,10 +163,10 @@ func sqlTextMarked(expr ast.Expr, values map[string]string) string {
 	return "$?"
 }
 
-// stripDollarQuoted removes PostgreSQL dollar-quoted strings. RE2 has no
-// backreferences, so "the same tag again" cannot be written as a pattern —
-// the scan is spelled out instead. Left standing, `$$fake org_id = $1$$`
-// made a string comparison read as a filter.
+// stripDollarQuoted removes PostgreSQL dollar-quoted strings: left standing,
+// `$$fake org_id = $1$$` makes a string comparison read as a filter. RE2 has
+// no backreferences, so "the same tag again" cannot be a pattern and the scan
+// is spelled out.
 func stripDollarQuoted(sql string) string {
 	for {
 		loc := dollarOpen.FindStringIndex(sql)
@@ -197,12 +188,12 @@ func stripDollarQuoted(sql string) string {
 // level of its own, and the text around it keeps a `$SUB` where the group
 // stood.
 //
-// Two things follow, and both were findings. A table named only inside a
-// subquery — `SELECT x.email FROM (SELECT email FROM accounts) x` — is
-// checked at ITS level instead of disappearing with the fold. And a
-// predicate whose right-hand side IS a subquery — `WHERE org_id = (SELECT id
-// FROM orgs WHERE slug=$1)` — reads as `ORG_ID = $SUB`, which is bounded,
-// instead of looking like a predicate with nothing on its right.
+// Two things follow. A table named only inside a subquery — `SELECT x.email
+// FROM (SELECT email FROM accounts) x` — is checked at ITS level instead of
+// disappearing with the fold. And a predicate whose right-hand side IS a
+// subquery — `WHERE org_id = (SELECT id FROM orgs WHERE slug=$1)` — reads as
+// `ORG_ID = $SUB`, which is bounded, rather than as a predicate with nothing
+// on its right.
 func levels(sql string) []string {
 	inner := regexp.MustCompile(`\(([^()]*)\)`)
 	var out []string
@@ -218,21 +209,19 @@ func levels(sql string) []string {
 }
 
 // bounded: does this level carry a value from outside the statement? A
-// parenthesised group counted as a bounded right-hand side whatever it held,
-// so `WHERE org_id = (org_id)` — a tautology — and `WHERE org_id = (SELECT
-// 1)` — a constant naming whichever campaign is number one — both read as
-// filters. A group is bounding only if something in it is.
+// parenthesised group is bounding only if something IN it is — `(org_id)` is
+// a tautology and `(SELECT 1)` names whichever campaign is number one.
 func bounded(level string) bool {
-	// …and a group that can fall back ON THE COLUMN bounds nothing either.
-	// `org_id = (COALESCE($1, org_id))` holds a parameter, so it read as a
-	// filter; it is `org_id = org_id` for every row whenever $1 is null.
+	// A group that can fall back ON THE COLUMN bounds nothing: it holds a
+	// parameter, but `org_id = (COALESCE($1, org_id))` is `org_id = org_id`
+	// for every row whenever $1 is null.
 	if orgIDWord.MatchString(level) {
 		return false
 	}
 	// A SUBQUERY bounds only if the parameter picks the row. Anywhere else —
 	// an OFFSET, a LIMIT, an ORDER BY — it chooses which campaign comes back
-	// without ever being compared to anything, and `= (SELECT id FROM orgs
-	// LIMIT 1 OFFSET $1)` served the caller whichever one they asked for.
+	// without being compared to anything: `= (SELECT id FROM orgs LIMIT 1
+	// OFFSET $1)` serves the caller whichever one they ask for.
 	if selectWord.MatchString(level) {
 		where := subqueryWhere.FindStringSubmatch(level)
 		return where != nil && boundValue.MatchString(where[1])
@@ -254,10 +243,9 @@ func bounded(level string) bool {
 var (
 	boundValue = regexp.MustCompile(`\$\d+|%\[?\d*\]?S`)
 	subRef     = regexp.MustCompile(`\$SUB(\d+)`)
-	// The column, and not a column whose name merely starts with it. Asking
-	// `strings.Contains(…, "ORG_ID")` accepted `org_id_backup` in an INSERT's
-	// column list and in an ON CONFLICT key: the canary read a campaign where
-	// none was written.
+	// The column, not a column whose name merely starts with it: a substring
+	// test accepts `org_id_backup` in an INSERT's column list and in an ON
+	// CONFLICT key, reading a campaign where none is written.
 	orgIDWord = regexp.MustCompile(`\bORG_ID\b`)
 	// Statements whose body is code, not text: stripping the dollar quotes
 	// leaves nothing to check, and running them touches everything.
@@ -363,13 +351,11 @@ var queryCalls = map[string]bool{
 // localScope: the string bindings as seen INSIDE one function.
 //
 // stringValues resolves by name across the whole package, and `sql` is a
-// local in one file and a package-level binding in another. A name that
-// leaks across that boundary makes the canary read a query nobody wrote —
-// and read it as compliant. So: a parameter, or ANY name this function
-// assigns, stops meaning what the package said, whether or not the new value
-// can be read here. `sql, _ := build()` puts two names on the left, which the
-// collector below ignores; without the reset, the local went on resolving to
-// another file's compliant INSERT while a bare SELECT ran.
+// local in one file and a package-level binding in another. A name leaking
+// across that boundary makes the canary read a query nobody wrote. So: a
+// parameter, or ANY name this function assigns, stops meaning what the
+// package said, whether or not the new value can be read here — `sql, _ :=
+// build()` puts two names on the left, which the collector below ignores.
 func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	scoped := map[string]string{}
 	for k, v := range values {
@@ -415,7 +401,7 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 type statement struct{ File, Func, SQL string }
 
 // sqlStatements walks the package and yields every SQL string reaching a
-// call, with the file and enclosing function it was written in.
+// call, with the file and enclosing function it is written in.
 func sqlStatements(t *testing.T) []statement {
 	t.Helper()
 	files := apiPackage(t)
@@ -493,23 +479,20 @@ var conflictKey = regexp.MustCompile(`ON CONFLICT\s*\$SUB(\d+)`)
 // qualifiers: every name under which a predicate may address this table
 // reference. With an alias, that alias and nothing else. Without one, either
 // no qualifier at all or the table's own name — `WHERE accounts.org_id = $1`
-// is how the predicate is written when no alias was declared, and refusing it
-// sent the next author to write AROUND the canary rather than through it.
-// The empty qualifier is always among them: `SELECT a.email FROM accounts a
-// WHERE org_id=$1` is legal and correctly walled — declaring an alias does
-// not oblige the predicate to use it. Refusing it was a false positive, and
-// in a guard that blocks the build a false positive is what sends the next
-// author around it. An unqualified predicate under TWO walled tables would be
-// ambiguous, which PostgreSQL refuses outright, so nothing rides on it.
+// is how the predicate is written when no alias is declared.
+// The empty qualifier counts too: `SELECT a.email FROM accounts a WHERE
+// org_id=$1` is legal and correctly walled, since declaring an alias does not
+// oblige the predicate to use it. In a guard that blocks the build, a false
+// positive costs as much as a hole — it sends the next author around it.
 func qualifiers(alias, table string, sole bool) []string {
 	names := []string{table}
 	if alias != "" {
 		names = []string{alias}
 	}
 	// …but only when it can mean ONE table. With two walled tables at the
-	// same level, `FROM accounts a, notes n WHERE org_id=$1` had a single
-	// unqualified predicate vouching for BOTH, and whichever one PostgreSQL
-	// did not resolve it to was scanned unbounded.
+	// same level, `FROM accounts a, notes n WHERE org_id=$1` would have a
+	// single unqualified predicate vouching for both, leaving whichever one
+	// PostgreSQL does not resolve it to scanned unbounded.
 	if sole {
 		names = append(names, "")
 	}
@@ -774,14 +757,11 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 							if notAnAlias[alias] {
 								alias = ""
 							}
-							// An INSERT is never bounded by a WHERE. That clause
-							// restricts what its SELECT source READS; it says
+							// An INSERT is never bounded by a WHERE: that clause
+							// restricts what its SELECT source READS and says
 							// nothing about which campaign the new row lands in.
-							// Consulting the column list only as a fallback,
-							// `INSERT INTO assignments (insee_code, status) SELECT
-							// … FROM notes WHERE org_id=$1` read as compliant,
-							// and the canary's promise — the row written carries
-							// the campaign — was left to a NOT NULL constraint.
+							// The column list is the only thing that does, so it
+							// is required and not consulted as a fallback.
 							if strings.EqualFold(strings.TrimSpace(m[1]), "INTO") {
 								if insertNamesCampaign(table, level) {
 									continue
@@ -812,8 +792,8 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		}
 	}
 
-	// An exemption that no longer covers anything is a stale claim, and the
-	// next query written where it used to apply would inherit it.
+	// An exemption covering nothing is a stale claim, and the next query
+	// written where it applied would inherit it.
 	for print, why := range crossesCampaigns {
 		if !used[print] {
 			t.Errorf("the exemption %q (%s) matches no statement any more — "+
@@ -824,8 +804,8 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 
 // A walled table the canary does not RECOGNISE is a table it does not guard,
 // and it says nothing about it — the same silence as a query it cannot read.
-// `FROM "public"."accounts"` was spelt in a way tableRef did not match, so the
-// statement carried no walled table at all and went through unexamined.
+// A spelling tableRef does not match, such as `FROM "public"."accounts"`,
+// makes the statement carry no walled table at all.
 //
 // Every spelling PostgreSQL accepts for the same table must be seen. Adding a
 // form here before supporting it is the point: the list is the specification.
@@ -860,8 +840,8 @@ func TestEverySpellingOfAWalledTableIsSeen(t *testing.T) {
 
 // The canary reads SQL out of the syntax tree. Written in a shape it cannot
 // resolve — a helper's return value, a %s placeholder holding the table name,
-// a range over a slice of statements — a query became INVISIBLE to it, and
-// invisible read as compliant. Silence is now a failure of its own.
+// a range over a slice of statements — a query is INVISIBLE to it, which
+// would otherwise read as compliant. Silence is a failure of its own.
 func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 	// Sites whose SQL cannot be resolved statically and that are known not to
 	// touch a walled table. Each is a promise, and an unused one is an error.

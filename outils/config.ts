@@ -49,7 +49,7 @@ interface ConfigFile {
 /**
  * `strict` refuses values still at the template ("Prénom NOM"): always
  * true for a mass mailing. Letting them through would send placeholders to
- * thousands of mayors — it happened, with 1,934 emails.
+ * thousands of mayors: 1,934 emails on the real list.
  */
 export function loadConfig({ strict = true } = {}): Config {
   const campaign: Campaign = {};

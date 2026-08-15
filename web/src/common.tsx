@@ -65,7 +65,7 @@ export const EMPTY_CFG: Campaign = {
 /**
  * The nine campaign fields, described once for both modes: the form, the
  * read-only recap and the "still on template values" banner all read this
- * list. Two copies used to exist and had already drifted — they disagreed on
+ * list. Two copies would drift: they disagree on
  * what ville_envoi does.
  *
  * `group` is what removes the real ambiguity: a volunteer reading a flat list
@@ -270,8 +270,8 @@ export interface CardDraft {
   body: string;
   note: string;
   /**
-   * The PRISTINE RENDER this text was a rewrite of. Listing what the
-   * render derives from was tried and missed a field every time: keying
+   * The PRISTINE RENDER this text is a rewrite of. Listing what the render
+   * derives from misses a field every time: keying
    * on the INSEE alone revived a predecessor's letter on his successor's
    * card, and adding the mayor's identity still missed the rank — a list
    * rebuilt with a corrected false positive left « vous avez présenté »
@@ -340,7 +340,7 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   const { valid } = M.emailAddresses(mayor);
   const badAddress = M.incompleteAddress(mayor);
   // the SAME normalisation as the engine: the screen announced a
-  // "discovery message" while the send button was armed with a thank-you
+  // "discovery message" while the send button carries a thank-you
   const rank = M.rank(mayor);
 
   // The email fields are CONTROLLED, and reset when the card changes — or
@@ -352,7 +352,7 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   // under this same BASIS — same person, same campaign, same touch, same
   // signer, compared by value: an identity compare threw a kept draft
   // away on every reconnection (a fresh config object with equal values)
-  // and missed a personal touch written after the card was first opened.
+  // and would miss a personal touch written after the card is first opened.
   const pristine = { subject: rendered?.subject ?? "", body: rendered?.body ?? "" };
   // The render, PLUS the identity it is addressed to. No email template
   // carries the mayor's name — {salutation} is a gender and {commune_de} a
@@ -361,9 +361,9 @@ export function Fiche({ mayor, cfg, personalNote, signer, status: initialStatus,
   const basis = JSON.stringify({ ...pristine, error, who: cardWho(mayor) });
   const who = cardWho(mayor);
   const kept = () => drafts?.current[mayor.insee_code as string];
-  // The email follows the render it was a rewrite of; the note follows
+  // The email follows the render it is a rewrite of; the note follows
   // the PERSON, since it derives from nothing else — saving an unrelated
-  // personal touch used to throw away a call note taken minutes earlier.
+  // personal touch would throw away a call note taken minutes earlier.
   const freshEmail = () => {
     const k = kept();
     return k && k.basis === basis ? { subject: k.subject, body: k.body } : pristine;

@@ -183,9 +183,9 @@ test.describe.serial("browser mode", () => {
       await expect(row).toContainText("Email envoyé");
 
       // The tracking is not the whole backup. "Fusionner" is checked by
-      // default, and it used to skip the settings: after the wipe the
-      // campaign came back empty and the messages silently reverted to the
-      // shipped template, with a report that said nothing.
+      // default. Skipping the settings would bring the campaign back empty
+      // after a wipe, reverting every message to the shipped template with a
+      // report that says nothing.
       await page.getByRole("button", { name: "Ma campagne" }).click();
       await expect(page.getByLabel("Son nom", { exact: true }))
         .toHaveValue(CANDIDATE);

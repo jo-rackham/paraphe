@@ -2,7 +2,7 @@
 // the message engine.
 //
 // The port of `difflib.SequenceMatcher` below must stay FAITHFUL: the 0.93
-// threshold on commune names was tuned against the Python implementation.
+// threshold on commune names is tuned against the Python implementation.
 // Another distance (Levenshtein, Jaro) would give other matches, hence
 // other mayors in the list — with nothing signalling it.
 
