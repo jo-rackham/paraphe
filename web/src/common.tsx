@@ -1144,13 +1144,42 @@ type Theme = "system" | "dark" | "light";
 
 /** Reapplies the persisted choice; main.tsx calls it before React mounts
  *  so the page never flashes the wrong scheme. */
-export function applyStoredTheme() {
-  const stored = localStorage.getItem(THEME_KEY);
-  if (stored === "dark" || stored === "light") {
-    document.documentElement.dataset.theme = stored;
+// Reaching localStorage THROWS where the origin has no storage: a sandboxed
+// iframe, a browser set to block site data. Reading the theme runs before
+// the first render, so the exception would escape main.tsx and leave #root
+// empty — a blank page, no message, on a browser setting the volunteer may
+// not know they have. A theme is a preference: without storage it simply
+// does not persist.
+function storedTheme(): string | null {
+  try {
+    return localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeTheme(theme: Theme) {
+  try {
+    if (theme === "system") {
+      localStorage.removeItem(THEME_KEY);
+    } else {
+      localStorage.setItem(THEME_KEY, theme);
+    }
+  } catch {
+    // the choice holds for this page; the OS decides again on the next one
+  }
+}
+
+function applyTheme(theme: string | null) {
+  if (theme === "dark" || theme === "light") {
+    document.documentElement.dataset.theme = theme;
   } else {
     delete document.documentElement.dataset.theme;
   }
+}
+
+export function applyStoredTheme() {
+  applyTheme(storedTheme());
 }
 
 const THEME_CYCLE: Record<Theme, Theme> = {
@@ -1169,17 +1198,16 @@ const THEME_LABELS: Record<Theme, string> = {
  *  goes. */
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(() => {
-    const stored = localStorage.getItem(THEME_KEY);
+    const stored = storedTheme();
     return stored === "dark" || stored === "light" ? stored : "system";
   });
   const next = THEME_CYCLE[theme];
   const change = () => {
-    if (next === "system") {
-      localStorage.removeItem(THEME_KEY);
-    } else {
-      localStorage.setItem(THEME_KEY, next);
-    }
-    applyStoredTheme();
+    storeTheme(next);
+    // from the value, not from what was just written: where storage
+    // refuses, re-reading it would replay the previous theme and the
+    // button would look broken
+    applyTheme(next);
     setTheme(next);
   };
   return (

@@ -5,8 +5,26 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyStoredTheme, ThemeToggle } from "./common.tsx";
+
+// A sandboxed iframe, or a browser told to block site data for the origin,
+// makes every localStorage access THROW. applyStoredTheme runs before the
+// first render: unguarded, the exception escapes main.tsx and #root stays
+// empty — a blank page, no message.
+const withRefusingStorage = (fn: () => void) => {
+  const refuse = () => {
+    throw new DOMException("storage is not available", "SecurityError");
+  };
+  const spies = (["getItem", "setItem", "removeItem"] as const).map((m) =>
+    vi.spyOn(Storage.prototype, m).mockImplementation(refuse),
+  );
+  try {
+    fn();
+  } finally {
+    for (const s of spies) s.mockRestore();
+  }
+};
 
 let host: HTMLDivElement;
 let root: Root;
@@ -85,5 +103,31 @@ describe("the theme toggle", () => {
     localStorage.setItem("paraphe:theme", "bizarre");
     applyStoredTheme();
     expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+});
+
+describe("a storage that refuses does not take the page down with it", () => {
+  it("applyStoredTheme returns instead of throwing before the first render", () => {
+    withRefusingStorage(() => {
+      expect(() => applyStoredTheme()).not.toThrow();
+    });
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it("the toggle still mounts, and still switches the theme it cannot persist", () => {
+    withRefusingStorage(() => {
+      expect(() =>
+        act(() => {
+          root.render(<ThemeToggle />);
+        }),
+      ).not.toThrow();
+      expect(() =>
+        act(() => {
+          button().click();
+        }),
+      ).not.toThrow();
+      // the press is honoured for this page even though nothing was written
+      expect(document.documentElement.dataset.theme).toBe("dark");
+    });
   });
 });
