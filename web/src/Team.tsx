@@ -481,6 +481,37 @@ interface TableauProps {
   onMessage: (m: Message) => void;
 }
 
+/**
+ * One goal tile: the number is the information, the bar its silhouette
+ * against the goal. The bar is decoration — the text beside it already
+ * says "12 sur 500" — so assistive technology skips it.
+ */
+function Tuile({
+  label,
+  value,
+  goal,
+}: {
+  label: string;
+  value: number;
+  goal?: number;
+}) {
+  const pct = goal ? Math.min(100, Math.round((value / goal) * 100)) : null;
+  return (
+    <div className="tuile">
+      <p className="valeur">
+        {value.toLocaleString("fr")}
+        {goal !== undefined && <span className="objectif"> sur {goal}</span>}
+      </p>
+      <p className="libelle">{label}</p>
+      {pct !== null && (
+        <div className="jauge" aria-hidden="true">
+          <div className="barre" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [dept, setDept] = useState("");
@@ -530,6 +561,29 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
           présentations, dans au moins 30 départements, 50 au plus par
           département.
         </p>
+        <div className="tuiles">
+          <Tuile
+            label="Promesses et signatures"
+            value={(data.stats.promised ?? 0) + (data.stats.signed ?? 0)}
+            goal={500}
+          />
+          <Tuile
+            label="Départements avec une promesse"
+            value={data.departments_covered}
+            goal={30}
+          />
+          <Tuile
+            label="Mes fiches à traiter"
+            value={
+              data.mine.filter(
+                (m) =>
+                  !m.status ||
+                  m.status === "to_contact" ||
+                  m.status === "to_call_back",
+              ).length
+            }
+          />
+        </div>
         <table>
           <tbody>
             {(cfg.statuses ?? []).map((s) => (
@@ -542,10 +596,6 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
             ))}
           </tbody>
         </table>
-        <p>
-          <strong>{data.departments_covered}</strong> département(s) avec au
-          moins une promesse <span className="gris">(30 requis)</span>.
-        </p>
       </div>
 
       <div className="carte">
