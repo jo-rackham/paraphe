@@ -185,10 +185,6 @@ spec:
             {{- end }}
             - name: PARAPHE_SOURCE_URL
               value: {{ .Values.sourceUrl | quote }}
-            {{- if .Values.ingress.tls.enabled }}
-            - name: PARAPHE_HTTPS
-              value: "1"
-            {{- end }}
             - name: PARAPHE_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

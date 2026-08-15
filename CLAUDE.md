@@ -237,7 +237,9 @@ refuses to open rather than let anyone in.
 ## Security and operations
 
 - `PARAPHE_INSTANCE_ADMIN_*` bootstrap the instance administration.
-  `PARAPHE_HTTPS=1` behind a TLS proxy (Secure cookie). `PARAPHE_SECRET_KEY`
+  The session cookie is always `Secure`, `HttpOnly` and `SameSite=Lax`, none
+  of them configurable: a setting is one an operator can get wrong once, in
+  the direction where nothing appears to break. `PARAPHE_SECRET_KEY`
   is mandatory on a multi-campaign instance; otherwise a random secret is
   drawn at first start and kept in the database. The repository's example
   values are refused at startup — they are public.

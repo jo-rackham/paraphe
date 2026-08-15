@@ -103,7 +103,7 @@ func run() error {
 	// same start.
 	configDir := Get("config_dir")
 	if err := CheckSettings(configDir); err != nil {
-		return fmt.Errorf("%w\nLocally: `task db` starts a disposable database.", err)
+		return fmt.Errorf("%w\nLocally, `task db` starts a disposable database", err)
 	}
 	dsn := Get("database_url")
 	// non-strict on the app side: it stays explorable with the template
@@ -152,7 +152,7 @@ func run() error {
 	s := &Server{
 		pool:          pool,
 		cfg:           cfg,
-		sessions:      NewSessions(secret, Get("https") != ""),
+		sessions:      NewSessions(secret),
 		bootstrapSlug: bootstrapSlug,
 		decoyHash:     decoy,
 		now:           time.Now,

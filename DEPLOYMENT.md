@@ -49,7 +49,6 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_BATCH_SIZE` | mayors handed out per "take a batch" (default 10) |
 | `PARAPHE_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` | coordination account, created or refreshed at every start — **mandatory at first launch** |
 | `PARAPHE_SECRET_KEY` | session signing secret (32+ random bytes) |
-| `PARAPHE_HTTPS` | `1` behind an HTTPS proxy: sets the `Secure` cookie |
 | `PARAPHE_SOURCE_URL` | public repository URL: shows "source code" in the footer |
 | `PARAPHE_DATABASE_URL` | PostgreSQL DSN — **mandatory**, the app refuses to start without it |
 | `PARAPHE_HOST` / `PARAPHE_PORT` | listening interface and port |
@@ -69,8 +68,11 @@ Two behaviours, deliberately different:
   banner on every page, but the mass mailing refuses to run. You can explore
   the tool before configuring it.
 
-`PARAPHE_HTTPS`: any non-empty value sets the `Secure` cookie. To disable it
-(HTTP development), leave the variable **absent** — `0` enables it.
+The session cookie is always `Secure`, `HttpOnly` and `SameSite=Lax`, and
+none of the three is configurable: an operator cannot forget one. Browsers
+treat `http://localhost` and `http://127.0.0.1` as secure contexts and accept
+the cookie there, so a local trial works; a deployment served over plain HTTP
+on a real host does not, which is the point.
 
 ## Accounts, local teams and walls
 

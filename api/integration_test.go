@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -226,13 +227,20 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	s := &Server{
 		pool:          pool,
 		cfg:           testConfig(),
-		sessions:      NewSessions([]byte("test key"), false),
+		sessions:      NewSessions([]byte("test key")),
 		bootstrapSlug: testSlug,
 		decoyHash:     decoy,
 		now:           time.Now,
 		webDir:        t.TempDir(),
 	}
-	srv := httptest.NewServer(securityHeaders(s.routes()))
+	// TLS, because the session cookie is Secure and Go's cookie jar applies
+	// RFC 6265 to the letter: it will not send such a cookie over http://,
+	// with none of the browser's exception for localhost. Over plain HTTP
+	// every authenticated request in this suite answered 401.
+	//
+	// Which is the right way round: the suite now exercises the shape a
+	// deployment runs in, instead of one no deployment is allowed to.
+	srv := httptest.NewTLSServer(securityHeaders(s.routes()))
 	t.Cleanup(srv.Close)
 	return s, srv
 }
@@ -312,7 +320,19 @@ func newClient(t *testing.T, srv *httptest.Server) *client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &client{t: t, http: &http.Client{Jar: jar}, base: srv.URL}
+	// A NEW client, sharing only the transport. srv.Client() returns the
+	// SAME client on every call, so assigning a jar to it gave every caller
+	// one jar between them: two clients signed in as different people, the
+	// second session overwrote the first, and the wall tests read a 403
+	// where they expected their own campaign.
+	//
+	// The transport carries the throwaway certificate httptest generated for
+	// this server, so the chain verifies rather than being skipped.
+	return &client{
+		t:    t,
+		http: &http.Client{Transport: srv.Client().Transport, Jar: jar},
+		base: srv.URL,
+	}
 }
 
 func clientOn(t *testing.T, srv *httptest.Server, host string) *client {
@@ -593,7 +613,7 @@ func TestAdministrationRoleUnreachableFromCampaign(t *testing.T) {
 func TestLivenessDoesNotTouchDatabase(t *testing.T) {
 	s, srv := testServer(t)
 	s.pool.Close() // simulated database failure
-	resp, err := http.Get(srv.URL + "/health")
+	resp, err := srv.Client().Get(srv.URL + "/health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +647,7 @@ func TestFormPostRefused(t *testing.T) {
 // HTML and shows "unexpected token <", which tells nobody anything.
 func TestUnknownAPIRouteReturnsJSON(t *testing.T) {
 	_, srv := testServer(t)
-	resp, err := http.Get(srv.URL + "/api/n-importe-quoi")
+	resp, err := srv.Client().Get(srv.URL + "/api/n-importe-quoi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,7 +667,7 @@ func TestProtectedRoutesWithoutSession(t *testing.T) {
 		"/api/export.csv", "/api/team", "/api/facets",
 		"/api/admin/requests",
 	} {
-		resp, err := http.Get(srv.URL + path)
+		resp, err := srv.Client().Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1577,7 +1597,7 @@ func TestSignInWaitsOutsideTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if resp, err := http.DefaultClient.Do(req); err == nil {
+	if resp, err := srv.Client().Do(req); err == nil {
 		resp.Body.Close() //nolint:errcheck // test
 		t.Fatalf("sign-in answered %d through a saturated admission gate: "+
 			"it waited INSIDE the database again", resp.StatusCode)
@@ -1606,7 +1626,12 @@ func TestADribblingBodyHoldsNoConnection(t *testing.T) {
 	if code := c.signIn(email, pw); code != http.StatusOK {
 		t.Fatalf("sign-in: %d", code)
 	}
-	url := strings.TrimPrefix(srv.URL, "http://")
+	// Raw sockets, so they must speak TLS themselves: the point is to hold
+	// connections open with an unfinished body, and a plaintext socket to a
+	// TLS server never reaches the handler at all — it dies in the
+	// handshake, and the test would prove nothing while staying green.
+	url := strings.TrimPrefix(srv.URL, "https://")
+	tlsConfig := srv.Client().Transport.(*http.Transport).TLSClientConfig
 	var open []net.Conn
 	defer func() {
 		for _, conn := range open {
@@ -1617,7 +1642,7 @@ func TestADribblingBodyHoldsNoConnection(t *testing.T) {
 	// decided: pgx sizes MaxConns from NumCPU, so a fixed count proves
 	// nothing on a big builder and everything on a small VPS
 	for range int(s.pool.Config().MaxConns) + 4 {
-		conn, err := net.Dial("tcp", url)
+		conn, err := tls.Dial("tcp", url, tlsConfig)
 		if err != nil {
 			t.Fatal(err)
 		}

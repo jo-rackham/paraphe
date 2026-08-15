@@ -29,9 +29,20 @@ const (
 	SessionDuration   = 12 * time.Hour
 )
 
+// The cookie is Secure, HttpOnly and SameSite=Lax, and none of the three is
+// configurable — a setting for any of them is a setting an operator can get
+// wrong once, in the direction where nothing appears to break.
+//
+// Secure costs nothing locally: browsers treat http://localhost and
+// http://127.0.0.1 as secure contexts and accept the cookie there. What it
+// forbids is a deployment on plain HTTP under a real host name, where the
+// session token travels readable to anyone on the path.
+//
+// HttpOnly keeps the token out of reach of JavaScript — the interface never
+// reads it, it only rides along — so an XSS cannot carry the session away
+// with it.
 type Sessions struct {
-	key    []byte
-	secure bool
+	key []byte
 }
 
 // The payload carries the campaign: a session is valid for ONE
@@ -44,8 +55,8 @@ type payload struct {
 	Exp   int64  `json:"exp"`
 }
 
-func NewSessions(key []byte, secure bool) *Sessions {
-	return &Sessions{key: key, secure: secure}
+func NewSessions(key []byte) *Sessions {
+	return &Sessions{key: key}
 }
 
 func (s *Sessions) sign(data []byte) string {
@@ -69,7 +80,7 @@ func (s *Sessions) Set(w http.ResponseWriter, email string, org int,
 		Value:    body + "." + s.sign([]byte(body)),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  now.Add(SessionDuration),
 		MaxAge:   int(SessionDuration / time.Second),
@@ -80,7 +91,7 @@ func (s *Sessions) Set(w http.ResponseWriter, email string, org int,
 func (s *Sessions) Clear(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookieName, Value: "", Path: "/",
-		HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 		MaxAge: -1,
 	})
 }

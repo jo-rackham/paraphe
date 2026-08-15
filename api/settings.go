@@ -60,8 +60,6 @@ var Settings = []Setting{
 		Default: "out/04_base_complete.csv", Help: "the mayor list to import"},
 	{Key: "web_dir", Env: "PARAPHE_WEB_DIR", Flag: "web-dir", Default: "web/dist",
 		Help: "built interface to serve; empty means the interface image serves it"},
-	{Key: "https", Env: "PARAPHE_HTTPS", Flag: "https",
-		Help: "any non-empty value sets the Secure cookie, behind a TLS proxy"},
 	{Key: "base_domain", Env: "PARAPHE_BASE_DOMAIN", Flag: "base-domain",
 		Help: "domain of the campaign subdomains; empty means a single campaign"},
 	{Key: "org_slug", Env: "PARAPHE_ORG_SLUG", Flag: "org-slug",

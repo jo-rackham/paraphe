@@ -22,7 +22,7 @@ func session(t *testing.T, s *Sessions, email string, when time.Time) *http.Requ
 }
 
 func TestSessionRoundTrip(t *testing.T) {
-	s := NewSessions([]byte("test key"), false)
+	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
 	read, org, ok := s.Read(session(t, s, "marie@exemple.fr", t0), t0)
 	if !ok || read != "marie@exemple.fr" || org != 1 {
@@ -31,7 +31,7 @@ func TestSessionRoundTrip(t *testing.T) {
 }
 
 func TestSessionExpires(t *testing.T) {
-	s := NewSessions([]byte("test key"), false)
+	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
 	r := session(t, s, "marie@exemple.fr", t0)
 	if _, _, ok := s.Read(r, t0.Add(SessionDuration-time.Minute)); !ok {
@@ -45,13 +45,13 @@ func TestSessionExpires(t *testing.T) {
 // The cookie is signed, not encrypted: anyone can read the address it
 // carries. What they must not be able to do is change it.
 func TestSessionRefusesWrongSignature(t *testing.T) {
-	s := NewSessions([]byte("test key"), false)
+	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
 	r := session(t, s, "marie@exemple.fr", t0)
 	raw := r.Cookies()[0].Value
 	body, signature, _ := strings.Cut(raw, ".")
 
-	other := NewSessions([]byte("other key"), false)
+	other := NewSessions([]byte("other key"))
 	w := httptest.NewRecorder()
 	if err := other.Set(w, "coordination@exemple.fr", 1, t0); err != nil {
 		t.Fatal(err)
@@ -72,22 +72,41 @@ func TestSessionRefusesWrongSignature(t *testing.T) {
 	}
 }
 
+// The three attributes are not configurable, and that is the guarantee: an
+// operator cannot forget one. A missing Secure serves the sign-in cookie in
+// the clear, and everything keeps working — which is what makes it a
+// mistake nobody catches.
+//
+// Both the cookie that OPENS a session and the one that clears it: a Clear
+// without Secure is a Set-Cookie a proxy can strip on the way, and the
+// session that should have ended survives.
 func TestSessionCookieIsProtected(t *testing.T) {
-	for _, https := range []bool{false, true} {
-		s := NewSessions([]byte("test key"), https)
+	s := NewSessions([]byte("test key"))
+	for _, tc := range []struct {
+		name string
+		emit func(w http.ResponseWriter)
+	}{
+		{"opening", func(w http.ResponseWriter) {
+			if err := s.Set(w, "marie@exemple.fr", 1, time.Unix(1786000000, 0)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"clearing", func(w http.ResponseWriter) { s.Clear(w) }},
+	} {
 		w := httptest.NewRecorder()
-		if err := s.Set(w, "marie@exemple.fr", 1, time.Unix(1786000000, 0)); err != nil {
-			t.Fatal(err)
-		}
+		tc.emit(w)
 		c := w.Result().Cookies()[0]
 		if !c.HttpOnly {
-			t.Error("cookie readable from JavaScript")
+			t.Errorf("%s: cookie readable from JavaScript", tc.name)
+		}
+		if !c.Secure {
+			t.Errorf("%s: cookie without Secure — it would go out over plain "+
+				"HTTP, which is how a session token is read off the wire",
+				tc.name)
 		}
 		if c.SameSite != http.SameSiteLaxMode {
-			t.Error("SameSite missing: the cookie would go out on a third-party request")
-		}
-		if c.Secure != https {
-			t.Errorf("PARAPHE_HTTPS=%v but Secure=%v", https, c.Secure)
+			t.Errorf("%s: SameSite missing, the cookie would go out on a "+
+				"third-party request", tc.name)
 		}
 	}
 }
