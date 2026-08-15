@@ -83,6 +83,12 @@ tasks:
     # Chart.yaml, then tags. release.yml refuses a tag that disagrees with
     # package.json, and outils/version.test.ts refuses files that disagree
     # among themselves: the tag is the only version there is.
+    #
+    # Its `before:init` runs `task test-api`, not `go build`. Compiling is
+    # not a suite: release-it pushes the commit AND the tag before CI ever
+    # runs, so a Go test broken on a tree that compiles put v0.2.0 on a
+    # public repository pointing at nothing publishable — undone only by
+    # deleting a tag and force-pushing.
     cmds:
       - pnpm exec release-it {{.CLI_ARGS}}
 

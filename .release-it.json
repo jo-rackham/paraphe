@@ -21,7 +21,7 @@
       "pnpm --dir outils exec vitest run",
       "pnpm --dir web exec tsc --noEmit",
       "pnpm --dir web exec vitest run",
-      "go build -C api ./..."
+      "task test-api"
     ],
     "after:bump": "node outils/version.ts ${version}",
     "after:release": "echo 'tag v${version} poussé — release.yml publie image et chart OCI ; suivre avec: task gh -- run watch'"

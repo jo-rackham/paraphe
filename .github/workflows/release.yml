@@ -43,11 +43,20 @@ jobs:
 
       - name: Déterminer la version
         id: v
+        # Through `env`, never spliced into the script: GitHub substitutes an
+        # expression as raw TEXT before bash parses the line, so a dispatch
+        # input carrying `$(…)` or `";…"` runs as a command — and it runs
+        # BEFORE the guard below reads package.json, which is the one file
+        # the guard compares against. The shape is checked too: whatever
+        # survives must still look like a version.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          DEPOT: ${{ github.repository }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            v="${{ inputs.version }}"
-          else
-            v="${GITHUB_REF_NAME#v}"
+          v="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if ! printf '%s' "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::version illisible : $v (attendu x.y.z)"
+            exit 1
           fi
           # The tag is the source of the image tag AND of the chart version.
           # A tag that does not name what the repository says it is would
@@ -62,7 +71,7 @@ jobs:
             exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "depot=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "depot=$(printf '%s' "$DEPOT" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Jeu de données minimal
         # the real lists regenerate with `task all` from the open sources;
@@ -140,6 +149,9 @@ jobs:
             echo ""
             echo '```bash'
             echo "helm install paraphe oci://ghcr.io/$d/charts/paraphe --version $v \\"
-            echo "  --set secrets.adminPassword=… --set secrets.secretKey=\$(openssl rand -hex 32)"
+            echo "  --set secrets.adminPassword=… \\"
+            echo "  --set secrets.secretKey=\$(openssl rand -hex 32) \\"
+            echo "  --set secrets.valkeyPassword=\$(openssl rand -hex 24) \\"
+            echo "  --set postgres.cnpg.backup.enabled=true --set postgres.cnpg.backup.s3CredentialsSecret=…"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
