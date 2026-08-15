@@ -126,6 +126,15 @@ licence for the RNE.
   endorsed X" is said at rank `has_endorsed` and nowhere else, and the
   endorser placeholders exist only for an endorser. `task messages` mails
   file 01 ONLY — 34,800 bulk emails would be spam.
+- **Accessibility is locked by `e2e/07-accessibility.spec.ts`**: axe scans
+  (WCAG A + AA) every screen of the three modes, light AND dark, plus the
+  keyboard path. The interface conventions it protects: `Alerte` carries
+  the live-region roles, tab strips go through `NavOnglets`
+  (`aria-current`), view changes through `useViewFocus` (focus to the h1,
+  per-view `document.title`), decorative pictograms through `Emoji`
+  (aria-hidden). `--focus` is the ring colour (olive in light: yellow
+  reads 1.6:1 there). Muting a row is done with `tr.inactif` plus a word,
+  never opacity — opacity halves every contrast under it.
 - Tag `parrainage_theme_democratique` (142 targets): endorsed a candidacy
   about how democracy works (Marchandise/LaPrimaire, Egger/RIC,
   Koenig/subsidiarity, Jardin, Nikonoff, Faudot, Troadec). The tag describes

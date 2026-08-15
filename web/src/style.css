@@ -10,6 +10,10 @@
   --entete: #141210; --entete-txt: #efe9d8; --entete-hover: #2a2620;
   --alerte-fond: #fff8d6; --alerte-trait: #f5c400; --champ: #ffffff;
   --lien: #8a6d00;
+  /* focus ring: yellow reads 1.6:1 against the light background, below the
+     3:1 WCAG floor for non-text indicators — olive is the palette's own
+     dark yellow and reads 4.7:1 */
+  --focus: #8a6d00;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -17,11 +21,24 @@
     --texte-sec: #a09883; --accent: #ffd400; --entete: #0a0906;
     --alerte-fond: #3a3007; --alerte-trait: #8a6d00; --champ: #12100a;
     --lien: #ffd400;
+    --focus: #ffd400;
   }
 }
 * { box-sizing: border-box; }
 body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
        margin: 0; background: var(--fond); color: var(--texte); }
+
+/* visible only to assistive technology (clip pattern) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+           margin: -1px; overflow: hidden; clip-path: inset(50%);
+           white-space: nowrap; border: 0; }
+/* first focusable element of the page; visible only while focused */
+.skip-link { position: absolute; left: -100vw; top: 0; z-index: 10;
+             background: var(--jaune); color: var(--noir);
+             padding: .55rem 1rem; border-radius: 0 0 .45rem 0;
+             font-weight: 600; text-decoration: none; }
+.skip-link:focus { left: 0; }
+main:focus { outline: none; }
 
 .tricolore { display: flex; height: 4px; }
 .tricolore i { flex: 1; }
@@ -37,10 +54,20 @@ header .qui { margin-left: auto; font-size: .85rem; color: var(--entete-txt);
           color: var(--jaune-vif); }
 .marque .sous { font-weight: 400; font-size: .78rem; color: var(--entete-txt);
                 opacity: .8; }
-header .lien { color: var(--entete-txt); background: none; border: 0;
-               font: inherit; cursor: pointer; padding: .35rem .6rem;
-               border-radius: .4rem; }
+/* the tab strip is a flex container of its own so the <nav> landmark does
+   not disturb the header's layout */
+header nav { display: flex; flex-wrap: wrap; gap: .4rem .9rem;
+             align-items: center; }
+/* header button.lien, not header .lien: at equal specificity the later
+   `button.lien` rule was winning, and its olive link colour reads 3.8:1
+   on the dark header — below the 4.5:1 floor. The cream this rule always
+   declared reads 15:1 */
+header button.lien { color: var(--entete-txt); background: none; border: 0;
+                     font: inherit; cursor: pointer; padding: .35rem .6rem;
+                     border-radius: .4rem; }
 header .lien:hover { background: var(--entete-hover); color: var(--jaune-vif); }
+header .lien[aria-current] { background: var(--entete-hover);
+                             color: var(--jaune-vif); }
 
 .rayures { height: 7px;
   background: repeating-linear-gradient(-45deg,
@@ -52,8 +79,11 @@ h1::after { content: ""; display: block; width: 3.5rem; height: 4px;
             margin-top: .35rem; background: var(--jaune); border-radius: 2px; }
 h2 { font-size: 1.15rem; margin-top: 1.6rem; }
 a { color: var(--lien); }
+/* overflow-x: at 320 px (or 400 % zoom) a table scrolls inside its card
+   instead of pushing the whole page sideways */
 .carte { background: var(--carte); border: 1px solid var(--trait);
-         border-radius: .6rem; padding: 1rem 1.2rem; margin: .8rem 0; }
+         border-radius: .6rem; padding: 1rem 1.2rem; margin: .8rem 0;
+         overflow-x: auto; }
 .chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
         font-size: .82rem; border: 1px solid rgba(0,0,0,.12); color: #141210; }
 table { border-collapse: collapse; width: 100%; }
@@ -76,7 +106,11 @@ input[type=text], input[type=password], select, textarea {
   border-radius: .45rem; width: 100%; background: var(--champ);
   color: var(--texte); }
 input:focus, select:focus, textarea:focus {
-  outline: 3px solid var(--jaune); outline-offset: 1px; }
+  outline: 3px solid var(--focus); outline-offset: 1px; }
+/* currentColor: the text already contrasts with its background, wherever
+   the control sits — dark header, yellow button, link in a paragraph */
+button:focus-visible, a:focus-visible, summary:focus-visible {
+  outline: 3px solid currentColor; outline-offset: 2px; }
 textarea { resize: vertical; }
 /* campaign fields: the label sits BESIDE its control, not around it */
 label[for^="champ-"] { display: block; margin-bottom: .25rem; }
@@ -87,12 +121,17 @@ details { border: 1px solid var(--trait); border-radius: .6rem;
 details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600; }
 details .dedans { padding: 0 1rem 1rem; }
 .gris { color: var(--texte-sec); font-size: .9rem; }
+/* deactivated account row: muted to the secondary grey, which still reads
+   4.5:1 — the state itself is written out, never carried by the fade */
+tr.inactif td { color: var(--texte-sec); }
 /* the campaign form: a flat list of nine fields gives no clue which ones
-   describe the candidate and which describe the volunteer */
-h3.groupe { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em;
-            color: var(--texte-sec); margin: 1.4rem 0 .4rem;
-            border-bottom: 1px solid var(--trait); padding-bottom: .3rem; }
-h3.groupe:first-child { margin-top: 0; }
+   describe the candidate and which describe the volunteer. A class, not a
+   tag: the same group heading is an h3 under the team card's h2 and an h2
+   right under the browser tab's h1 — the hierarchy has no level to skip */
+.groupe { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em;
+          color: var(--texte-sec); margin: 1.4rem 0 .4rem;
+          border-bottom: 1px solid var(--trait); padding-bottom: .3rem; }
+.groupe:first-child { margin-top: 0; }
 .aide { display: block; margin-top: .25rem; }
 .grand-tel { font-size: 1.5rem; font-weight: 700; margin: .2rem 0; }
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
@@ -135,5 +174,9 @@ footer .officiel { border: 1px solid var(--trait);
   animation: va-et-vient 1.1s ease-in-out infinite; }
 @keyframes va-et-vient {
   0% { margin-left: -35%; } 100% { margin-left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .jauge .barre { transition: none; }
+  .jauge .barre.indeterminee { animation: none; }
 }
 button:disabled, .bouton:disabled { opacity: .5; cursor: progress; }

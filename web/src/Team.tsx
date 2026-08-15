@@ -12,14 +12,18 @@ import {
   type CardDraft,
   Chip,
   campaignLabel,
+  Emoji,
   Fiche,
   Guide,
   Hexagone,
   label,
+  NavOnglets,
   PiedDePage,
   RenderGuard,
   ROLES,
+  SkipLink,
   STATUSES,
+  useViewFocus,
 } from "./common.tsx";
 import * as M from "./messages.ts";
 import type {
@@ -36,6 +40,14 @@ import type {
 // Team mode: the work lives in PostgreSQL, shared and walled off per local
 // team. This mode is what keeps two volunteers from writing to the same
 // mayor — the browser version cannot.
+
+const VIEW_TITLES: Record<string, string> = {
+  guide: "Guide",
+  tableau: "Mon tableau de bord",
+  maires: "Les maires",
+  equipe: "Mon équipe",
+  profil: "Mon profil",
+};
 
 export default function Team({ config }: { config: ServerConfig }) {
   const [cfg, setCfg] = useState(config);
@@ -128,10 +140,24 @@ export default function Team({ config }: { config: ServerConfig }) {
     }
   };
 
+  // one view key per screen a volunteer can land on; the card's key
+  // includes nothing of the mayor because tab leaves "fiche" before
+  // another card can open
+  useViewFocus(
+    !ready ? "chargement" : !me ? "connexion" : tab,
+    !ready
+      ? null
+      : !me
+        ? "Connexion"
+        : tab === "fiche"
+          ? (chosen?.mayor.commune ?? "Fiche")
+          : (VIEW_TITLES[tab] ?? "paraphe"),
+  );
+
   if (!ready)
     return (
       <main>
-        <p>Chargement…</p>
+        <p role="status">Chargement…</p>
       </main>
     );
   if (!me) {
@@ -188,7 +214,8 @@ export default function Team({ config }: { config: ServerConfig }) {
 
       {tab === "guide" && (
         <>
-          <h1>Guide de l'équipe</h1>
+          {/* no heading of its own: GUIDE.md opens on its h1, and a second
+              one above it would be the page's only doubled title */}
           <p>
             <button type="button" onClick={() => setTab("tableau")}>
               Commencer — mon tableau de bord
@@ -293,7 +320,8 @@ function Coquille({
   ];
   return (
     <>
-      <div className="tricolore">
+      <SkipLink />
+      <div className="tricolore" aria-hidden="true">
         <i />
         <i />
         <i />
@@ -307,20 +335,9 @@ function Coquille({
             <span className="sous">{cfg.campaign?.candidat}</span>
           </span>
         </span>
-        {me &&
-          tabs.map(([key, label]) => (
-            <button
-              type="button"
-              key={key}
-              className="lien"
-              style={
-                tab === key ? { background: "var(--entete-hover)" } : undefined
-              }
-              onClick={() => setTab?.(key)}
-            >
-              {label}
-            </button>
-          ))}
+        {me && setTab && (
+          <NavOnglets tabs={tabs} tab={tab ?? ""} onTab={setTab} />
+        )}
         {me && (
           <span className="qui">
             {me.account.name}
@@ -332,9 +349,11 @@ function Coquille({
           </span>
         )}
       </header>
-      <div className="rayures" />
+      <div className="rayures" aria-hidden="true" />
       <RenderGuard>
-        <main>{children}</main>
+        <main id="contenu" tabIndex={-1}>
+          {children}
+        </main>
       </RenderGuard>
       <PiedDePage sourceUrl={cfg.source_url}>
         <p>
@@ -389,6 +408,7 @@ function Connexion({
             <input
               type="text"
               autoComplete="username"
+              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -400,6 +420,7 @@ function Connexion({
             <input
               type="password"
               autoComplete="current-password"
+              required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -464,7 +485,7 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
     reload();
   }, [reload]);
 
-  if (!data) return <p>Chargement…</p>;
+  if (!data) return <p role="status">Chargement…</p>;
 
   const take = async () => {
     setSending(true);
@@ -574,10 +595,10 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
           <table>
             <thead>
               <tr>
-                <th>Commune</th>
-                <th>Département</th>
-                <th>Signal</th>
-                <th>Statut</th>
+                <th scope="col">Commune</th>
+                <th scope="col">Département</th>
+                <th scope="col">Signal</th>
+                <th scope="col">Statut</th>
               </tr>
             </thead>
             <tbody>
@@ -596,9 +617,9 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
             <table>
               <thead>
                 <tr>
-                  <th>Bénévole</th>
-                  <th>Fiches</th>
-                  <th>Contactées</th>
+                  <th scope="col">Bénévole</th>
+                  <th scope="col">Fiches</th>
+                  <th scope="col">Contactées</th>
                 </tr>
               </thead>
               <tbody>
@@ -639,7 +660,7 @@ function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
 
       <p>
         <a className="bouton secondaire" href={API.exportUrl()}>
-          ⬇ Exporter le suivi de mon équipe (CSV)
+          <Emoji>⬇ </Emoji>Exporter le suivi de mon équipe (CSV)
         </a>
       </p>
     </>
@@ -859,17 +880,19 @@ function ListeServeur({
         </p>
       )}
 
-      <p className="gris">
+      {/* role="status": the result of a filter change is spoken, the way
+          the eye catches the count settling */}
+      <p className="gris" role="status">
         {rows.length} affiché(s) sur {total}.
       </p>
       <div className="carte">
         <table>
           <thead>
             <tr>
-              <th>Commune</th>
-              <th>Département</th>
-              <th>Signal</th>
-              <th>Statut</th>
+              <th scope="col">Commune</th>
+              <th scope="col">Département</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Statut</th>
             </tr>
           </thead>
           <tbody>
@@ -880,12 +903,12 @@ function ListeServeur({
         </table>
         <div ref={sentinel} />
         {loading && (
-          <p className="gris" style={{ textAlign: "center" }}>
+          <p className="gris" role="status" style={{ textAlign: "center" }}>
             Chargement…
           </p>
         )}
         {failed !== null && (
-          <p className="alerte" style={{ textAlign: "center" }}>
+          <p className="alerte" role="alert" style={{ textAlign: "center" }}>
             Chargement interrompu.{" "}
             <button
               type="button"
@@ -985,6 +1008,7 @@ function ConfigurationCampagne({
                 id={`champ-${f.key}`}
                 rows={3}
                 placeholder={f.example}
+                aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
                 value={values[f.key] ?? ""}
                 onChange={(e) =>
                   setValues({ ...values, [f.key]: e.target.value })
@@ -995,13 +1019,18 @@ function ConfigurationCampagne({
                 id={`champ-${f.key}`}
                 type="text"
                 placeholder={f.example}
+                aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
                 value={values[f.key] ?? ""}
                 onChange={(e) =>
                   setValues({ ...values, [f.key]: e.target.value })
                 }
               />
             )}
-            {f.hint && <span className="gris aide">{f.hint}</span>}
+            {f.hint && (
+              <span className="gris aide" id={`champ-${f.key}-aide`}>
+                {f.hint}
+              </span>
+            )}
           </p>
         </div>
       ))}
@@ -1066,7 +1095,7 @@ function GestionEquipe({
     reload();
   }, [reload]);
 
-  if (!data) return <p>Chargement…</p>;
+  if (!data) return <p role="status">Chargement…</p>;
   const coordination = me.account.role === "coordination";
 
   const createAccount = async (e: React.FormEvent) => {
@@ -1101,7 +1130,9 @@ function GestionEquipe({
       )}
 
       {created && (
-        <div className="carte alerte">
+        // role="status": the one-time password is read out when the card
+        // appears — it is the only moment it exists
+        <div className="carte alerte" role="status">
           <p>
             <strong>
               Accès créé pour {created.name} ({created.email}).
@@ -1130,6 +1161,7 @@ function GestionEquipe({
               Nom
               <input
                 type="text"
+                required
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               />
@@ -1140,6 +1172,7 @@ function GestionEquipe({
               Adresse email
               <input
                 type="text"
+                required
                 value={draft.email}
                 onChange={(e) => setDraft({ ...draft, email: e.target.value })}
               />
@@ -1197,17 +1230,25 @@ function GestionEquipe({
         <table>
           <thead>
             <tr>
-              <th>Nom</th>
-              <th>Adresse</th>
-              <th>Rôle</th>
-              <th>Équipe</th>
-              <th />
+              <th scope="col">Nom</th>
+              <th scope="col">Adresse</th>
+              <th scope="col">Rôle</th>
+              <th scope="col">Équipe</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {data.accounts.map((c) => (
-              <tr key={c.email} style={c.active ? undefined : { opacity: 0.5 }}>
-                <td>{c.name}</td>
+              // muted, not faded: opacity .5 halved every contrast in the
+              // row, réactiver button included — and made the state a
+              // colour-only signal. The word carries it now.
+              <tr key={c.email} className={c.active ? undefined : "inactif"}>
+                <td>
+                  {c.name}
+                  {!c.active && <span className="gris"> (désactivé)</span>}
+                </td>
                 <td className="gris">{c.email}</td>
                 <td>{label(ROLES, c.role)}</td>
                 <td>{c.team ?? "—"}</td>
@@ -1226,6 +1267,9 @@ function GestionEquipe({
                       }}
                     >
                       {c.active ? "désactiver" : "réactiver"}
+                      {/* nine identical buttons in a column: the name says
+                          whose access this one touches */}
+                      <span className="sr-only"> {c.name}</span>
                     </button>
                   )}
                 </td>
@@ -1257,6 +1301,7 @@ function GestionEquipe({
                   Nom de l'équipe
                   <input
                     type="text"
+                    required
                     value={team.name}
                     onChange={(e) => setTeam({ ...team, name: e.target.value })}
                   />
@@ -1295,10 +1340,10 @@ function GestionEquipe({
             <table>
               <thead>
                 <tr>
-                  <th>Équipe</th>
-                  <th>Départements</th>
-                  <th>Membres</th>
-                  <th>Fiches</th>
+                  <th scope="col">Équipe</th>
+                  <th scope="col">Départements</th>
+                  <th scope="col">Membres</th>
+                  <th scope="col">Fiches</th>
                 </tr>
               </thead>
               <tbody>
@@ -1355,11 +1400,15 @@ function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
           C'est ce qui distingue votre message d'un publipostage.
         </p>
         <p>
-          <textarea
-            rows={4}
-            value={personalNote}
-            onChange={(e) => setPersonalNote(e.target.value)}
-          />
+          <label>
+            {/* the visible title of the card, repeated for the ear only */}
+            <span className="sr-only">Votre touche personnelle</span>
+            <textarea
+              rows={4}
+              value={personalNote}
+              onChange={(e) => setPersonalNote(e.target.value)}
+            />
+          </label>
         </p>
         <button
           type="button"

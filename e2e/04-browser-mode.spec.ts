@@ -57,7 +57,8 @@ test.describe
       await page.getByRole("button", { name: "Enregistrer" }).click();
       await expect(page.getByText("noté hors ligne")).toBeVisible();
 
-      await page.getByRole("button", { name: "← retour à la liste" }).click();
+      // the arrow is decorative (aria-hidden): not part of the button's name
+      await page.getByRole("button", { name: "retour à la liste" }).click();
       // Matched on the EXACT town: the synthetic towns are numbered, and
       // « Sainte-Fiction-1 » is a prefix of « Sainte-Fiction-10 ».
       const link = page.getByRole("button", { name: town, exact: true });
@@ -167,7 +168,8 @@ test.describe
 
       await page.getByRole("button", { name: "Mes données" }).click();
       const receiving = page.waitForEvent("download");
-      await page.getByRole("button", { name: "⬇ Exporter (JSON)" }).click();
+      // the arrow is decorative (aria-hidden): not part of the button's name
+      await page.getByRole("button", { name: "Exporter (JSON)" }).click();
       const backup = await (await receiving).path();
 
       // wiping is what a volunteer does at the end of a campaign — the

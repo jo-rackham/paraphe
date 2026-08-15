@@ -6,11 +6,15 @@ import {
   Chip,
   campaignLabel,
   EMPTY_CFG,
+  Emoji,
   Fiche,
   Guide,
   Hexagone,
+  NavOnglets,
   PiedDePage,
   RenderGuard,
+  SkipLink,
+  useViewFocus,
 } from "./common.tsx";
 import {
   formatBytes,
@@ -33,6 +37,13 @@ import type { Campaign, Mayor, Message, Tracking } from "./types.ts";
 
 // Browser mode: no data leaves the computer. The only network request is
 // downloading the list published next to the application.
+
+const VIEW_TITLES: Record<string, string> = {
+  liste: "Les maires",
+  guide: "Guide",
+  donnees: "Mes données",
+  campagne: "Ma campagne",
+};
 
 export default function Browser() {
   const [mayors, setMayors] = useState<Mayor[]>([]);
@@ -320,16 +331,26 @@ export default function Browser() {
     }
   }, []);
 
+  useViewFocus(
+    !ready ? "chargement" : tab,
+    !ready
+      ? null
+      : tab === "fiche"
+        ? chosen?.commune || "Fiche"
+        : (VIEW_TITLES[tab] ?? "paraphe"),
+  );
+
   if (!ready)
     return (
       <main>
-        <p>Chargement…</p>
+        <p role="status">Chargement…</p>
       </main>
     );
 
   return (
     <>
-      <div className="tricolore">
+      <SkipLink />
+      <div className="tricolore" aria-hidden="true">
         <i />
         <i />
         <i />
@@ -343,34 +364,24 @@ export default function Browser() {
             <span className="sous">version navigateur</span>
           </span>
         </span>
-        <button type="button" className="lien" onClick={() => setTab("liste")}>
-          Les maires
-        </button>
-        <button type="button" className="lien" onClick={() => setTab("guide")}>
-          Guide
-        </button>
-        <button
-          type="button"
-          className="lien"
-          onClick={() => setTab("donnees")}
-        >
-          Mes données
-        </button>
-        <button
-          type="button"
-          className="lien"
-          onClick={() => setTab("campagne")}
-        >
-          Ma campagne
-        </button>
+        <NavOnglets
+          tabs={[
+            ["liste", "Les maires"],
+            ["guide", "Guide"],
+            ["donnees", "Mes données"],
+            ["campagne", "Ma campagne"],
+          ]}
+          tab={tab}
+          onTab={setTab}
+        />
         <span className="qui">aucune donnée ne quitte ce navigateur</span>
       </header>
-      <div className="rayures" />
+      <div className="rayures" aria-hidden="true" />
       <RenderGuard>
-        <main>
+        <main id="contenu" tabIndex={-1}>
           <Alerte message={message} onClose={() => setMessage(null)} />
           {offerError && (
-            <p className="alerte erreur">
+            <p className="alerte erreur" role="alert">
               Ce lien ne propose aucune campagne : {offerError}{" "}
               <button
                 type="button"
@@ -611,15 +622,26 @@ function Progression({ state }: { state: DownloadState }) {
   const { key, received, total } = state;
   const pct = total ? Math.round((received / total) * 100) : null;
   return (
-    <div className="carte chargement" role="status" aria-live="polite">
+    // the live region wraps ONLY the stable sentence: with the byte counter
+    // inside it, every received chunk queued one more announcement
+    <div className="carte chargement">
       <p style={{ margin: 0 }}>
-        <strong>Téléchargement de la {LISTS[key].name}…</strong>{" "}
+        <strong role="status">Téléchargement de la {LISTS[key].name}…</strong>{" "}
         <span className="gris">
           {formatBytes(received)}
           {total ? ` sur ${formatBytes(total)}` : ""}
         </span>
       </p>
-      <div className="jauge">
+      <div
+        className="jauge"
+        role="progressbar"
+        aria-label={`Téléchargement de la ${LISTS[key].name}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        // undefined while the size is unknown: an indeterminate bar is
+        // exactly what a progressbar without aria-valuenow means
+        aria-valuenow={pct ?? undefined}
+      >
         <div
           className={pct === null ? "barre indeterminee" : "barre"}
           style={pct === null ? undefined : { width: `${pct}%` }}
@@ -659,7 +681,7 @@ function Accueil({ onCsv, onDemo, onDownload, download }: AccueilProps) {
             disabled={!!download}
             onClick={() => onDownload("light")}
           >
-            ⬇ Charger la liste prioritaire
+            <Emoji>⬇ </Emoji>Charger la liste prioritaire
           </button>{" "}
           <button
             type="button"
@@ -667,7 +689,7 @@ function Accueil({ onCsv, onDemo, onDownload, download }: AccueilProps) {
             disabled={!!download}
             onClick={() => onDownload("complete")}
           >
-            ⬇ Charger tous les maires de France
+            <Emoji>⬇ </Emoji>Charger tous les maires de France
           </button>
         </p>
         <p className="gris">
@@ -810,17 +832,19 @@ function Liste({
           conservé.
         </p>
       )}
-      <p className="gris">
+      {/* role="status": the result of a filter change is spoken, the way
+          the eye catches the count settling */}
+      <p className="gris" role="status">
         {Math.min(shown, mayors.length)} affiché(s) sur {mayors.length}.
       </p>
       <div className="carte">
         <table>
           <thead>
             <tr>
-              <th>Commune</th>
-              <th>Département</th>
-              <th>Signal</th>
-              <th>Statut</th>
+              <th scope="col">Commune</th>
+              <th scope="col">Département</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Statut</th>
             </tr>
           </thead>
           <tbody>
@@ -912,14 +936,14 @@ function Donnees({
         <p className="gris">{counts.total} maires chargés.</p>
         <p>
           <button type="button" onClick={onExport}>
-            ⬇ Exporter (JSON)
+            <Emoji>⬇ </Emoji>Exporter (JSON)
           </button>{" "}
           <button
             type="button"
             className="secondaire"
             onClick={() => importField.current?.click()}
           >
-            ⬆ Importer une sauvegarde
+            <Emoji>⬆ </Emoji>Importer une sauvegarde
           </button>
         </p>
         <p>
@@ -968,10 +992,10 @@ function Donnees({
         </p>
         <p>
           <button type="button" onClick={() => onDownload("light")}>
-            ⬇ Liste prioritaire
+            <Emoji>⬇ </Emoji>Liste prioritaire
           </button>{" "}
           <button type="button" onClick={() => onDownload("complete")}>
-            ⬇ Base complète
+            <Emoji>⬇ </Emoji>Base complète
           </button>
         </p>
         <p>
@@ -980,7 +1004,7 @@ function Donnees({
             className="secondaire"
             onClick={() => csvField.current?.click()}
           >
-            📂 Charger un CSV
+            <Emoji>📂 </Emoji>Charger un CSV
           </button>{" "}
           <button type="button" className="secondaire" onClick={onDemo}>
             Données fictives
@@ -1053,7 +1077,8 @@ function CampaignTab({
         {CAMPAIGN_FIELDS.map((f, i) => (
           <div key={f.key}>
             {f.group !== CAMPAIGN_FIELDS[i - 1]?.group && (
-              <h3 className="groupe">{f.group}</h3>
+              // h2: right under the tab's h1 — h3 would skip a level here
+              <h2 className="groupe">{f.group}</h2>
             )}
             <p>
               {/* associated by id, not nested: a textarea nested in its
@@ -1064,6 +1089,7 @@ function CampaignTab({
                   id={`champ-${f.key}`}
                   rows={3}
                   placeholder={f.example}
+                  aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
                   value={draft[f.key]}
                   onChange={(e) =>
                     onEdit({ ...draft, [f.key]: e.target.value })
@@ -1074,13 +1100,18 @@ function CampaignTab({
                   id={`champ-${f.key}`}
                   type="text"
                   placeholder={f.example}
+                  aria-describedby={f.hint ? `champ-${f.key}-aide` : undefined}
                   value={draft[f.key]}
                   onChange={(e) =>
                     onEdit({ ...draft, [f.key]: e.target.value })
                   }
                 />
               )}
-              {f.hint && <span className="gris aide">{f.hint}</span>}
+              {f.hint && (
+                <span className="gris aide" id={`champ-${f.key}-aide`}>
+                  {f.hint}
+                </span>
+              )}
             </p>
           </div>
         ))}
@@ -1098,7 +1129,7 @@ function CampaignTab({
           Enregistrer
         </button>
         {dirty && (
-          <span className="gris" style={{ marginLeft: ".6rem" }}>
+          <span className="gris" role="status" style={{ marginLeft: ".6rem" }}>
             modifications non enregistrées
           </span>
         )}

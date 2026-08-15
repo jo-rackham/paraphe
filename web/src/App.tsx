@@ -40,7 +40,7 @@ export default function App() {
   if (mode === null)
     return (
       <main>
-        <p>Chargement…</p>
+        <p role="status">Chargement…</p>
       </main>
     );
   if (mode.kind === "outage") {
@@ -49,7 +49,9 @@ export default function App() {
     return (
       <main>
         <h1>Serveur injoignable</h1>
-        <p className="alerte erreur">{mode.message}</p>
+        <p className="alerte erreur" role="alert">
+          {mode.message}
+        </p>
         <p>
           Votre travail est enregistré sur le serveur de la campagne : rien
           n'est perdu, mais il faut attendre qu'il réponde.{" "}

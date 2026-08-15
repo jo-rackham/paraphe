@@ -8,6 +8,8 @@ import {
   PiedDePage,
   REQUEST_STATES,
   RenderGuard,
+  SkipLink,
+  useViewFocus,
 } from "./common.tsx";
 import type {
   InstanceConfig,
@@ -55,9 +57,27 @@ export default function Instance({ config }: { config: InstanceConfig }) {
     }
   };
 
+  useViewFocus(
+    !ready
+      ? "chargement"
+      : me
+        ? "moderation"
+        : signingIn
+          ? "connexion"
+          : "accueil",
+    !ready
+      ? null
+      : me
+        ? "Demandes d'hébergement"
+        : signingIn
+          ? "Administration de l'instance"
+          : "Héberger une campagne",
+  );
+
   return (
     <>
-      <div className="tricolore">
+      <SkipLink />
+      <div className="tricolore" aria-hidden="true">
         <i />
         <i />
         <i />
@@ -81,11 +101,11 @@ export default function Instance({ config }: { config: InstanceConfig }) {
           </span>
         )}
       </header>
-      <div className="rayures" />
+      <div className="rayures" aria-hidden="true" />
       <RenderGuard>
-        <main>
+        <main id="contenu" tabIndex={-1}>
           <Alerte message={message} onClose={() => setMessage(null)} />
-          {!ready && <p>Chargement…</p>}
+          {!ready && <p role="status">Chargement…</p>}
           {ready && me && <Moderation onMessage={setMessage} />}
           {ready && !me && !signingIn && (
             <Accueil
@@ -193,6 +213,7 @@ function Demande({ config }: { config: InstanceConfig }) {
           Adresse souhaitée
           <input
             type="text"
+            required
             value={slug}
             placeholder="ma-campagne"
             onChange={(e) => setSlug(e.target.value)}
@@ -211,6 +232,7 @@ function Demande({ config }: { config: InstanceConfig }) {
           Nom de la campagne
           <input
             type="text"
+            required
             value={name}
             placeholder="Campagne de …"
             onChange={(e) => setName(e.target.value)}
@@ -222,6 +244,8 @@ function Demande({ config }: { config: InstanceConfig }) {
           Votre nom
           <input
             type="text"
+            autoComplete="name"
+            required
             value={requesterName}
             onChange={(e) => setRequesterName(e.target.value)}
           />
@@ -232,6 +256,8 @@ function Demande({ config }: { config: InstanceConfig }) {
           Votre adresse email
           <input
             type="text"
+            autoComplete="email"
+            required
             value={requesterEmail}
             onChange={(e) => setRequesterEmail(e.target.value)}
           />
@@ -303,6 +329,7 @@ function AdministrationSignIn({
             <input
               type="text"
               autoComplete="username"
+              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -314,6 +341,7 @@ function AdministrationSignIn({
             <input
               type="password"
               autoComplete="current-password"
+              required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -381,7 +409,7 @@ function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     }
   };
 
-  if (!queue) return <p>Chargement…</p>;
+  if (!queue) return <p role="status">Chargement…</p>;
   const pending = queue.requests.filter((d) => d.state === "pending");
   const decided = queue.requests.filter((d) => d.state !== "pending");
 
@@ -390,7 +418,9 @@ function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
       <h1>Demandes d'hébergement</h1>
 
       {opened && (
-        <div className="carte">
+        // role="status": the one-time password is read out when the card
+        // appears — it is the only moment it exists
+        <div className="carte" role="status">
           <h2>Campagne ouverte : {opened.address}</h2>
           <p>
             Transmettez ces accès à {opened.coordination}. Le mot de passe n'est
@@ -432,12 +462,14 @@ function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             </label>
           </p>
           <p>
+            {/* one pair of buttons per request: the name says which */}
             <button
               type="button"
               disabled={busy === d.id}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne
+              <span className="sr-only"> {d.slug}</span>
             </button>{" "}
             <button
               type="button"
@@ -446,62 +478,69 @@ function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
               onClick={() => decide(d, "refused")}
             >
               Refuser
+              <span className="sr-only"> {d.slug}</span>
             </button>
           </p>
         </div>
       ))}
 
       <h2>Campagnes hébergées</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Adresse</th>
-            <th>Nom</th>
-            <th>État</th>
-            <th>Depuis</th>
-          </tr>
-        </thead>
-        <tbody>
-          {queue.organisations.map((o) => (
-            <tr key={o.id}>
-              <td>
-                <code>
-                  {o.slug}.{queue.base_domain}
-                </code>
-              </td>
-              <td>{o.name}</td>
-              <td>{label(ORG_STATES, o.state)}</td>
-              <td>{o.created_at}</td>
+      {/* in a card like every other table: it is also what lets a narrow
+          screen scroll the table instead of the page */}
+      <div className="carte">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Adresse</th>
+              <th scope="col">Nom</th>
+              <th scope="col">État</th>
+              <th scope="col">Depuis</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {queue.organisations.map((o) => (
+              <tr key={o.id}>
+                <td>
+                  <code>
+                    {o.slug}.{queue.base_domain}
+                  </code>
+                </td>
+                <td>{o.name}</td>
+                <td>{label(ORG_STATES, o.state)}</td>
+                <td>{o.created_at}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {decided.length > 0 && (
         <>
           <h2>Demandes traitées</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Adresse</th>
-                <th>Décision</th>
-                <th>Motif</th>
-                <th>Par</th>
-              </tr>
-            </thead>
-            <tbody>
-              {decided.map((d) => (
-                <tr key={d.id}>
-                  <td>
-                    <code>{d.slug}</code>
-                  </td>
-                  <td>{label(REQUEST_STATES, d.state)}</td>
-                  <td>{d.reason}</td>
-                  <td>{d.decided_by}</td>
+          <div className="carte">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Adresse</th>
+                  <th scope="col">Décision</th>
+                  <th scope="col">Motif</th>
+                  <th scope="col">Par</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {decided.map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      <code>{d.slug}</code>
+                    </td>
+                    <td>{label(REQUEST_STATES, d.state)}</td>
+                    <td>{d.reason}</td>
+                    <td>{d.decided_by}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </>

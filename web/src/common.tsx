@@ -152,6 +152,80 @@ export const CAMPAIGN_FIELDS: CampaignField[] = [
 export const campaignLabel = (key: string): string =>
   CAMPAIGN_FIELDS.find((f) => f.key === key)?.label ?? key;
 
+/**
+ * Decorative pictogram (emoji, arrow): hidden from assistive technology —
+ * the text beside it carries the meaning, and a screen reader saying
+ * "enveloppe" before every button label is noise, not information.
+ */
+export function Emoji({ children }: { children: ReactNode }) {
+  return <span aria-hidden="true">{children}</span>;
+}
+
+/** First focusable element of every page; its target is `<main id="contenu">`. */
+export function SkipLink() {
+  return (
+    <a className="skip-link" href="#contenu">
+      Aller au contenu
+    </a>
+  );
+}
+
+/**
+ * The header's tab strip, one `<nav>` landmark: the active tab is carried
+ * by `aria-current` (styled from the attribute — state and appearance
+ * cannot disagree), which is also what announces it to a screen reader.
+ */
+export function NavOnglets({
+  tabs,
+  tab,
+  onTab,
+}: {
+  tabs: [string, string][];
+  tab: string;
+  onTab: (key: string) => void;
+}) {
+  return (
+    <nav aria-label="Navigation principale">
+      {tabs.map(([key, name]) => (
+        <button
+          type="button"
+          key={key}
+          className="lien"
+          aria-current={tab === key ? "true" : undefined}
+          onClick={() => onTab(key)}
+        >
+          {name}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * SPA view change: the clicked control often unmounts with the old view,
+ * and keyboard or screen-reader focus silently falls back to the top of
+ * the document. When `key` changes (never on the first view), the new
+ * view's h1 takes focus, and the document title says where the volunteer
+ * landed. `title: null` marks a transient screen (loading) that is not a
+ * view at all.
+ */
+export function useViewFocus(key: string, title: string | null) {
+  const shown = useRef<string | null>(null);
+  useEffect(() => {
+    if (title === null) return;
+    document.title = `${title} — paraphe`;
+    if (shown.current === key) return;
+    const first = shown.current === null;
+    shown.current = key;
+    if (first) return; // page load: the browser's own focus is right
+    const h = document.querySelector<HTMLElement>("main h1");
+    if (h) {
+      h.setAttribute("tabindex", "-1");
+      h.focus();
+    }
+  }, [key, title]);
+}
+
 export function Hexagone() {
   return (
     <svg width="26" height="29" viewBox="0 0 26 29" aria-hidden="true">
@@ -226,7 +300,12 @@ export function Chip({ status }: { status: string }) {
         style={{ background: "#fef08a" }}
         title="Statut inconnu de cette version de l'application"
       >
-        {status} ⚠
+        {status} <Emoji>⚠</Emoji>
+        {/* the title attribute never reaches a keyboard or touch user */}
+        <span className="sr-only">
+          {" "}
+          (statut inconnu de cette version de l'application)
+        </span>
       </span>
     );
   }
@@ -274,7 +353,13 @@ export function Alerte({
 }) {
   if (!message) return null;
   return (
-    <p className={message.tone === "erreur" ? "alerte erreur" : "alerte"}>
+    // role, not aria-live on a permanent node: the paragraph is inserted
+    // with its text, and both roles announce an insertion — an error
+    // interrupts, a confirmation waits its turn
+    <p
+      role={message.tone === "erreur" ? "alert" : "status"}
+      className={message.tone === "erreur" ? "alerte erreur" : "alerte"}
+    >
       {message.text}{" "}
       {onClose && (
         <button type="button" className="lien" onClick={onClose}>
@@ -379,6 +464,7 @@ export function Fiche({
   const [status, setStatus] = useState(initialStatus ?? "to_contact");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   let rendered: {
     subject: string;
@@ -479,10 +565,12 @@ export function Fiche({
 
   const save = async () => {
     setStatusError(null);
+    setSaved(false);
     setSaving(true);
     try {
       await onStatus(status, note);
       setNote("");
+      setSaved(true);
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -494,7 +582,7 @@ export function Fiche({
     <>
       <p>
         <button type="button" className="lien" onClick={onBack}>
-          ← retour à la liste
+          <Emoji>← </Emoji>retour à la liste
         </button>
       </p>
       <h1>
@@ -526,7 +614,11 @@ export function Fiche({
             </span>
           )}
         </p>
-        <p className="grand-tel">☎ {mayor.phone || "non renseigné"}</p>
+        <p className="grand-tel">
+          <Emoji>☎ </Emoji>
+          <span className="sr-only">Téléphone : </span>
+          {mayor.phone || "non renseigné"}
+        </p>
         <p style={{ margin: ".2rem 0" }}>
           <strong>Ouverture :</strong>{" "}
           {mayor.town_hall_hours || "non renseigné"}
@@ -541,7 +633,9 @@ export function Fiche({
       ) : (
         <>
           <details open>
-            <summary>✉️ Email</summary>
+            <summary>
+              <Emoji>✉️ </Emoji>Email
+            </summary>
             <div className="dedans">
               {regenerated && (
                 <p className="alerte">
@@ -590,7 +684,7 @@ export function Fiche({
                     navigator.clipboard.writeText(`${subject}\n\n${body}`);
                   }}
                 >
-                  📋 Copier
+                  <Emoji>📋 </Emoji>Copier
                 </button>{" "}
                 {valid.length > 0 && (
                   <a
@@ -601,7 +695,7 @@ export function Fiche({
                       `&body=${encodeURIComponent(body)}`
                     }
                   >
-                    ✉️ Ouvrir dans ma messagerie
+                    <Emoji>✉️ </Emoji>Ouvrir dans ma messagerie
                   </a>
                 )}
               </p>
@@ -609,7 +703,9 @@ export function Fiche({
           </details>
 
           <details>
-            <summary>📮 Courrier</summary>
+            <summary>
+              <Emoji>📮 </Emoji>Courrier
+            </summary>
             <div className="dedans">
               {badAddress && (
                 <p className="alerte">Adresse inutilisable : {badAddress}.</p>
@@ -622,13 +718,15 @@ export function Fiche({
                 {rendered!.letter}
               </pre>
               <button type="button" onClick={() => window.print()}>
-                🖨️ Imprimer
+                <Emoji>🖨️ </Emoji>Imprimer
               </button>
             </div>
           </details>
 
           <details>
-            <summary>☎️ Téléphone</summary>
+            <summary>
+              <Emoji>☎️ </Emoji>Téléphone
+            </summary>
             <div className="dedans">
               <pre>{rendered!.phone}</pre>
             </div>
@@ -665,7 +763,12 @@ export function Fiche({
         </p>
         <button type="button" onClick={save} disabled={saving}>
           {saving ? "Enregistrement…" : "Enregistrer"}
-        </button>
+        </button>{" "}
+        {/* always in the tree: a live region announces reliably only when
+            its CONTENT changes, not when it appears with it */}
+        <span role="status" className="gris">
+          {saved ? "Enregistré." : ""}
+        </span>
         {notes.length > 0 && (
           <>
             <h2>Historique</h2>
