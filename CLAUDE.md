@@ -335,6 +335,15 @@ One instance can host several campaigns, one per subdomain.
   branch's: the canary judged the statement the driver runs by a decoy it
   never runs, and an unbounded outer passed behind a bounded one. Written
   `sql = "…"`, that shape was caught throughout.
+  **And that third pass asks whether a PATH EXISTS on which no binding branch
+  runs — never what shape the branching has.** Read as the branching's own
+  semantics it was false for a `switch` with a `default`, so a wall written in
+  one case vouched for the default; a `select` never set it; `for` and `range`
+  were not in the list at all, though a loop over nothing runs its body no
+  time; and an `if` INITIALISER always runs but binds only inside its
+  statement, so `if sql := "…org_id=$1…"; cond {}` left the outer statement
+  standing while the reader had taken the inner one. Four shapes, one
+  question asked wrongly. `TestEveryPathThatSkipsTheWallIsRead` walks them.
   **Assumed, and the safe direction**: a nested declaration shadowing an
   outer SQL name is read on BOTH paths, so a dead unbounded decoy beside a
   bounded statement is refused. The canary cannot tell inside a block from

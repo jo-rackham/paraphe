@@ -753,6 +753,7 @@ func localScopeVariants(
 	var groups []group
 	ast.Inspect(fn, func(n ast.Node) bool {
 		var branches []ast.Node
+		var init ast.Node
 		none := false
 		switch s := n.(type) {
 		case *ast.IfStmt:
@@ -762,23 +763,54 @@ func localScopeVariants(
 			} else {
 				none = true
 			}
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.SwitchStmt:
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
 			none = !hasDefault(s.Body)
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.TypeSwitchStmt:
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
 			none = !hasDefault(s.Body)
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.SelectStmt:
 			// every communication clause is a branch, and exactly one runs
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
+		// A loop body is a branch that may run NO time at all — the same
+		// path an `if` without `else` has, and it was missing entirely:
+		// `for _, x := range items { sql += " WHERE org_id=$1" }` read as one
+		// text carries the predicate, and the driver runs the base alone on
+		// an empty slice.
+		case *ast.ForStmt:
+			branches = append(branches, s.Body)
+			none = true
+			if s.Init != nil {
+				init = s.Init
+			}
+		case *ast.RangeStmt:
+			branches = append(branches, s.Body)
+			none = true
 		default:
 			return true
+		}
+		// An INITIALISER always runs, but what it binds is scoped to the
+		// statement: `if sql := "…org_id=$1…"; cond {}` leaves the OUTER sql
+		// standing for every use after the closing brace, and the sequential
+		// reader — which knows no block scope — overwrote it. So the reading
+		// where that binding does not apply has to exist.
+		if init != nil && binds(init) {
+			groups = append(groups, group{[]ast.Node{init}, true})
 		}
 		var assigning []ast.Node
 		for _, b := range branches {
@@ -786,12 +818,19 @@ func localScopeVariants(
 				assigning = append(assigning, b)
 			}
 		}
-		// ONE assigning branch is enough when the branching may take none:
-		// `sql := base; if x { sql += " WHERE org_id=$1" }` read as one text
-		// carries the predicate, and the driver runs `base` alone whenever x
-		// is false.
-		if len(assigning) > 1 || (len(assigning) == 1 && none) {
-			groups = append(groups, group{assigning, none})
+		// The question is not what SHAPE the branching has, it is whether a
+		// path exists on which NONE of the binding branches runs — because
+		// that is the path a wall written inside one of them does not cover,
+		// and the only reading that exposes it is the one below that skips
+		// them all. Two ways to have such a path: the branching may take no
+		// branch at all (`if` without `else`, a loop over nothing), or some
+		// branch binds nothing — a bare `default:`, a case that only logs, a
+		// select clause that returns. Read as the branching's own semantics,
+		// `mayTakeNone` was FALSE for a switch with a default, so the reading
+		// that mattered was never produced for the commonest shape of all.
+		noneBinds := none || len(branches) > len(assigning)
+		if len(assigning) > 0 && (noneBinds || len(assigning) > 1) {
+			groups = append(groups, group{assigning, noneBinds})
 		}
 		return true
 	})
