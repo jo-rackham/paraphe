@@ -120,6 +120,23 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		// collides here and gets the 409 the check already has a message for.
 		`CREATE UNIQUE INDEX IF NOT EXISTS team_requests_pending_name ` +
 			`ON team_requests(org_id, name) WHERE state='pending'`,
+		// Columns younger than the FIRST release. On the database an
+		// upgrading instance already has, the CREATEs above are no-ops:
+		// every column added since v0.1.0 must therefore exist twice — in
+		// the CREATE for fresh databases, and as an ALTER here for the ones
+		// that predate it. schema_upgrades_test.go enforces the pair.
+		//
+		// `listed` arrives FALSE and only then defaults to TRUE: rows that
+		// predate the directory were never shown the question, and answering
+		// it TRUE for them would publish a campaign by the very restart that
+		// upgrades the instance. Rows written afterwards still default to
+		// listed — both doors carry the choice.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE orgs ALTER COLUMN listed SET DEFAULT TRUE`,
+		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range statements {
 		if _, err := tx.Exec(ctx, s); err != nil {

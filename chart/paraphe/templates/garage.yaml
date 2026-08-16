@@ -249,6 +249,14 @@ metadata:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation
+    # ArgoCD reads its OWN annotations and otherwise maps post-* to
+    # PostSync, which waits for the app to be HEALTHY — on a first install
+    # garage cannot become healthy before this very job lays the cluster
+    # out, and the sync waits forever on a job it will not start. Sync
+    # phase runs it alongside the StatefulSet; the script already waits
+    # for the nodes to answer.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 3
   template:
@@ -265,16 +273,20 @@ spec:
       restartPolicy: Never
       enableServiceLinks: false
       securityContext:
-        # ROOT, and only here. The bootstrap needs curl and jq, and the
-        # image installs them at start — `apk` writes to /lib/apk and
-        # refuses to run as anyone else. Everything else stays shut: no
-        # capability, no privilege escalation, no volume but the script,
-        # and the pod lives for the few seconds the bootstrap takes.
+        # ROOT by default, and only here. The bootstrap needs curl and jq,
+        # and the stock image installs them at start — `apk` writes to
+        # /lib/apk and refuses to run as anyone else. Everything else stays
+        # shut: no capability, no privilege escalation, no volume but the
+        # script, and the pod lives for the few seconds the bootstrap takes.
         #
-        # An operator who would rather not: point garage.initImage at an
-        # image that already carries curl and jq, and this pod stops
-        # needing anything at all.
-        runAsUser: 0
+        # A platform that refuses root pods (admission injecting
+        # runAsNonRoot makes this uid unschedulable): point
+        # garage.initImage at an image that already carries curl and jq,
+        # and set garage.initRunAsUser to any non-zero uid.
+        runAsUser: {{ .Values.garage.initRunAsUser }}
+        {{- if ne (int .Values.garage.initRunAsUser) 0 }}
+        runAsNonRoot: true
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
