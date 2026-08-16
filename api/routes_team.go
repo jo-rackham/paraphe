@@ -270,6 +270,23 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deactivating the last active coordinator locks the campaign out just as
+	// a self-demotion would, and this route had no guard: its blind UPDATE
+	// raced routeChangeRole's FOR UPDATE and both won. The same lock closes
+	// it — a lead never reaches a coordinator (the filter below refuses it),
+	// so only a coordinator's call needs it.
+	if me.Coordination() {
+		sole, err := s.soleActiveCoordinator(r, target)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+		if sole {
+			errorJSON(w, http.StatusConflict, lastCoordinatorMessage)
+			return
+		}
+	}
+
 	// A team lead only searches within their OWN team: otherwise the
 	// 404/403 distinction would tell them which addresses exist in other
 	// teams.
@@ -300,6 +317,45 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 		"account", s.accountPseudonym(target),
 		"by", s.accountPseudonym(me.Email), "active", active)
 	replyJSON(w, http.StatusOK, map[string]any{"email": target, "active": active})
+}
+
+const lastCoordinatorMessage = "Impossible : ce compte est le dernier accès " +
+	"de coordination actif de la campagne."
+
+// soleActiveCoordinator locks the campaign's active coordinators and reports
+// whether `target` is one of them AND the only one. Both routes that can
+// take a coordinator out of the active set — a self-demotion
+// (routeChangeRole) and a deactivation (routeToggleAccount) — call this and
+// so lock the SAME rows: they serialise against each other, and the second
+// to arrive re-evaluates on the committed state and is refused. Without the
+// shared lock, one route's FOR UPDATE guards nothing against the other's
+// blind UPDATE, and a campaign races itself down to zero coordinators — a
+// state no route can leave, since validRole refuses to mint one.
+func (s *Server) soleActiveCoordinator(r *http.Request, target string) (bool, error) {
+	rows, err := s.tx(r).Query(r.Context(),
+		"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active "+
+			"FOR UPDATE", scopeOrg(r), RoleCoordination)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var targetIsCoord bool
+	others := 0
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return false, err
+		}
+		if e == target {
+			targetIsCoord = true
+		} else {
+			others++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return targetIsCoord && others == 0, nil
 }
 
 // POST /api/team/account/{email}/role — moves an existing account to
@@ -353,37 +409,13 @@ func (s *Server) routeChangeRole(w http.ResponseWriter, r *http.Request) {
 		// The LAST active coordination access never leaves the role: nobody
 		// could open, close or promote anything afterwards, and only whoever
 		// operates the deployment could repair it (the bootstrap variables).
-		// The caller is an active coordinator, so this only ever bites a
-		// coordinator demoting THEMSELVES while alone — but FOR UPDATE still
-		// serialises two demotions racing each other: both lock the same
-		// rows, the loser recounts on the winner's outcome.
-		rows, err := s.tx(r).Query(r.Context(),
-			"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active "+
-				"FOR UPDATE", scopeOrg(r), RoleCoordination)
+		sole, err := s.soleActiveCoordinator(r, target)
 		if err != nil {
 			s.failure(w, err)
 			return
 		}
-		others := 0
-		for rows.Next() {
-			var e string
-			if err := rows.Scan(&e); err != nil {
-				rows.Close()
-				s.failure(w, err)
-				return
-			}
-			if e != target {
-				others++
-			}
-		}
-		if err := rows.Err(); err != nil {
-			s.failure(w, err)
-			return
-		}
-		if others == 0 {
-			errorJSON(w, http.StatusConflict,
-				"Impossible : ce compte est le dernier accès de coordination "+
-					"actif de la campagne.")
+		if sole {
+			errorJSON(w, http.StatusConflict, lastCoordinatorMessage)
 			return
 		}
 	}

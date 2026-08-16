@@ -10,6 +10,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -210,5 +211,56 @@ func TestARelayFailureLeavesTheRequestInTheQueue(t *testing.T) {
 	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE "+
 		"org_id=$1 AND state='pending'", org); n != 1 {
 		t.Fatalf("%d pending requests, want 1", n)
+	}
+}
+
+// A campaign must never race itself down to zero active coordinators. Two
+// routes each take one out of the active set: deactivation
+// (routeToggleAccount) and self-demotion (routeChangeRole). Before they
+// shared soleActiveCoordinator's FOR UPDATE, one coordinator firing both at
+// once — deactivate the other coordinator, demote themselves — drove the set
+// to empty, and no route can leave that state (validRole refuses to mint a
+// coordinator; only bootstrap can). The shared lock serialises them: the
+// loser re-evaluates on the committed state and takes a 409.
+//
+// A race, so it is run many rounds: without the guard it locks out in
+// roughly a quarter of them, and one lost round is one campaign a person
+// can no longer administer.
+func TestDeactivationAndSelfDemotionCannotEmptyTheCoordination(t *testing.T) {
+	const rounds = 20
+	for i := 0; i < rounds; i++ {
+		s, srv := testServer(t)
+		org := orgID(t, s, testSlug)
+		aPass := createAccount(t, s, "a@exemple.fr", RoleCoordination, nil)
+		createAccount(t, s, "b@exemple.fr", RoleCoordination, nil)
+
+		ca := newClient(t, srv)
+		if code := ca.signIn("a@exemple.fr", aPass); code != http.StatusOK {
+			t.Fatalf("round %d: A sign-in: %d", i, code)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			ca.call(http.MethodPost, "/api/team/account/b@exemple.fr/active",
+				map[string]any{})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			ca.call(http.MethodPost, "/api/team/account/a@exemple.fr/role",
+				map[string]any{"role": RoleVolunteer})
+		}()
+		close(start)
+		wg.Wait()
+
+		if active := scalar[int](t, s, "SELECT COUNT(*) FROM accounts WHERE "+
+			"org_id=$1 AND role=$2 AND active", org, RoleCoordination); active == 0 {
+			t.Fatalf("round %d: the campaign lost every active coordinator — "+
+				"deactivation and self-demotion raced past the guard", i)
+		}
 	}
 }
