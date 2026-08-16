@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -335,11 +336,132 @@ func resolveString(expr ast.Expr, values map[string]string) (string, bool) {
 	return "", false
 }
 
-// oneRow: a query whose result cannot grow. An aggregate over the whole
-// table returns exactly one row — refusing those blocked legitimate reads
-// (the highest id since the last poll) for nothing.
+// Every exemption below describes the WHOLE statement, anchored, and none of
+// them is a substring test. A substring is satisfied by ADDING text: written
+// as `strings.Contains(sql, "STATE='PENDING'")`, the pending exemption was
+// granted to `WHERE state='pending' OR state='refused'` — refused rows are
+// never deleted, so that is the unbounded response the guard exists to refuse
+// — and to `WHERE NOT (state='pending')`, and to the same substring sitting
+// in a COMMENT. Anchored, anything extra falls outside the shape and the
+// LIMIT is required again, comments included: they break it CLOSED.
+//
+// oneRow: a query whose result cannot grow. An aggregate over the whole table
+// returns exactly one row — refusing those blocked legitimate reads (the
+// highest id since the last poll) for nothing. GROUP BY is what makes that
+// false: `SELECT MAX(id), note FROM notes GROUP BY note` opens with an
+// aggregate and returns one row per distinct note.
 var oneRow = regexp.MustCompile(
 	`^SELECT\s+(COUNT|MAX|MIN|SUM|AVG)\(`)
+
+// pendingQueue: the ONE shape the insert's ceiling bounds — the pending set
+// and nothing else. Anything ANDed, ORed or negated onto it reads rows the
+// ceiling does not count. The state may be written as a literal or bound as
+// a parameter; what matters is that it is the only predicate.
+var pendingQueue = regexp.MustCompile(
+	`\bWHERE\s+STATE\s*=\s*(?:'PENDING'|\$\d+)\s*` +
+		`(?:ORDER\s+BY[A-Z0-9_,. ]*)?$`)
+
+// singleRowByID: one row by primary key. Anchored for the same reason —
+// `WHERE id=$1 OR ts > $2` carries the substring and reads the table — but
+// the anchor has to leave room for what a single row is legitimately written
+// with: a table alias, the campaign predicate that walls it, and any of
+// PostgreSQL's locking clauses. Refusing `WHERE id=$1 AND org_id=$2` would
+// refuse the most natural way to read one row of a WALLED table, and send
+// its author to add a decoy LIMIT 1 or around the guard.
+var singleRowByID = regexp.MustCompile(
+	`\bWHERE\s+(?:[A-Z][A-Z0-9_]*\.)?ID\s*=\s*\$\d+` +
+		`(?:\s+AND\s+(?:[A-Z][A-Z0-9_]*\.)?ORG_ID\s*=\s*\$\d+)?` +
+		lockingClause + `\s*;?\s*$`)
+
+// lockingClause: what PostgreSQL allows a query to end on. Declared once,
+// because singleRowByID accepted it and limitClause did not — and an
+// asymmetry between two shapes of one rule is what most of this project's
+// criticals have been.
+const lockingClause = `(?:\s+FOR\s+(?:UPDATE|SHARE|NO\s+KEY\s+UPDATE|` +
+	`KEY\s+SHARE)(?:\s+SKIP\s+LOCKED|\s+NOWAIT)?)?\s*`
+
+// existsOnly: the statement IS an EXISTS, it does not merely CONTAIN one.
+// `SELECT EXISTS(…)` answers one boolean; `… WHERE EXISTS(…)` is a predicate
+// on a read that returns whatever it matches, and a `'EXISTS('` in a selected
+// value is not SQL at all. The last exemption left as a substring while its
+// neighbours were being anchored for exactly this reason.
+var existsOnly = regexp.MustCompile(`^SELECT\s+EXISTS\s*\(`)
+
+// limitClause: a bound the OUTERMOST query carries. At the END of the text,
+// where it binds the statement rather than a CTE inside it — `WITH b AS
+// (SELECT id FROM notes LIMIT 1) SELECT * FROM notes` carries one and reads
+// everything. `LIMIT ALL` and `LIMIT NULL` are not bounds either: PostgreSQL
+// reads both as every row.
+var limitClause = regexp.MustCompile(
+	`\bLIMIT\s+(?:\d+|\$\d+)(?:\s+OFFSET\s+(?:\d+|\$\d+))?` +
+		lockingClause + `;?\s*$` +
+		`|\bFETCH\s+FIRST\s+(?:\d+|\$\d+)?\s*ROWS?\s+ONLY` +
+		lockingClause + `;?\s*$`)
+
+// sqlWithoutComments: what the server parses, minus what it ignores.
+//
+// The last link of the chain was a `strings.Contains(sql, "LIMIT")`, so
+// `/* LIMIT 200 */` bounded a statement that read the whole table — the same
+// lesson as the anchored exemptions, one line further down than they were.
+//
+// QUOTE-AWARE, because the two obvious orders are each wrong. Stripping
+// comments first lets a `/*` inside a literal open one that closes at the
+// next literal's `*/`, eating the real SQL between them: `WHERE
+// slug='foo/*bar' … LIMIT 100` lost its bound and was refused. Stripping
+// literals first — what normaliseSQL does, and for its own good reason —
+// takes `'pending'` with them, and that is what the pending shape is
+// recognised by. So this walks the text once and strips only what stands
+// OUTSIDE a literal, which is what the server does too.
+func sqlWithoutComments(sql string) string {
+	var out strings.Builder
+	for i := 0; i < len(sql); {
+		switch {
+		case sql[i] == '\'':
+			j := i + 1
+			for j < len(sql) {
+				switch {
+				case sql[j] == '\\' && j+1 < len(sql): // E'…\'…'
+					j += 2
+				case sql[j] == '\'' && j+1 < len(sql) && sql[j+1] == '\'':
+					j += 2 // '' is one quote, not the end
+				case sql[j] == '\'':
+					j++
+					goto closed
+				default:
+					j++
+				}
+			}
+		closed:
+			out.WriteString(sql[i:j])
+			i = j
+		case strings.HasPrefix(sql[i:], "--"):
+			if n := strings.IndexByte(sql[i:], '\n'); n < 0 {
+				i = len(sql)
+			} else {
+				i += n
+			}
+			out.WriteByte(' ')
+		case strings.HasPrefix(sql[i:], "/*"):
+			depth, j := 1, i+2
+			for j < len(sql) && depth > 0 {
+				switch {
+				case strings.HasPrefix(sql[j:], "/*"):
+					depth, j = depth+1, j+2
+				case strings.HasPrefix(sql[j:], "*/"):
+					depth, j = depth-1, j+2
+				default:
+					j++
+				}
+			}
+			i = j
+			out.WriteByte(' ')
+		default:
+			out.WriteByte(sql[i])
+			i++
+		}
+	}
+	return sqlSpaces.ReplaceAllString(out.String(), " ")
+}
 
 // aggregateOver: the same one row, read as a SUBQUERY rather than as the
 // whole statement — `… WHERE (SELECT count(*) FROM t WHERE …) < $n`, which
@@ -350,6 +472,244 @@ var oneRow = regexp.MustCompile(
 func aggregateOver(table string) *regexp.Regexp {
 	return regexp.MustCompile(
 		`SELECT\s+(?:COUNT|MAX|MIN|SUM|AVG)\([^()]*\)\s+FROM\s+` + table + `\b`)
+}
+
+// decodesAName: a body's `"name"` lands in this field.
+//
+// Read the way encoding/json reads it, not as a substring. `json:"name"` was
+// looked for with its closing quote, so `json:"name,omitempty"` — the most
+// ordinary spelling in Go — carried a name past a canary written to find one.
+// And an untagged field decodes it too: the match on a field name is
+// CASE-INSENSITIVE, so a body's `"name"` fills `Name` with nothing said.
+//
+// EXPORTED only, and that is not a detail: encoding/json fills nothing else,
+// so `limitClass{name string}` — a settings record no request ever touches —
+// read as a request type carrying a name the moment the untagged case was
+// added, and dragged a handler that never decodes one into the canary.
+func decodesAName(f *ast.Field) bool {
+	byFieldName := func() bool {
+		for _, id := range f.Names {
+			if id.IsExported() && strings.EqualFold(id.Name, "name") {
+				return true
+			}
+		}
+		return false
+	}
+	if f.Tag == nil {
+		return byFieldName()
+	}
+	tag, err := strconv.Unquote(f.Tag.Value)
+	if err != nil {
+		return false
+	}
+	spelt, _, _ := strings.Cut(reflect.StructTag(tag).Get("json"), ",")
+	switch spelt {
+	case "-":
+		return false
+	case "":
+		// tagged for something else, or `json:",omitempty"`: the field name
+		// is what decodes, case-insensitively
+		return byFieldName()
+	}
+	return byFieldName() || (isExported(f) && strings.EqualFold(spelt, "name"))
+}
+
+// embedIgnored: `json:"-"` on an embedded field, which encoding/json obeys —
+// the type embedded there promotes nothing, so a name inside it decodes
+// nothing and demanding a ceiling for it refuses a handler that needs none.
+func embedIgnored(f *ast.Field) bool {
+	if f.Tag == nil {
+		return false
+	}
+	tag, err := strconv.Unquote(f.Tag.Value)
+	if err != nil {
+		return false
+	}
+	spelt, _, _ := strings.Cut(reflect.StructTag(tag).Get("json"), ",")
+	return spelt == "-"
+}
+
+// isExported: a tag renames a field for the decoder, it does not export it.
+func isExported(f *ast.Field) bool {
+	for _, id := range f.Names {
+		if id.IsExported() {
+			return true
+		}
+	}
+	return false
+}
+
+// embeddedIdent: the type name an anonymous struct field embeds — `Inner`,
+// `*Inner`, and the qualified forms, whose fields encoding/json promotes into
+// the outer type just the same.
+func embeddedIdent(e ast.Expr) (string, bool) {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return t.Name, true
+	case *ast.StarExpr:
+		return embeddedIdent(t.X)
+	case *ast.SelectorExpr:
+		return t.Sel.Name, true
+	}
+	return "", false
+}
+
+// readsTable: this statement names the table where rows come FROM. A comma
+// counts, because a second table hides behind one.
+func readsTable(sql, table string) bool {
+	return regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`).
+		MatchString(sql)
+}
+
+// boundedRead: this statement's result cannot grow with the table, so it
+// needs no LIMIT of its own.
+//
+// One function, so the guard below and the test that walks the shapes read
+// the SAME decision. Two copies of it would be two things that must agree,
+// which is the shape most of this project's criticals have had.
+func boundedRead(sql, table string) bool {
+	sql = sqlWithoutComments(sql)
+	trimmed := strings.TrimSpace(sql)
+	refs := regexp.MustCompile(`(FROM|JOIN|,)\s+`+table+`\b`).
+		FindAllString(sql, -1)
+	// A set operation is as many statements as it has branches, and the shape
+	// of the first says nothing about the others: `SELECT count(*) FROM notes
+	// UNION SELECT id FROM notes` opens with an aggregate and returns a row
+	// per note.
+	combined := regexp.MustCompile(`\b(?:UNION|INTERSECT|EXCEPT)\b`).
+		MatchString(sql)
+	// A bound at the END binds the whole statement, set operation included:
+	// `A UNION B LIMIT 100` returns a hundred rows.
+	if limitClause.MatchString(trimmed) {
+		return true
+	}
+	// Everything below describes ONE query, and a set operation is as many as
+	// it has branches: the aggregate shapes read the first, the anchored ones
+	// read the last, and the branch beside it reads the table whole. Gating
+	// only the aggregates left `A UNION B WHERE id=$1` calling itself bounded.
+	if combined {
+		return false
+	}
+	switch {
+	// every reference to it here is an aggregate: one row, whichever way the
+	// statement is shaped
+	case len(refs) > 0 &&
+		len(aggregateOver(table).FindAllString(sql, -1)) == len(refs):
+		return true
+	case oneRow.MatchString(trimmed) && !strings.Contains(sql, "GROUP BY"):
+		return true
+	case existsOnly.MatchString(trimmed):
+		return true
+	case singleRowByID.MatchString(trimmed):
+		return true
+	// The PENDING set alone is bounded by the INSERT: the ceiling is applied
+	// there, so the rows that exist are already the bound. A LIMIT here would
+	// bound the read by a number the insert only approximates, and past the
+	// cap — where a race is able to leave the table — it cut off the OLDEST,
+	// the legitimate early requests, on the one screen that can accept them.
+	// Whatever is not pending has no such bound and keeps a LIMIT of its own.
+	case pendingQueue.MatchString(trimmed):
+		return true
+	}
+	return false
+}
+
+// An exemption describes the WHOLE statement, and these are the shapes that
+// proved it has to. Every one of them was granted the pending exemption when
+// it was a `strings.Contains`, and each returns rows the ceiling does not
+// count — the refused ones are never deleted either.
+func TestAnExemptionDescribesTheWholeStatement(t *testing.T) {
+	const q = "HOSTING_REQUESTS"
+	for _, sql := range []string{
+		// what must STAY exempt: the queue as it is written
+		"SELECT ID, SLUG FROM HOSTING_REQUESTS WHERE STATE='PENDING' " +
+			"ORDER BY ID DESC",
+		"SELECT COUNT(*) FROM HOSTING_REQUESTS WHERE STATE=$1",
+		"SELECT SLUG, NAME FROM HOSTING_REQUESTS WHERE ID=$1 FOR UPDATE",
+		"SELECT EXISTS(SELECT 1 FROM HOSTING_REQUESTS WHERE SLUG=$1)",
+		// the shape the queue actually carries
+		"SELECT ID FROM HOSTING_REQUESTS ORDER BY ID DESC LIMIT 200",
+		"SELECT ID FROM HOSTING_REQUESTS ORDER BY ID DESC LIMIT $1 OFFSET $2",
+		"SELECT ID FROM HOSTING_REQUESTS FETCH FIRST 100 ROWS ONLY",
+		// the state bound as a parameter rather than written out
+		"SELECT ID FROM HOSTING_REQUESTS WHERE STATE=$1 ORDER BY ID DESC",
+		// one row of a WALLED table, written the way the wall requires, and
+		// with the locking clauses PostgreSQL spells differently
+		"SELECT ID FROM HOSTING_REQUESTS H WHERE H.ID=$1 AND H.ORG_ID=$2",
+		"SELECT ID FROM HOSTING_REQUESTS WHERE ID=$1 FOR NO KEY UPDATE",
+		// a bound with the locking clause its sister shape already accepts,
+		// and a statement written with its terminator
+		"SELECT ID FROM HOSTING_REQUESTS ORDER BY ID LIMIT 10 FOR UPDATE",
+		"SELECT ID FROM HOSTING_REQUESTS LIMIT 10 FOR UPDATE SKIP LOCKED",
+		"SELECT ID FROM HOSTING_REQUESTS ORDER BY ID DESC LIMIT 100;",
+		// a literal that carries what a comment opens with: the text before
+		// it is real SQL and the bound after it is real too
+		"SELECT ID FROM HOSTING_REQUESTS WHERE SLUG='FOO/*BAR' " +
+			"ORDER BY ID DESC LIMIT 100",
+		// the union its LIMIT genuinely bounds, all branches at once
+		"SELECT ID FROM HOSTING_REQUESTS UNION " +
+			"SELECT ID FROM HOSTING_REQUESTS LIMIT 100",
+	} {
+		if !boundedRead(sql, q) {
+			t.Errorf("a bounded read is refused, which is the false positive "+
+				"that sends the next author around the guard:\n\t%s", sql)
+		}
+	}
+	for _, sql := range []string{
+		// pending OR something the ceiling does not count
+		"SELECT ID, SLUG FROM HOSTING_REQUESTS WHERE STATE='PENDING' OR " +
+			"STATE='REFUSED' ORDER BY ID DESC",
+		// the negation of it
+		"SELECT ID FROM HOSTING_REQUESTS WHERE NOT (STATE='PENDING')",
+		// the exempting text in a comment, and in a trailing one
+		"SELECT ID FROM HOSTING_REQUESTS /* STATE='PENDING' */",
+		"SELECT ID FROM HOSTING_REQUESTS WHERE STATE<>'PENDING' " +
+			"-- STATE='PENDING'",
+		// one row by key, with something ORed onto it
+		"SELECT ID FROM HOSTING_REQUESTS WHERE ID=$1 OR TS > $2",
+		// …and the word LIMIT where it bounds nothing. PostgreSQL reads both
+		// of these as every row.
+		"SELECT ID FROM HOSTING_REQUESTS LIMIT ALL",
+		"SELECT ID FROM HOSTING_REQUESTS LIMIT NULL",
+		// in a comment, leading and trailing
+		"/* LIMIT 200 */ SELECT ID FROM HOSTING_REQUESTS",
+		"SELECT ID FROM HOSTING_REQUESTS -- LIMIT 200\n",
+		// in a value the statement selects
+		"SELECT 'LIMIT 200', ID FROM HOSTING_REQUESTS",
+		// bounding a CTE and not the statement that reads the table
+		"WITH B AS (SELECT ID FROM HOSTING_REQUESTS LIMIT 1) " +
+			"SELECT ID FROM HOSTING_REQUESTS",
+		// …and one bounding an OFFSET with no ceiling above it
+		"SELECT ID FROM HOSTING_REQUESTS OFFSET 200",
+		// EXISTS is one row only when the statement IS one, not when it
+		// contains one — the last exemption left as a substring while its
+		// neighbours were anchored
+		"SELECT ID FROM HOSTING_REQUESTS WHERE EXISTS(SELECT 1 FROM ORGS)",
+		"SELECT 'EXISTS(' AS MARKER, ID FROM HOSTING_REQUESTS",
+		// a set operation is as many statements as it has branches, and the
+		// shapes anchored at the END describe the last one alone
+		"SELECT ID FROM HOSTING_REQUESTS UNION " +
+			"SELECT ID FROM HOSTING_REQUESTS WHERE ID=$1",
+		"SELECT ID FROM HOSTING_REQUESTS UNION " +
+			"SELECT ID FROM HOSTING_REQUESTS WHERE STATE=$1",
+	} {
+		if boundedRead(sql, q) {
+			t.Errorf("this reads rows the ceiling does not count and the "+
+				"guard calls it bounded:\n\t%s", sql)
+		}
+	}
+	// A set operation is as many statements as it has branches: the first
+	// one's shape says nothing about the others.
+	if boundedRead("SELECT COUNT(*) FROM NOTES UNION SELECT ID FROM NOTES",
+		"NOTES") {
+		t.Error("an aggregate UNIONed with a full read is called bounded by " +
+			"the shape of its first branch")
+	}
+	// …and the aggregate GROUP BY makes unbounded: one row per distinct note
+	if boundedRead("SELECT MAX(ID), NOTE FROM NOTES GROUP BY NOTE", "NOTES") {
+		t.Error("an aggregate under GROUP BY returns one row per group, and " +
+			"the guard reads the SELECT list alone")
+	}
 }
 
 // Tables the application only ever adds to. `notes` grows by one row per
@@ -380,49 +740,22 @@ func TestEveryReadOfAnAppendOnlyTableIsBounded(t *testing.T) {
 					return true
 				}
 				for _, arg := range call.Args {
-					// SQL is case-insensitive; the canary must be too, or
-					// `select … from notes` walks straight past it
-					sql := strings.ToUpper(sqlText(arg, scoped))
+					// SQL is case-insensitive and its whitespace is free; the
+					// canary must be both, or `select … from  notes` walks
+					// straight past it and no anchored shape ever matches.
+					sql := sqlSpaces.ReplaceAllString(
+						strings.ToUpper(sqlText(arg, scoped)), " ")
 					if !strings.Contains(sql, "SELECT ") {
 						continue
 					}
 					selects++
 					for _, table := range appendOnly {
-						// FROM, JOIN or a comma list: the table is read the same
-						// way whichever keyword introduces it
-						named := regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`)
-						refs := named.FindAllString(sql, -1)
-						if len(refs) == 0 {
+						if !readsTable(sql, table) || boundedRead(sql, table) {
 							continue
 						}
-						// every reference to it here is an aggregate: one row,
-						// whichever way the statement is shaped
-						if len(aggregateOver(table).FindAllString(sql, -1)) ==
-							len(refs) {
-							continue
-						}
-						if oneRow.MatchString(strings.TrimSpace(sql)) ||
-							strings.Contains(sql, "EXISTS(") ||
-							strings.Contains(sql, "WHERE ID=$1") {
-							continue
-						}
-						// The PENDING set alone is bounded by the INSERT: the
-						// ceiling is applied there, so the rows that exist are
-						// already the bound. A LIMIT here would bound the read
-						// by a number the insert only approximates, and past
-						// the cap — where a race is able to leave the table —
-						// it cut off the OLDEST, the legitimate early
-						// requests, on the one screen that can accept them.
-						// Whatever is not pending has no such bound and keeps
-						// a LIMIT of its own; `<>'PENDING'` is not this.
-						if strings.Contains(sql, "STATE='PENDING'") {
-							continue
-						}
-						if !strings.Contains(sql, "LIMIT") {
-							t.Errorf("%s: a SELECT over %s carries no LIMIT — that "+
-								"table is only ever appended to:\n\t%s",
-								name, table, strings.TrimSpace(sql))
-						}
+						t.Errorf("%s: a SELECT over %s is not bounded — that "+
+							"table is only ever appended to:\n\t%s",
+							name, table, strings.TrimSpace(sql))
 					}
 				}
 				return true
@@ -570,8 +903,20 @@ func zeroByte(expr ast.Expr) bool {
 func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
 	files := apiPackage(t)
 
-	// Which request types carry a name at all.
+	// Which request types carry a name at all — EMBEDDED ONES INCLUDED.
+	//
+	// encoding/json promotes the fields of an embedded struct, so a type that
+	// embeds one carrying `json:"name"` decodes a name exactly like a type
+	// that declares it. Reading the direct fields alone, this collector missed
+	// every such type, and the handler that decoded it was invisible to a
+	// canary written to find precisely that. Resolved to a fixpoint, because
+	// an embedded type may itself embed one.
 	carriesName := map[string]bool{}
+	// stands for: a name that IS another type. An embed and an alias reach
+	// the same place — `type Alias = Inner` has a TypeSpec whose Type is an
+	// identifier, not a struct, so it left the collector at the door and
+	// every type embedding it stayed unmarked.
+	standsFor := map[string][]string{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			spec, ok := n.(*ast.TypeSpec)
@@ -580,15 +925,42 @@ func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
 			}
 			st, ok := spec.Type.(*ast.StructType)
 			if !ok {
+				if id, ok := embeddedIdent(spec.Type); ok {
+					standsFor[spec.Name.Name] = append(
+						standsFor[spec.Name.Name], id)
+				}
 				return true
 			}
 			for _, f := range st.Fields.List {
-				if f.Tag != nil && strings.Contains(f.Tag.Value, `json:"name"`) {
+				if decodesAName(f) {
 					carriesName[spec.Name.Name] = true
+				}
+				// an anonymous field: its own name is the type it embeds —
+				// unless the tag says the decoder ignores it, which `json:"-"`
+				// does and the fixpoint below used to walk straight past
+				if len(f.Names) == 0 && !embedIgnored(f) {
+					if id, ok := embeddedIdent(f.Type); ok {
+						standsFor[spec.Name.Name] = append(
+							standsFor[spec.Name.Name], id)
+					}
 				}
 			}
 			return true
 		})
+	}
+	for changed := true; changed; {
+		changed = false
+		for outer, inners := range standsFor {
+			if carriesName[outer] {
+				continue
+			}
+			for _, inner := range inners {
+				if carriesName[inner] {
+					carriesName[outer] = true
+					changed = true
+				}
+			}
+		}
 	}
 	if len(carriesName) == 0 {
 		t.Fatal("no request type carries a name: this canary is looking at " +

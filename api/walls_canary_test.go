@@ -708,13 +708,26 @@ var queryCalls = map[string]bool{
 func localScopeVariants(
 	values map[string]string, fn *ast.FuncDecl,
 ) []map[string]string {
-	assigns := func(n ast.Node) bool {
+	// A branch BINDS a name — by assigning it, or by declaring one that
+	// shadows it. The THIRD pass that has to know about declarations, and the
+	// one the round that taught the other two forgot: a branch shadowing with
+	// `const sql = "…walled…"` produced no variant at all, so no
+	// branch-not-taken was read, and the sequential pass — ast.Inspect visits
+	// in source order and knows no block scope — overwrote the outer text
+	// with the branch's. The canary then judged the statement the driver runs
+	// by a decoy it never runs, in both directions: an unbounded outer passed
+	// behind a bounded decoy, and a bounded outer was refused behind a dead
+	// unbounded one. The same shape written `sql = "…"` was caught throughout.
+	binds := func(n ast.Node) bool {
 		found := false
 		ast.Inspect(n, func(x ast.Node) bool {
 			if a, ok := x.(*ast.AssignStmt); ok && len(a.Lhs) == 1 {
 				if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
 					found = true
 				}
+			}
+			if len(declaredNames(x)) > 0 {
+				found = true
 			}
 			return true
 		})
@@ -740,6 +753,7 @@ func localScopeVariants(
 	var groups []group
 	ast.Inspect(fn, func(n ast.Node) bool {
 		var branches []ast.Node
+		var init ast.Node
 		none := false
 		switch s := n.(type) {
 		case *ast.IfStmt:
@@ -749,40 +763,153 @@ func localScopeVariants(
 			} else {
 				none = true
 			}
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.SwitchStmt:
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
 			none = !hasDefault(s.Body)
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.TypeSwitchStmt:
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
 			none = !hasDefault(s.Body)
+			if s.Init != nil {
+				init = s.Init
+			}
 		case *ast.SelectStmt:
 			// every communication clause is a branch, and exactly one runs
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
+		// A loop body is a branch that may run NO time at all — the same
+		// path an `if` without `else` has, and it was missing entirely:
+		// `for _, x := range items { sql += " WHERE org_id=$1" }` read as one
+		// text carries the predicate, and the driver runs the base alone on
+		// an empty slice.
+		case *ast.ForStmt:
+			branches = append(branches, s.Body)
+			none = true
+			if s.Init != nil {
+				init = s.Init
+			}
+		case *ast.RangeStmt:
+			branches = append(branches, s.Body)
+			none = true
 		default:
 			return true
 		}
+		// An INITIALISER always runs, but what it binds is scoped to the
+		// statement: `if sql := "…org_id=$1…"; cond {}` leaves the OUTER sql
+		// standing for every use after the closing brace, and the sequential
+		// reader — which knows no block scope — overwrote it. So the reading
+		// where that binding does not apply has to exist.
+		if init != nil && binds(init) {
+			groups = append(groups, group{[]ast.Node{init}, true})
+		}
 		var assigning []ast.Node
 		for _, b := range branches {
-			if assigns(b) {
+			if binds(b) {
 				assigning = append(assigning, b)
 			}
 		}
-		// ONE assigning branch is enough when the branching may take none:
-		// `sql := base; if x { sql += " WHERE org_id=$1" }` read as one text
-		// carries the predicate, and the driver runs `base` alone whenever x
-		// is false.
-		if len(assigning) > 1 || (len(assigning) == 1 && none) {
-			groups = append(groups, group{assigning, none})
+		// The question is not what SHAPE the branching has, it is whether a
+		// path exists on which NONE of the binding branches runs — because
+		// that is the path a wall written inside one of them does not cover,
+		// and the only reading that exposes it is the one below that skips
+		// them all. Two ways to have such a path: the branching may take no
+		// branch at all (`if` without `else`, a loop over nothing), or some
+		// branch binds nothing — a bare `default:`, a case that only logs, a
+		// select clause that returns. Read as the branching's own semantics,
+		// `mayTakeNone` was FALSE for a switch with a default, so the reading
+		// that mattered was never produced for the commonest shape of all.
+		noneBinds := none || len(branches) > len(assigning)
+		if len(assigning) > 0 && (noneBinds || len(assigning) > 1) {
+			groups = append(groups, group{assigning, noneBinds})
 		}
 		return true
 	})
+	// A closure binds where it RUNS, not where it is written, and the
+	// learning pass walks into every one of them and applies what it assigns
+	// as though it already had. `defer func(){ sql += " WHERE org_id=$1" }()`
+	// walled a statement the driver runs BEFORE the defer, and a closure
+	// nobody invokes walled one that never changes at all. It is a branch
+	// that may not be taken — here, or later, or never.
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok && binds(lit) {
+			groups = append(groups, group{[]ast.Node{lit}, true})
+		}
+		return true
+	})
+	// A call reads the text as of ITS OWN position, and this reader has one
+	// scope for the whole function: `sql := base; if cond { query(sql);
+	// return }; sql += wall; query(sql)` resolved the EARLY query as though
+	// the wall were already appended, and the driver runs the bare statement
+	// on that path. So every name bound more than once gets the readings its
+	// prefixes give.
+	//
+	// Only where a call actually SITS between two bindings. Without that,
+	// `sql := base; sql += wall; query(sql)` — ordinary, and how half this
+	// package builds a query — would be read as `base` alone by a variant no
+	// caller ever executes, and refused.
+	boundAt := map[string][]ast.Node{}
+	var calls []token.Pos
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if c, ok := n.(*ast.CallExpr); ok {
+			calls = append(calls, c.Pos())
+		}
+		if a, ok := n.(*ast.AssignStmt); ok && len(a.Lhs) == 1 {
+			if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
+				boundAt[id.Name] = append(boundAt[id.Name], n)
+			}
+		}
+		for _, name := range declaredNames(n) {
+			boundAt[name] = append(boundAt[name], n)
+		}
+		return true
+	})
+	callBetween := func(after, before token.Pos) bool {
+		for _, p := range calls {
+			if p > after && p < before {
+				return true
+			}
+		}
+		return false
+	}
 	var out []map[string]string
+	for _, sites := range boundAt {
+		for k := 1; k < len(sites); k++ {
+			if !callBetween(sites[k-1].End(), sites[k].Pos()) {
+				continue
+			}
+			skip := map[ast.Node]bool{}
+			for _, later := range sites[k:] {
+				skip[later] = true
+			}
+			out = append(out, localScopeSkipping(values, fn, skip))
+		}
+	}
+	// …and the reading where NOTHING binds. Groups are enumerated one at a
+	// time, each variant applying every OTHER group in full, so with two
+	// sibling `if`s each carrying a wall the path where neither runs was the
+	// one reading nobody made — and it is the bare statement, the one no wall
+	// covers. The full cross-product is not enumerated (it is exponential,
+	// and a combination of two walls is walled either way); this is the
+	// corner of it that matters.
+	if len(groups) > 1 {
+		skip := map[ast.Node]bool{}
+		for _, g := range groups {
+			for _, b := range g.branches {
+				skip[b] = true
+			}
+		}
+		out = append(out, localScopeSkipping(values, fn, skip))
+	}
 	for _, g := range groups {
 		for _, keep := range g.branches {
 			skip := map[ast.Node]bool{}

@@ -835,6 +835,41 @@ func TestStatusRespectsGeographicScope(t *testing.T) {
 // Notes carry their own team_id. Trusting it rather than the card's
 // current owner is what keeps a nominative note from leaking when a card
 // returns to the shared pool.
+// A note names a team, always — and the DATABASE is what says so.
+//
+// Its reader is `team_id IS NULL OR team_id = mine`, so a note with a real
+// null is one every team of the campaign reads, which is the opposite of
+// what NationalTeam was introduced for. Nothing the application writes is
+// null (MyTeam() is 0 at the least), and a note that predates the column is
+// backfilled to the national scope rather than left readable by everyone.
+//
+// Its sibling `assignments.team_id` stays nullable ON PURPOSE: there, a null
+// is how an operator puts a stuck card back in the shared pool, and the test
+// below is what holds the notes behind when that happens.
+func TestANoteAlwaysNamesATeam(t *testing.T) {
+	s, _ := testServer(t)
+	seedMayors(t, s, 1, "60")
+	org := orgID(t, s, testSlug)
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		ctx := context.Background()
+		// a savepoint: the refusal aborts the transaction it happens in, and
+		// the outer one still has to commit
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = sp.Rollback(ctx) }()
+		if _, err := sp.Exec(ctx,
+			"INSERT INTO notes(org_id, insee_code, volunteer, status, note, "+
+				"ts, team_id) VALUES($1,'60000','x@exemple.fr','refused',"+
+				"'secret','2026-01-01T00:00',NULL)", org); err == nil {
+			t.Error("a note was written with no team at all: its reader " +
+				"treats that as every team's, so one campaign's volunteers " +
+				"read each other's calls")
+		}
+	})
+}
+
 func TestNotesDoNotFollowReleasedCardToAnotherTeam(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 2, "60")

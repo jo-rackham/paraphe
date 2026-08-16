@@ -419,6 +419,169 @@ func shadowsThePackage() {
 	}
 }
 
+// A branch that DECLARES is a path of its own, like a branch that assigns.
+//
+// localScopeVariants enumerates one reading per path, so a wall added inside
+// a branch cannot vouch for the path that skips it. It counted ASSIGNMENTS
+// only — and the round that taught the reader about declarations taught the
+// forgetting pass and the learning pass, not this third one. A branch
+// shadowing with `const sql = "…org_id = $1…"` produced no variant at all, so
+// no branch-not-taken was read; the sequential pass, which visits in source
+// order and knows no block scope, then overwrote the outer text with the
+// branch's. The canary judged the statement the driver runs by a decoy it
+// never runs, and an unbounded outer passed behind a bounded one. Written
+// `sql = "…"`, the same shape was caught throughout.
+func TestABranchThatDeclaresIsAPathOfItsOwn(t *testing.T) {
+	const src = `package main
+
+func shadowsInABranch(cond bool) {
+	sql := "SELECT id, note FROM notes"
+	if cond {
+		const sql = "SELECT id, note FROM notes WHERE org_id = $1"
+		_ = sql
+	}
+	run(sql)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	files := map[string]*ast.File{"fixture.go": file}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("no function in the fixture")
+	}
+	// the reading the driver executes when the branch is not taken must be
+	// among the variants, or nothing ever judges it
+	var read []string
+	for _, scope := range localScopeVariants(stringValues(files), fn) {
+		sql := strings.ToUpper(scope["sql"])
+		read = append(read, sql)
+		if strings.Contains(sql, "NOTES") && !strings.Contains(sql, "ORG_ID") {
+			return
+		}
+	}
+	t.Errorf("no variant reads the statement the driver runs when the branch "+
+		"is skipped, so a declaration inside it vouched for the path that "+
+		"never executes it; what was read: %q", read)
+}
+
+// Every branching where SOME path does not bind the name is one path more.
+//
+// The enumeration asked what shape the branching had, not whether a path
+// existed on which none of the binding branches runs — and those are
+// different questions for the commonest shapes of all. A `switch` with a
+// `default` set mayTakeNone to false, so a wall written in one case vouched
+// for the default. A `select` never set it at all. A `for` and a `range`
+// were not in the list, though a loop over nothing runs its body no time.
+// And an `if` INITIALISER always runs but binds only inside the statement,
+// so `if sql := "…org_id=$1…"; cond {}` left the outer sql standing for
+// every use after the brace while the reader had taken the inner one.
+//
+// Each of these read as a bounded statement while the driver ran an
+// unbounded one, on a table the campaign wall protects.
+func TestEveryPathThatSkipsTheWallIsRead(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"range over nothing", `
+	sql := "SELECT id FROM notes"
+	for range items {
+		sql += " WHERE org_id = $1"
+	}
+	run(sql)`},
+		{"for that may not run", `
+	sql := "SELECT id FROM notes"
+	for i := 0; i < n; i++ {
+		sql += " WHERE org_id = $1"
+	}
+	run(sql)`},
+		{"switch with a default", `
+	sql := "SELECT id FROM notes"
+	switch n {
+	case 1:
+		sql += " WHERE org_id = $1"
+	default:
+	}
+	run(sql)`},
+		{"select whose other clause binds nothing", `
+	sql := "SELECT id FROM notes"
+	select {
+	case <-items:
+		sql += " WHERE org_id = $1"
+	case <-other:
+	}
+	run(sql)`},
+		{"an initialiser bound to the statement", `
+	sql := "SELECT id FROM notes"
+	if sql := sql + " WHERE org_id = $1"; sql != "" {
+		_ = sql
+	}
+	run(sql)`},
+		// Two branchings are enumerated one at a time, each reading applying
+		// the OTHER in full, so the path where neither runs — the bare
+		// statement, the one no wall covers — was the reading nobody made.
+		{"two sibling branchings, neither taken", `
+	sql := "SELECT id FROM notes"
+	if n == 1 {
+		sql += " WHERE org_id = $1"
+	}
+	if n == 2 {
+		sql += " WHERE org_id = $1 AND team_id = $2"
+	}
+	run(sql)`},
+		// A closure binds where it RUNS. The learning pass walks into every
+		// one and applies what it assigns as though it already had.
+		{"a closure that walls after the query", `
+	sql := "SELECT id FROM notes"
+	defer func() { sql += " WHERE org_id = $1" }()
+	run(sql)`},
+		{"a closure nobody invokes", `
+	sql := "SELECT id FROM notes"
+	_ = func() { sql += " WHERE org_id = $1" }
+	run(sql)`},
+		// A call reads the text as of its OWN position, and this reader had
+		// one scope for the whole function.
+		{"a call before the wall is appended", `
+	sql := "SELECT id FROM notes"
+	if n == 1 {
+		run(sql)
+		return
+	}
+	sql += " WHERE org_id = $1"
+	run(sql)`},
+	} {
+		src := "package main\n\nfunc probe(n int, items, other chan int) {" +
+			tc.body + "\n}\n"
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+		if err != nil {
+			t.Fatalf("%s: parsing the fixture: %v", tc.name, err)
+		}
+		files := map[string]*ast.File{"fixture.go": file}
+		fn := file.Decls[0].(*ast.FuncDecl)
+		unwalled := false
+		var read []string
+		for _, scope := range localScopeVariants(stringValues(files), fn) {
+			sql := strings.ToUpper(scope["sql"])
+			read = append(read, sql)
+			if strings.Contains(sql, "NOTES") && !strings.Contains(sql, "ORG_ID") {
+				unwalled = true
+			}
+		}
+		if !unwalled {
+			t.Errorf("%s: no variant reads the statement the driver runs on "+
+				"the path that skips the wall; what was read: %q",
+				tc.name, read)
+		}
+	}
+}
+
 // A procedural body is refused whatever leads it.
 //
 // `DO $$…$$` is the one shape no rule after it can read: stripDollarQuoted

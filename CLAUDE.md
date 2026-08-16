@@ -326,9 +326,41 @@ One instance can host several campaigns, one per subdomain.
   direction: a local `const` hiding a package binding made the canary judge a
   DIFFERENT statement than the one that runs. A `const` holding half a
   statement is this package's own idiom. Whoever teaches the reader a new way
-  a name gets its value teaches BOTH the forgetting pass and the learning
-  pass; `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var and
-  the shadow.
+  a name gets its value teaches **all THREE passes** — the one that forgets,
+  the one that learns back, and the one that ENUMERATES THE PATHS. The round
+  that taught the first two left the third counting assignments only, so a
+  branch shadowing with `const sql = "…org_id = $1…"` produced no variant, no
+  branch-not-taken was ever read, and the sequential pass — which visits in
+  source order and knows no block scope — overwrote the outer text with the
+  branch's: the canary judged the statement the driver runs by a decoy it
+  never runs, and an unbounded outer passed behind a bounded one. Written
+  `sql = "…"`, that shape was caught throughout.
+  **And that third pass asks whether a PATH EXISTS on which no binding branch
+  runs — never what shape the branching has.** Read as the branching's own
+  semantics it was false for a `switch` with a `default`, so a wall written in
+  one case vouched for the default; a `select` never set it; `for` and `range`
+  were not in the list at all, though a loop over nothing runs its body no
+  time; and an `if` INITIALISER always runs but binds only inside its
+  statement, so `if sql := "…org_id=$1…"; cond {}` left the outer statement
+  standing while the reader had taken the inner one. Four shapes, one
+  question asked wrongly. `TestEveryPathThatSkipsTheWallIsRead` walks them.
+  **And three more that are not paths at all but READINGS the one scope per
+  function could not hold**: two sibling branchings are enumerated one at a
+  time, each reading applying the other in full, so the path where NEITHER
+  runs — the bare statement — was the one nobody made; a closure binds where
+  it RUNS, so a `defer` appending a wall walled the query in front of it and
+  a closure nobody invokes walled one that never changes; and a call reads
+  the text as of ITS position, so a query before a later `sql +=` was judged
+  on the text that comes after it. The last one is generated only where a
+  call actually SITS between two bindings — without that, `sql := base; sql
+  += wall; query(sql)`, which is how half this package builds a query, would
+  be refused on a reading no caller executes.
+  **Assumed, and the safe direction**: a nested declaration shadowing an
+  outer SQL name is read on BOTH paths, so a dead unbounded decoy beside a
+  bounded statement is refused. The canary cannot tell inside a block from
+  outside it; refusing loudly beats passing in silence, and the remedy is to
+  rename. `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var
+  and the shadow; `TestABranchThatDeclaresIsAPathOfItsOwn` walks the branch.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -459,6 +491,14 @@ works when the relay is down, and still bootstraps the instance.
   ArgoCD stuck on « Progressing ». CI renders the mail block too: it is off
   by default, so no other case exercises those twenty-eight lines, and
   `helm lint` parses a branch without executing it.
+  **Presence was not the whole promise: a value the application refuses at
+  STARTUP is refused at RENDER too.** The chart checked that the settings
+  were there and never what they said, so a session key of five bytes, a
+  `mail.publicUrl` carrying a path and a query, and a `media.publicUrl`
+  carrying the semicolon that closes a Content-Security-Policy source all
+  rendered — and produced exactly the CrashLoopBackOff this doctrine exists
+  to prevent. CI drives each refusal separately, and its own renders used a
+  one-letter key until the guard said so.
 - **Stored as a plain SHA-256, deliberately.** The token is 256 bits of
   `crypto/rand`: there is nothing to search, so a memory-hard hash buys
   nothing and would put a 32 MiB derivation behind `hashGate` on a PUBLIC

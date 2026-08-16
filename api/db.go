@@ -251,6 +251,16 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 			org_id INTEGER NOT NULL,
 			insee_code TEXT, volunteer TEXT, status TEXT, note TEXT, ts TEXT,
 			team_id INTEGER)`,
+		// A note belongs to a team, and NULL is not one. The reader says
+		// `team_id IS NULL OR team_id = mine`, which is how a note written
+		// before this column existed became a note every team of every
+		// campaign could read. NationalTeam is the value for "no team", and
+		// the constraint is what keeps it the only one. Backfilled first: a
+		// row that predates the column must not fail the start that upgrades
+		// it. Same treatment as `assignments`, in orgSchema.
+		`UPDATE notes SET team_id = 0 WHERE team_id IS NULL`,
+		`ALTER TABLE notes ALTER COLUMN team_id SET DEFAULT 0`,
+		`ALTER TABLE notes ALTER COLUMN team_id SET NOT NULL`,
 		// Local teams: a team = a work scope (usually one or more
 		// departments) with its lead. The name is only unique WITHIN a
 		// campaign: two campaigns each have their own "Nord" team.
