@@ -104,6 +104,46 @@ func TestALogoWrittenToTheStoreIsPubliclyReadableThenGone(t *testing.T) {
 	}
 }
 
+// An SVG is a DOCUMENT: opened at its own address it runs what it contains,
+// and a single review pass found two ways past the validator that did
+// exactly that. `Content-Disposition: attachment` closes the whole class —
+// the browser downloads the file instead of rendering it — and costs
+// nothing, because `<img src>` ignores the header and draws the logo as
+// before. Both halves verified in Chromium.
+func TestAnSVGIsStoredSoNoBrowserRendersItAsAPage(t *testing.T) {
+	store := testMedia(t)
+	ctx := context.Background()
+	logo, code, why := readLogo("disposition", dataURI("image/svg+xml",
+		[]byte(cleanSVG)))
+	if logo == nil {
+		t.Fatalf("fixture refused: %d %s", code, why)
+	}
+	if err := store.Put(ctx, logo.Key, logo.ContentType, logo.Raw); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Delete(ctx, logo.Key) })
+	status, _, headers := fetchPublicly(t, store.URL(logo.Key))
+	if status != http.StatusOK {
+		t.Fatalf("the SVG answered %d", status)
+	}
+	if got := headers.Get("Content-Disposition"); got != "attachment" {
+		t.Errorf("Content-Disposition = %q: without it, an SVG that gets past "+
+			"the validator is a page on the media origin", got)
+	}
+
+	// …and ONLY the SVG. A raster cannot execute anything, and marking it
+	// as an attachment would make "open the image in a new tab" download it
+	// for no reason at all.
+	raster, _, _ := readLogo("disposition", dataURI("image/png", rasterPNG(t, 8, 8)))
+	if err := store.Put(ctx, raster.Key, raster.ContentType, raster.Raw); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Delete(ctx, raster.Key) })
+	if _, _, h := fetchPublicly(t, store.URL(raster.Key)); h.Get("Content-Disposition") != "" {
+		t.Errorf("a PNG is served as an attachment: %q", h.Get("Content-Disposition"))
+	}
+}
+
 // Deleting a key that is not there is how a pointer the database lost track
 // of gets cleaned up. It must not be an error.
 func TestDeletingAnAbsentObjectIsNotAFailure(t *testing.T) {

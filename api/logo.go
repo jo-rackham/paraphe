@@ -11,6 +11,7 @@ import (
 	"image"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	// The decoders image.DecodeConfig dispatches to. Blank imports: nothing
@@ -160,10 +161,17 @@ func refuseRaster(format string, raw []byte) string {
 }
 
 // Elements that carry or can carry execution. `foreignObject` embeds
-// arbitrary HTML, the other three embed a whole document.
+// arbitrary HTML, the next three embed a whole document, and the SMIL four
+// REWRITE an attribute after the document has loaded — `<animate
+// attributeName="href" to="…">` sets a link's target to something the
+// validator never saw, which is how a `javascript:` URL got past an
+// attribute check that only reads what is written in the file. A logo does
+// not animate.
 var svgForbidden = map[string]bool{
 	"script": true, "foreignobject": true, "iframe": true,
 	"embed": true, "object": true, "handler": true,
+	"animate": true, "animatetransform": true, "animatemotion": true,
+	"set": true,
 }
 
 // refuseSVG walks the document and refuses the shapes that make an SVG more
@@ -181,6 +189,20 @@ func refuseSVG(raw []byte) string {
 			return "SVG illisible : le fichier n'est pas du XML valide."
 		}
 		switch t := token.(type) {
+		case xml.ProcInst:
+			// `<?xml-stylesheet type="text/xsl" href="data:text/xsl;base64,…"?>`
+			// is not decoration: opened as a document, the browser fetches
+			// that stylesheet and applies it, and an XSLT may emit HTML with
+			// a <script> in it. Verified — the file was served as
+			// `text/html` on the media origin with the script running. The
+			// switch handled StartElement and Directive and let every
+			// processing instruction through.
+			//
+			// `<?xml …?>` itself is a ProcInst too, and refusing it costs
+			// nothing: an SVG needs no declaration to render.
+			return fmt.Sprintf("SVG refusé : il contient une instruction de "+
+				"traitement <?%s?>, qui peut charger une feuille de style "+
+				"exécutable. Réexportez l'image sans.", t.Target)
 		case xml.Directive:
 			// A DOCTYPE, hence possibly an internal entity declaration.
 			// Go's parser expands none of it — but the BROWSER that renders
@@ -213,10 +235,16 @@ func refuseSVG(raw []byte) string {
 	return ""
 }
 
+// A URL scheme, as a BROWSER reads it: tabs, newlines and carriage returns
+// are stripped from a URL before the scheme is looked at, so `java<TAB>script:`
+// is `javascript:` to Chrome and to nobody comparing strings. Every C0
+// control goes, which is what the URL specification says to do.
+var rxURLNoise = regexp.MustCompile(`[\x00-\x20]`)
+
 func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 	for _, a := range attrs {
 		name := strings.ToLower(a.Name.Local)
-		value := strings.ToLower(strings.TrimSpace(a.Value))
+		value := rxURLNoise.ReplaceAllString(strings.ToLower(a.Value), "")
 		if strings.HasPrefix(name, "on") {
 			return fmt.Sprintf("SVG refusé : l'attribut %q sur <%s> est un "+
 				"gestionnaire d'événement. Réexportez l'image sans "+
@@ -229,7 +257,16 @@ func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 		// A reference outside the document: the <img> rendering mode would
 		// not follow it, but a file opened directly would. A logo refers
 		// only to itself.
-		if name == "href" && !strings.HasPrefix(value, "#") && value != "" {
+		//
+		// An INLINE raster is not outside the document, and refusing it
+		// contradicted this very sentence: "Embed image" in Inkscape,
+		// Figma and Illustrator all produce `<image href="data:image/…">`,
+		// and every one of those exports was rejected as external. Only
+		// `data:image/` — `data:text/html,<script>…` in an <a> is exactly
+		// what the rest of this function exists to refuse.
+		if name == "href" && value != "" &&
+			!strings.HasPrefix(value, "#") &&
+			!strings.HasPrefix(value, "data:image/") {
 			return fmt.Sprintf("SVG refusé : <%s> référence une ressource "+
 				"extérieure (%q). Un logo doit être autonome.", element, a.Value)
 		}

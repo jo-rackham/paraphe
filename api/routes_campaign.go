@@ -313,6 +313,13 @@ func (s *Server) forgetLogo(org int, previous, kept string) {
 		if current == previous {
 			return // written again while this was in flight
 		}
+		// The lock is held ACROSS the deletion, and deliberately. Committing
+		// first and deleting after reads as the tidier shape and reopens the
+		// hole this whole function exists to close: between the release and
+		// the delete, an upload of the same image writes exactly this key
+		// back, and the delete then destroys an object the pointer names.
+		// The cost is that a campaign's other writers wait — at most
+		// mediaTimeout, and only while the store is wedged.
 		if err := s.media.Delete(ctx, previous); err != nil {
 			// Said, not raised: the campaign's logo is already correct, and
 			// the only cost is an orphan the next `task backup-media`

@@ -128,14 +128,16 @@ export default function Browser() {
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
-        DB.readSetting<string>("logo", ""),
+        DB.readSetting<unknown>("logo", ""),
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
-      setLogo(g);
+      // checked on the way OUT too: a database written before this
+      // guard existed, or by another tab, is not this code's doing
+      setLogo(DB.usableLogo(g) ? g : "");
       setDraft(c);
       setNoteDraft(a);
       setLoadedList(l);
@@ -314,7 +316,7 @@ export default function Browser() {
         DB.readSetting<string>("argument", ""),
         // the logo travels in the backup like every other setting, and
         // « fusionner » protects the one you hold, key by key
-        DB.readSetting<string>("logo", ""),
+        DB.readSetting<unknown>("logo", ""),
         // the backup carries `liste` too, and not reading it back left the
         // banner offering to load "all 34 826" — which would replace the
         // list just imported
@@ -324,7 +326,9 @@ export default function Browser() {
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
-      setLogo(g);
+      // checked on the way OUT too: a database written before this
+      // guard existed, or by another tab, is not this code's doing
+      setLogo(DB.usableLogo(g) ? g : "");
       setDraft(c);
       setNoteDraft(a);
       setLoadedList(l);

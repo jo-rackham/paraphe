@@ -203,6 +203,13 @@ export interface ImportReport {
   keptSettings?: number;
 }
 
+/**
+ * A logo this mode may hold: inline bytes, or nothing. Browser mode stores
+ * only data URIs — a remote address here would be fetched on every render.
+ */
+export const usableLogo = (v: unknown): v is string =>
+  v === "" || (typeof v === "string" && v.startsWith("data:image/"));
+
 /** A usable tracking entry: without this, the card renders a white screen. */
 function validTracking(e: unknown): e is Tracking {
   const t = e as Tracking;
@@ -287,6 +294,18 @@ export async function importAll(
   );
   const held = new Set((current ?? []).map((s) => s.key));
   for (const r of data.settings ?? []) {
+    // The logo is the one setting that becomes an <img src>, so it is the
+    // one a backup file can turn into a beacon: an imported
+    // `https://ailleurs.example/pixel.gif?qui=…` is fetched on every page
+    // load, for ever, and the GUIDE tells volunteers to exchange these
+    // files. A data: URI is the only shape this mode ever writes, and the
+    // only one that keeps « aucune donnée ne quitte ce navigateur » true —
+    // published on GitHub Pages there is no Content-Security-Policy to
+    // catch it.
+    if (r.key === "logo" && !usableLogo(r.value)) {
+      report.skipped++;
+      continue;
+    }
     if (!merge || !held.has(r.key)) {
       await writeSetting(r.key, r.value);
       report.settings++;

@@ -144,6 +144,15 @@ unassigned=$(echo "$status" | jq -r --arg zone "$GARAGE_ZONE" \
     | .id] | join(" ")')
 
 if [ -n "$unassigned" ]; then
+  # Anything already staged by hand is about to be replaced by what this
+  # deployment says. Said out loud: an operator mid-way through a manual
+  # `garage layout assign` would otherwise see their work vanish into an
+  # upgrade that reported nothing.
+  staged=$(echo "$status" | jq -r '.layout.stagedRoleChanges? // [] | length')
+  if [ "${staged:-0}" -gt 0 ]; then
+    echo "warning: $staged staged role change(s) were pending and are being" \
+      "replaced by this deployment's zone and capacity" >&2
+  fi
   echo "assigning a layout to: $unassigned"
   roles=$(for id in $unassigned; do
     jq -nc --arg id "$id" --arg zone "$GARAGE_ZONE" \
@@ -225,24 +234,34 @@ api POST /v2/AllowBucketKey -d "$(jq -nc \
     permissions: {read: true, write: true, owner: false}}')" >/dev/null
 echo "key $MEDIA_ACCESS_KEY may read and write $MEDIA_BUCKET"
 
-# Every OTHER key this script ever granted loses its access here. Rotating
-# the ID is what an operator does after a LEAK, and until now it left the
-# leaked credential with full read and write on the bucket for ever —
-# granting the new one revokes nothing by itself. Denied rather than
-# deleted: a revoked key answers 403, and Garage never lets its ID come
-# back, so deleting it would spend something that cannot be recovered.
-api GET "/v2/GetBucketInfo?globalAlias=$MEDIA_BUCKET" \
-  | jq -r --arg keep "$MEDIA_ACCESS_KEY" \
-    '.keys[]? | select(.accessKeyId != $keep)
-     | select(.permissions.read or .permissions.write or .permissions.owner)
-     | .accessKeyId' \
-  | while read -r stale; do
-      [ -n "$stale" ] || continue
-      api POST /v2/DenyBucketKey -d "$(jq -nc --arg b "$bucket" --arg k "$stale" \
-        '{bucketId: $b, accessKeyId: $k,
-          permissions: {read: true, write: true, owner: true}}')" >/dev/null
-      echo "revoked a former key on $MEDIA_BUCKET: $stale"
-    done
+# Every FORMER GENERATION OF THIS KEY loses its access here. Rotating the ID
+# is what an operator does after a leak, and granting the new one revokes
+# nothing by itself — the leaked credential kept full read and write for
+# ever. Denied rather than deleted: a revoked key answers 403, and Garage
+# never lets an ID come back, so deleting it spends something unrecoverable.
+#
+# Filtered on the NAME this script imports under, not on "everything that is
+# not the current key". The broader form revoked whatever else the operator
+# had deliberately granted — a backup pipeline, a mirror, a migration tool —
+# on every `helm upgrade`, silently, and Garage would not let those IDs
+# return either. Keys nobody named "paraphe" are none of this script's
+# business.
+# Read FIRST, filter second. `set -e` does not cross a pipe, so
+# `api GET … | jq` exited 0 whenever jq did — a 5xx or a restarted peer
+# skipped the revocation in silence, which after a leak is the one moment
+# it must not. As its own command, a failure stops the script. (`pipefail`
+# would say the same thing and is not POSIX; this file is #!/bin/sh.)
+bucket_info=$(api GET "/v2/GetBucketInfo?globalAlias=$MEDIA_BUCKET")
+stale_keys=$(echo "$bucket_info" | jq -r --arg keep "$MEDIA_ACCESS_KEY" \
+  '.keys[]? | select(.name == "paraphe" and .accessKeyId != $keep)
+   | select(.permissions.read or .permissions.write or .permissions.owner)
+   | .accessKeyId')
+for stale in $stale_keys; do
+  api POST /v2/DenyBucketKey -d "$(jq -nc --arg b "$bucket" --arg k "$stale" \
+    '{bucketId: $b, accessKeyId: $k,
+      permissions: {read: true, write: true, owner: true}}')" >/dev/null
+  echo "revoked a former paraphe key on $MEDIA_BUCKET: $stale"
+done
 
 # --- publishing ------------------------------------------------------------
 # The whole point of this arbitration: the browser fetches the logos from

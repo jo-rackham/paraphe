@@ -181,6 +181,40 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 			`<a href="javascript:alert(1)"><rect width="10" height="10"/></a></svg>`,
 		"not an SVG at all": `<html><body>bonjour</body></html>`,
 		"not even XML":      `<svg xmlns="http://www.w3.org/2000/svg"`,
+
+		// A processing instruction is not decoration. Opened at its own
+		// address, the browser fetched this XSLT and applied it, and the
+		// document it produced ran its <script> on the media origin —
+		// verified in Chromium, `document.contentType` was `text/html`.
+		// The token switch handled StartElement and Directive and let
+		// every ProcInst through.
+		"an XSLT stylesheet instruction": `<?xml-stylesheet type="text/xsl" ` +
+			`href="data:text/xsl;base64,PHhzbDpzdHlsZXNoZWV0Lz4="?>` +
+			`<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>`,
+
+		// SMIL rewrites an attribute AFTER the document loads, so the value
+		// the validator read is not the value the browser follows. And a
+		// browser strips tabs and newlines out of a URL before reading its
+		// scheme, so `java<TAB>script:` is javascript: to it and to no
+		// string comparison.
+		"an animate rewriting href": "<svg xmlns=\"http://www.w3.org/2000/svg\"><a>" +
+			"<animate attributeName=\"href\" to=\"java\tscript:alert(1)\" begin=\"0s\"/>" +
+			"<rect width=\"10\" height=\"10\"/></a></svg>",
+		"a set rewriting href": "<svg xmlns=\"http://www.w3.org/2000/svg\"><a>" +
+			"<set attributeName=\"href\" to=\"java\nscript:alert(1)\"/>" +
+			"<rect width=\"10\" height=\"10\"/></a></svg>",
+		// Caught by the ELEMENT refusal and by nothing else: the target is
+		// a perfectly ordinary https URL, so no scheme check fires, and the
+		// external-reference check only reads attributes named `href` —
+		// here the URL lives in `to`.
+		"an animate pointing a link somewhere else": `<svg xmlns="http://www.w3.org/2000/svg"><a>` +
+			`<animate attributeName="href" to="https://ailleurs.example/" begin="0s"/>` +
+			`<rect width="10" height="10"/></a></svg>`,
+		"a link whose scheme carries a tab": "<svg xmlns=\"http://www.w3.org/2000/svg\">" +
+			"<a href=\"java\tscript:alert(1)\"><rect width=\"10\" height=\"10\"/></a></svg>",
+		"an HTML data: link": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<a href="data:text/html,<script>alert(1)</script>">` +
+			`<rect width="10" height="10"/></a></svg>`,
 	}
 	for name, body := range cases {
 		logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(body)))
@@ -194,6 +228,21 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 		if why == "" {
 			t.Errorf("%s: refused without saying why", name)
 		}
+	}
+}
+
+// An INLINE raster is not an external reference — it is the most autonomous
+// form there is, and "Embed image" in Inkscape, Figma and Illustrator all
+// produce one. Refusing it contradicted the very sentence the refusal
+// printed, and rejected a common real export.
+func TestAnSVGEmbeddingItsOwnRasterIsAccepted(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">` +
+		`<image href="data:image/png;base64,` +
+		base64.StdEncoding.EncodeToString(rasterPNG(t, 4, 4)) +
+		`" width="10" height="10"/></svg>`
+	logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(svg)))
+	if logo == nil {
+		t.Errorf("an SVG embedding its own raster was refused (%d): %s", code, why)
 	}
 }
 

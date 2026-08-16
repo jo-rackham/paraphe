@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChampLogo, LOGO_MAX_BYTES, Marque } from "./common.tsx";
+import * as DB from "./db.ts";
 import { fetchCampaign } from "./prefill.ts";
 
 // The campaign logo, on the three points where getting it wrong is not
@@ -248,5 +249,46 @@ describe("a campaign offered by ?org=", () => {
     const offer = await fetchCampaign("camille2027");
     expect(offer.logo).toBe("");
     expect(offer.campaign.candidat).toBe("rempli");
+  });
+});
+
+describe("a logo carried by a backup file", () => {
+  // The GUIDE tells volunteers to exchange these files to share their
+  // tracking. One tampered export otherwise turns every teammate's reload
+  // into a beacon: the value becomes an <img src>, fetched on every render,
+  // for ever. Published on GitHub Pages there is no Content-Security-Policy
+  // to catch it, and « aucune donnée ne quitte ce navigateur » is the whole
+  // promise of that build.
+  const backup = (logo: unknown) => ({
+    format: "paraphe/1",
+    exported_at: "2026-08-16",
+    mayors: [],
+    tracking: [],
+    settings: [{ key: "logo", value: logo }],
+  });
+
+  it("keeps an inline image", async () => {
+    await DB.eraseAll();
+    await DB.importAll(backup("data:image/png;base64,iVBORw0KGgo="));
+    expect(await DB.readSetting("logo", "")).toBe(
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+  });
+
+  it("drops a remote address rather than fetch it on every load", async () => {
+    for (const hostile of [
+      "https://tracker.attaquant.example/pixel.gif?qui=victime",
+      "http://192.168.1.1/beacon",
+      "//ailleurs.example/x.png",
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      42,
+      { url: "https://ailleurs.example" },
+    ]) {
+      await DB.eraseAll();
+      const report = await DB.importAll(backup(hostile));
+      expect(await DB.readSetting("logo", ""), String(hostile)).toBe("");
+      expect(report.skipped, String(hostile)).toBeGreaterThan(0);
+    }
   });
 });

@@ -63,7 +63,12 @@ func NewMediaStore() (*MediaStore, error) {
 	bucket := strings.TrimSpace(Get("media_bucket"))
 	access := strings.TrimSpace(Get("media_access_key"))
 	secret := strings.TrimSpace(Get("media_secret_key"))
-	public := strings.TrimSuffix(strings.TrimSpace(Get("media_public_url")), "/")
+	// NOT trimmed here: MediaOrigin is what judges this value, and it drops
+	// the path itself. Trimming first made the two disagree — a value with
+	// a space before its trailing slash passed the startup check and was
+	// refused at request time, so the instance started, the probe stayed
+	// green, and every page shipped a policy without the media origin.
+	public := strings.TrimSpace(Get("media_public_url"))
 
 	given := map[string]string{
 		"PARAPHE_MEDIA_ENDPOINT":   endpoint,
@@ -190,10 +195,25 @@ func (m *MediaStore) CheckBucket(ctx context.Context) error {
 // rather than depending on the web server in front.
 func (m *MediaStore) Put(ctx context.Context, key, contentType string,
 	raw []byte) error {
-	code, body, err := m.do(ctx, http.MethodPut, key, raw, map[string]string{
+	headers := map[string]string{
 		"content-type":  contentType,
 		"cache-control": "public, max-age=31536000, immutable",
-	})
+	}
+	// An SVG is a DOCUMENT, and a document opened at its own address runs
+	// what it contains. `<img src>` ignores Content-Disposition and renders
+	// the drawing exactly as before; a top-level navigation downloads the
+	// file instead of executing it.
+	//
+	// This is the layer that closes the class. The validator refuses the
+	// shapes it knows — and a single review pass found two it did not, an
+	// `<?xml-stylesheet?>` pointing at an XSLT that emits HTML, and a SMIL
+	// `<animate>` rewriting a link to `java<TAB>script:`. Enumerating what
+	// an SVG may do is a losing game; refusing to render it as a page is
+	// not.
+	if contentType == "image/svg+xml" {
+		headers["content-disposition"] = "attachment"
+	}
+	code, body, err := m.do(ctx, http.MethodPut, key, raw, headers)
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", key, err)
 	}
