@@ -159,7 +159,8 @@ var (
 			// table position. Only an operand it could not read counts.
 			`|\bUPDATE\s*` + tableModifier + schemaQualifier + `(?:%|\$\?|,)` +
 			`|\b(?:FROM|USING)\s+` + tableName +
-			`(?:\s*,\s*` + tableName + `)*\s*,\s*` + tableModifier + marker)
+			`(?:\s*,\s*` + tableName + `)*\s*,\s*` + tableModifier +
+			schemaQualifier + marker)
 	// The destructive verbs, with an operand that cannot be read.
 	//
 	// destructiveRef catches every one of these when the table is NAMED,

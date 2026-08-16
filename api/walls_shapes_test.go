@@ -261,16 +261,22 @@ func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 		}
 	}
 	// …and the comma position, which tableRef has read since the day a second
-	// table hid behind one.
+	// table hid behind one — walked over the SAME axes as the keywords above,
+	// schemas included. Walked at the keyword positions and not at this one,
+	// the grid certified an agreement that did not hold: `FROM accounts a,
+	// public.`+t named a walled table tableRef read and unreadableTable did
+	// not, and PostgreSQL cross-joined every campaign's rows into the answer.
 	for _, modifier := range modifiers {
-		named := "SELECT X FROM TEAMS G, " + modifier + "ACCOUNTS C"
-		if !tableRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("tableRef does not read the table of %q", named)
-		}
-		unreadable := "SELECT X FROM TEAMS G, " + modifier + "%S"
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("a marker after a comma %sis a table nobody can read "+
-				"and no rule says so:\n\t%s", modifier, unreadable)
+		for _, schema := range schemas {
+			named := "SELECT X FROM TEAMS G, " + modifier + schema + "ACCOUNTS C"
+			if !tableRef("ACCOUNTS").MatchString(named) {
+				t.Errorf("tableRef does not read the table of %q", named)
+			}
+			unreadable := "SELECT X FROM TEAMS G, " + modifier + schema + "%S"
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("a marker after a comma is a table nobody can read "+
+					"and no rule says so:\n\t%s", unreadable)
+			}
 		}
 	}
 }

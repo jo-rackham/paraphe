@@ -309,6 +309,14 @@ One instance can host several campaigns, one per subdomain.
   `TestEveryTablePositionIsReadByBothRules` walks keyword × modifier
   demanding that one read a NAME there and the other a MARKER. Teaching one
   rule a position without the other goes red in the round that does it.
+  **A grid walked at some positions and not at others certifies an agreement
+  that does not hold** — which is how the SEVENTH round of this class arrived.
+  The schema axis was added at the keyword positions, and the comma, which
+  had its own loop, kept walking modifiers alone: `FROM accounts a,
+  public.`+t named a walled table `tableRef` read and `unreadableTable` did
+  not, and PostgreSQL cross-joined every campaign's rows into the answer
+  (measured, two rows against ten). An axis added anywhere is added at EVERY
+  position, and the test walks each position over all of them.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
