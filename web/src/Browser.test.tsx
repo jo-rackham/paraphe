@@ -66,11 +66,28 @@ async function until(pred: () => boolean, what: string) {
   throw new Error(`never happened: ${what}`);
 }
 
-/** Renders Browser under ?org=campagne and waits for the offer to land. */
-async function renderWithOffer() {
+/**
+ * Renders Browser under ?org=campagne, ASKS for the proposal, and waits for
+ * it to land.
+ *
+ * The click is not ceremony: this mode promises no request leaves the
+ * browser, and the promise says it must be verifiable in the network tab.
+ * The link NAMES a campaign; fetching it is the volunteer's decision, and
+ * nothing before that click touches the network.
+ */
+async function renderAndSettle() {
   await act(async () => {
     root.render(<Browser />);
   });
+  await until(
+    () => text().includes("Ce lien propose une campagne"),
+    "the ask appears",
+  );
+}
+
+async function renderWithOffer() {
+  await renderAndSettle();
+  await click("Voir cette proposition");
   await until(
     () => text().includes("Reprendre la campagne"),
     "the offer lands",
@@ -172,13 +189,15 @@ afterEach(async () => {
 // tampered backup is not this code's doing, and this mode is published on
 // GitHub Pages where no Content-Security-Policy catches what it renders.
 describe("a logo already in the database", () => {
-  // through renderWithOffer: the offer is fetched by the SAME mount effect,
-  // strictly after the logo is read, so the banner landing is the proof
-  // that the read has happened — an assertion made before it would pass on
-  // an empty page whatever the guard does
+  // through renderAndSettle: the ?org= ask is the LAST thing the mount
+  // effect does, strictly after the logo is read, so its appearing is the
+  // proof that the read has happened — an assertion made before it would
+  // pass on an empty page whatever the guard does. It used to wait for the
+  // offer itself, which meant a network round trip this describe never
+  // needed; the ask is the same proof without one.
   const stored = async (value: unknown) => {
     await DB.writeSetting("logo", value as string);
-    await renderWithOffer();
+    await renderAndSettle();
     return [...container.querySelectorAll("img")].map((i) =>
       i.getAttribute("src"),
     );
@@ -205,6 +224,37 @@ describe("a logo already in the database", () => {
 });
 
 describe("the offer banner, rendered", () => {
+  // The promise this mode makes is not « we only send what is needed », it
+  // is that NOTHING leaves — and index.html says it must be verifiable in
+  // the network tab rather than asserted. A ?org= link naming a campaign
+  // used to be fetched by the mount effect, so opening a link shared
+  // publicly rang <slug>.<instance> with the visitor's address before any
+  // click. Counted here, because a comment cannot hold that line.
+  it("asks before it fetches: nothing leaves until the volunteer clicks", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", (...args: unknown[]) => {
+      calls++;
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            slug: "campagne",
+            name: "Camille Réel",
+            campaign: OFFERED,
+            url: args[0],
+          }),
+      });
+    });
+    await renderAndSettle();
+    expect(calls, "a request left the browser before any click").toBe(0);
+    await click("Voir cette proposition");
+    await until(
+      () => text().includes("Reprendre la campagne"),
+      "the offer lands",
+    );
+    expect(calls, "the ask must send exactly one request").toBe(1);
+  });
+
   it("appears on an untouched campaign, and the warning stays with it", async () => {
     await renderWithOffer();
     expect(text()).toContain("Reprendre la campagne « Camille Réel »");

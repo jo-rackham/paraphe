@@ -16,9 +16,13 @@
 <!-- aucune ressource distante : ni police, ni CDN, ni mesure d'audience.
      La promesse « aucune donnée ne sort » (mode navigateur) doit être
      vérifiable dans l'onglet réseau, pas seulement affirmée.
-     Le mode navigateur ne fait AUCUNE requête sortante : le logo d'une
-     campagne reprise par ?org= est téléchargé une fois, à l'instant où le
-     bénévole accepte, et conservé en data URI dans IndexedDB.
+     Le mode navigateur ne fait AUCUNE requête sortante tant que le bénévole
+     n'en demande pas une. Un lien ?org= NOMME une campagne, il ne va pas la
+     chercher : l'écran le dit et attend le clic — sinon un lien partagé
+     publiquement ferait sonner l'instance, avec l'adresse du visiteur, à
+     chaque ouverture. Ensuite seulement viennent la proposition puis, si
+     elle est acceptée, le logo, téléchargé une fois et conservé en data URI
+     dans IndexedDB.
      Le mode ÉQUIPE en fait une, nommée : les logos sont servis par
      l'origine média de l'instance (PARAPHE_MEDIA_PUBLIC_URL), la seule que
      la Content-Security-Policy autorise en plus de la sienne. -->

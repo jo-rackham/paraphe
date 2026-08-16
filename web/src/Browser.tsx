@@ -19,6 +19,7 @@ import {
   rescueFocusAfterCommit,
   SkipLink,
   ThemeToggle,
+  useSubmitGuard,
   useViewFocus,
 } from "./common.tsx";
 import { LISTS, type ListKey, loadList, type Progress } from "./data.ts";
@@ -72,6 +73,15 @@ export default function Browser() {
   // volunteer takes with the candidate's name in front of them.
   const [offer, setOffer] = useState<Offer | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
+  // The campaign a ?org= link NAMES, held until the volunteer asks for it.
+  // Fetching it on load put a request to <slug>.<instance> in the network
+  // tab before any click — the one thing this mode promises does not happen,
+  // and the promise says it must be verifiable there rather than asserted.
+  // A link shared publicly would otherwise ring its instance, with the
+  // visitor's address, every time the page opened.
+  const [pendingSlug, setPendingSlug] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [looking, doneLooking] = useSubmitGuard();
   // The « Ma campagne » draft lives HERE, not in the tab: the tab is
   // unmounted by a tab switch, and an unsaved draft is the volunteer's
   // work — it must survive a look at the Guide. No effect resyncs it from
@@ -152,15 +162,8 @@ export default function Browser() {
       // their own name under « Qui signe les emails », their own phone —
       // was offered a link that replaced all nine, and `signataire` is the
       // signature at the bottom of every email to a mayor.
-      if (slug && untouchedCampaign(c)) {
-        try {
-          setOffer(await fetchCampaign(slug));
-        } catch (err) {
-          // its own slot: the list download resolves a second later and
-          // overwrote this one, so a broken link failed in total silence
-          setOfferError(err instanceof Error ? err.message : String(err));
-        }
-      }
+      // …and REMEMBERED, never fetched here: see pendingSlug above.
+      if (slug && untouchedCampaign(c)) setPendingSlug(slug);
     })().catch((e) => {
       // Rejecting instead of hanging changes nothing on screen without
       // this: `ready` stays false, the page renders "Chargement…" for
@@ -438,6 +441,46 @@ export default function Browser() {
             <p role="status">Chargement…</p>
           ) : (
             <>
+              {/* A ?org= link SAYS a campaign is on offer; it does not go and
+              get it. Nothing leaves this browser until the volunteer asks,
+              which is what the network tab has to show. */}
+              {pendingSlug && !offer && untouchedCampaign(draft) && (
+                <section className="carte">
+                  <h2>Ce lien propose une campagne</h2>
+                  <p>
+                    Le lien que vous avez ouvert nomme la campagne «&nbsp;
+                    {pendingSlug}&nbsp;». Rien ne lui a encore été demandé :
+                    l'afficher enverra une requête à son serveur, la première et
+                    la seule.
+                  </p>
+                  <button
+                    type="button"
+                    aria-disabled={fetching || undefined}
+                    onClick={async () => {
+                      if (looking()) return;
+                      setFetching(true);
+                      // this button unmounts once the offer is in
+                      focusContenu();
+                      try {
+                        setOffer(await fetchCampaign(pendingSlug));
+                      } catch (err) {
+                        // its own slot: the list download resolves a second
+                        // later and overwrote this one, so a broken link
+                        // failed in total silence
+                        setOfferError(
+                          err instanceof Error ? err.message : String(err),
+                        );
+                        setPendingSlug(null);
+                      } finally {
+                        setFetching(false);
+                        doneLooking();
+                      }
+                    }}
+                  >
+                    Voir cette proposition
+                  </button>
+                </section>
+              )}
               {/* the draft, not cfg: the draft covers everything the volunteer
             has — saved (it starts from cfg and follows every writer) or
             still being typed under this very banner */}
@@ -448,6 +491,9 @@ export default function Browser() {
                     // the card — and the clicked button — unmounts
                     focusContenu();
                     setOffer(null);
+                    // …and the ask that led to it, or refusing the offer put
+                    // « Voir cette proposition » straight back on screen
+                    setPendingSlug(null);
                     // and it must STAY refused: left in the address bar, ?org=
                     // brought the offer back at every reload
                     const url = new URL(window.location.href);
