@@ -501,21 +501,48 @@ jobs:
           # …and a value the APPLICATION refuses at startup is refused HERE,
           # where the person who typed it is looking. Each one separately:
           # asserting on one leaves the others free to disappear.
-          for faute in secrets.secretKey=trop-court \
-            mail.publicUrl=https://p.exemple.fr/chemin?x=1 \
-            "media.publicUrl=* ; script-src *"; do
-            if helm template paraphe chart/paraphe \
+          #
+          # And each refusal has to come from the guard AIMED AT. A render
+          # that fails for an unrelated reason — a missing secret two files
+          # away — reads exactly like a guard that worked, and one of these
+          # cases was passing for that reason while it was being written.
+          # The message is the proof.
+          refuse() {
+            faute=$1; attendu=$2; shift 2
+            if sortie=$(helm template paraphe chart/paraphe \
               --set secrets.adminPassword=x --set "secrets.secretKey=$CLE" \
               --set secrets.valkeyPassword=w \
               --set postgres.cnpg.backup.acknowledgedDisabled=true \
               --set mail.url=smtp://envoi@relais.exemple.fr:587 \
               --set mail.from=contact@exemple.fr \
               --set mail.publicUrl=https://p.exemple.fr \
-              --set "$faute" > /dev/null 2>&1; then
+              "$@" --set "$faute" 2>&1); then
               echo "::error::the chart renders $faute, which the app refuses"
               exit 1
             fi
-          done
+            case "$sortie" in
+              *"$attendu"*) echo "--- refusé comme prévu : $faute" ;;
+              *) echo "::error::$faute was refused, but not by its own guard"
+                 echo "$sortie" | tail -3
+                 exit 1 ;;
+            esac
+          }
+          stockage=(--set media.enabled=true --set garage.enabled=true
+            --set secrets.mediaAccessKey=GKcicicicicicicicicicici
+            --set secrets.mediaSecretKey=cccccccccccccccccccccccccccccccc
+            --set secrets.garageRpcSecret=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+            --set secrets.garageAdminToken=jeton-ci)
+          refuse secrets.secretKey=trop-court "octets"
+          refuse "mail.publicUrl=https://p.exemple.fr/chemin?x=1" "mail.publicUrl vaut"
+          refuse "mail.publicUrl=https://qui@exemple.fr" "mail.publicUrl vaut"
+          # the composed origin, so the setting it is composed FROM as well
+          # the comma is escaped for helm's own parser, which otherwise reads
+          # it as a second --set and fails before any guard is reached — which
+          # is the shape the message check above exists to catch, and did
+          refuse "media.publicUrl=https://m.exemple.fr\,evil.fr" \
+            "magasin d'objets" "${stockage[@]}"
+          refuse "media.host=m.exemple.fr;script-src *" \
+            "magasin d'objets" "${stockage[@]}"
           # The object store is off by default too, so its StatefulSet, its
           # bootstrap Job and its half of the Secret rendered in NO case here
           # — three files nothing above this line has ever parsed with their
