@@ -131,8 +131,12 @@ tasks:
       - docker compose stop api
       # La base actuelle est mise de côté, pas supprimée : une restauration
       # ratée doit laisser l'opérateur dans un état pas pire qu'avant.
-      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'DROP DATABASE IF EXISTS paraphe_avant_restauration'
-      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'ALTER DATABASE paraphe RENAME TO paraphe_avant_restauration'
+      #
+      # Elle est HORODATÉE. Nommée fixe, la deuxième restauration écrasait le
+      # filet avec le contenu de la première : qui restaure le mauvais dump
+      # puis se ravise avait perdu l'original — le filet ne tenait qu'un coup,
+      # et rien ne le disait.
+      - docker compose exec -T postgres psql -U paraphe -d postgres -c "ALTER DATABASE paraphe RENAME TO paraphe_avant_$(date +%Y%m%d_%H%M%S)"
       - docker compose exec -T postgres psql -U paraphe -d postgres -c 'CREATE DATABASE paraphe'
       # ON_ERROR_STOP : sans lui psql rend 0 sur un fichier plein d'erreurs,
       # et la tâche annonçait « restauré » sur une base à moitié écrite.
@@ -140,7 +144,7 @@ tasks:
       # `defer` : si le chargement échoue, Task s'arrête ici et l'API resterait
       # ÉTEINTE, sans un mot sur la façon de revenir en arrière. L'opérateur
       # est au milieu d'un incident ; la sortie doit lui dire quoi taper.
-      - defer: '{{if .FAILED}}echo "ÉCHEC — la base d''avant est intacte sous paraphe_avant_restauration. Pour revenir : docker compose exec -T postgres psql -U paraphe -d postgres -c ''DROP DATABASE paraphe'' && docker compose exec -T postgres psql -U paraphe -d postgres -c ''ALTER DATABASE paraphe_avant_restauration RENAME TO paraphe'' && docker compose start api"{{end}}'
+      - defer: '{{if .EXIT_CODE}}echo "ÉCHEC — la base d''avant est intacte sous paraphe_avant_restauration. Pour revenir : docker compose exec -T postgres psql -U paraphe -d postgres -c ''DROP DATABASE paraphe'' && docker compose exec -T postgres psql -U paraphe -d postgres -c ''ALTER DATABASE paraphe_avant_restauration RENAME TO paraphe'' && docker compose start api"{{end}}'
       - docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U paraphe -d paraphe < {{.CLI_ARGS}}
       # Le dump vient-il de CETTE application ? L'en-tête que la précondition
       # lit est celui de tout pg_dump : un dump d'une base sans rapport se
