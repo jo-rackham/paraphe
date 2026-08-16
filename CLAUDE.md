@@ -317,6 +317,18 @@ One instance can host several campaigns, one per subdomain.
   not, and PostgreSQL cross-joined every campaign's rows into the answer
   (measured, two rows against ten). An axis added anywhere is added at EVERY
   position, and the test walks each position over all of them.
+  **The EIGHTH round was not a table position at all**, and it is the one to
+  remember: `localScope` learned every local ASSIGNMENT and no local
+  DECLARATION. `const columns = "id, email FROM accounts "` followed by
+  `"SELECT "+columns+"WHERE …"` resolved to a text with no FROM in it, so the
+  statement named no walled table, no rule applied, and it passed in silence
+  — while the same query written inline is refused. Worse in the shadowing
+  direction: a local `const` hiding a package binding made the canary judge a
+  DIFFERENT statement than the one that runs. A `const` holding half a
+  statement is this package's own idiom. Whoever teaches the reader a new way
+  a name gets its value teaches BOTH the forgetting pass and the learning
+  pass; `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var and
+  the shadow.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.

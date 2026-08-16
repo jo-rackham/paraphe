@@ -337,6 +337,71 @@ func onlyLogs(table string) {
 	}
 }
 
+// A statement built from a LOCAL DECLARATION is read like any other.
+//
+// localScope learned every local ASSIGNMENT and no local declaration, and a
+// `const` holding half a statement is this package's own idiom, not an
+// exotic shape. `const columns = "id, email FROM accounts "` followed by
+// `"SELECT "+columns+"WHERE …"` resolved to a text with no FROM in it: the
+// statement named no walled table, so no rule applied to it and the canary
+// passed it in silence — while the same query written inline is refused.
+//
+// Not a table position two rules read differently, which is what seven
+// rounds of this class had been: a whole statement neither of them ever saw.
+// Both `const` and `var` are walked, and so is the shadowing direction — a
+// local declaration that hides a package binding must not leave the package
+// text standing in its place.
+//
+// On a fixture, because the shape has to be written down to be tested and it
+// must not ship.
+func TestAStatementBuiltFromALocalDeclarationIsRead(t *testing.T) {
+	const src = `package main
+
+var columns = "id, name FROM notes "
+
+func fromConst() {
+	const cols = "id, email FROM accounts "
+	run("SELECT " + cols + "WHERE role = $1")
+}
+
+func fromVar() {
+	var cols = "id, name FROM teams "
+	run("SELECT " + cols + "WHERE id = $1")
+}
+
+func shadowsThePackage() {
+	const columns = "id FROM assignments "
+	run("SELECT " + columns + "WHERE insee_code = $1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	seen := map[string]string{}
+	for _, st := range statementsIn(map[string]*ast.File{"fixture.go": file}) {
+		seen[st.Func] = st.SQL
+	}
+	for fn, table := range map[string]string{
+		"fromConst":         "ACCOUNTS",
+		"fromVar":           "TEAMS",
+		"shadowsThePackage": "ASSIGNMENTS",
+	} {
+		if !strings.Contains(seen[fn], table) {
+			t.Errorf("%s builds its statement from a local declaration and the "+
+				"canary reads %q: %s is named nowhere, so no rule applies and "+
+				"an unbounded query passes in silence",
+				fn, seen[fn], table)
+		}
+	}
+	// …and the shadowed package text is NOT what stands in its place
+	if strings.Contains(seen["shadowsThePackage"], "NOTES") {
+		t.Errorf("a local declaration shadowing a package binding was read as "+
+			"the package's: %s", seen["shadowsThePackage"])
+	}
+}
+
 // A procedural body is refused whatever leads it.
 //
 // `DO $$…$$` is the one shape no rule after it can read: stripDollarQuoted

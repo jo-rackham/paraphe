@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"regexp"
 	"slices"
 	"strconv"
@@ -807,6 +808,55 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 	return localScopeSkipping(values, fn, nil)
 }
 
+// declaredNames: the names a local `const` or `var` declaration binds.
+// Together with declaredStrings, this is what keeps a declaration from being
+// a hole where an assignment is read.
+func declaredNames(n ast.Node) []string {
+	decl, ok := n.(*ast.GenDecl)
+	if !ok || (decl.Tok != token.CONST && decl.Tok != token.VAR) {
+		return nil
+	}
+	var names []string
+	for _, spec := range decl.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for _, id := range vs.Names {
+			if id.Name != "_" {
+				names = append(names, id.Name)
+			}
+		}
+	}
+	return names
+}
+
+// declaredStrings: the readable text each of those names is declared with.
+// One name to one value only — `const a, b = x, y` binds by position, and a
+// declaration with no value (`var sql string`) binds nothing to read.
+func declaredStrings(n ast.Node, scoped map[string]string) map[string]string {
+	decl, ok := n.(*ast.GenDecl)
+	if !ok || (decl.Tok != token.CONST && decl.Tok != token.VAR) {
+		return nil
+	}
+	out := map[string]string{}
+	for _, spec := range decl.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok || len(vs.Names) != len(vs.Values) {
+			continue
+		}
+		for i, id := range vs.Names {
+			if id.Name == "_" {
+				continue
+			}
+			if txt := sqlTextMarked(vs.Values[i], scoped); txt != "" && txt != "$?" {
+				out[id.Name] = txt
+			}
+		}
+	}
+	return out
+}
+
 func localScopeSkipping(
 	values map[string]string, fn *ast.FuncDecl, skip map[ast.Node]bool,
 ) map[string]string {
@@ -831,6 +881,11 @@ func localScopeSkipping(
 					delete(scoped, id.Name)
 				}
 			}
+		}
+		// A local `const` or `var` shadows the package binding just as an
+		// assignment does, and it is a DECLARATION, not an AssignStmt.
+		for _, id := range declaredNames(n) {
+			delete(scoped, id)
 		}
 		return true
 	})
@@ -872,6 +927,18 @@ func localScopeSkipping(
 		ast.Inspect(fn, func(n ast.Node) bool {
 			if skip[n] {
 				return false // a branch this variant does not take
+			}
+			// …and the local declarations, learned the same way. A `const`
+			// holding half a statement is the idiom of this package, not an
+			// exotic shape: `const columns = "id, email FROM accounts "`
+			// followed by `"SELECT "+columns+"WHERE …"` resolved to a text
+			// with NO FROM in it, so the statement named no walled table, no
+			// rule applied to it, and the canary passed it in silence — the
+			// same query written inline is refused. Not a table position two
+			// rules read differently: a whole statement neither of them ever
+			// saw.
+			for name, value := range declaredStrings(n, scoped) {
+				scoped[name] = value
 			}
 			a, ok := n.(*ast.AssignStmt)
 			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
