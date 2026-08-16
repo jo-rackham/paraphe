@@ -214,9 +214,13 @@ var (
 	// wall; wrapped in a CTE it became a statement whose walled table
 	// tableRef could not see either. Both halves are fixed, and both are
 	// pinned below.
+	// RESET is here for the same reason SET is, and it arrived with SET's
+	// other half: a session setting put back is a statement like the one that
+	// set it, and a call carrying it must be readable rather than invisible.
 	sqlVerb = regexp.MustCompile(
-		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP` +
-			`|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO|TABLE)\b`)
+		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|RESET|COPY|LOCK|CREATE|ALTER` +
+			`|DROP|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO` +
+			`|TABLE)\b`)
 )
 
 // normaliseSQL: what the canary reads. Comments and string literals are
@@ -435,10 +439,18 @@ var (
 	orgIDWord = regexp.MustCompile(`\bORG_ID\b`)
 	// Statements whose body is code, not text: stripping the dollar quotes
 	// leaves nothing to check, and running them touches everything.
-	// `DO` only where a statement STARTS: as a word it also opens the
-	// `ON CONFLICT … DO UPDATE` of every upsert in the package.
+	//
+	// `DO` only where a STATEMENT starts, because as a bare word it also
+	// opens the `ON CONFLICT … DO UPDATE` of every upsert here — but a
+	// statement starts after a semicolon as well as at the beginning of the
+	// text, and anchoring on the beginning alone was a hole. `SELECT 1; DO
+	// $$ BEGIN TRUNCATE notes; END $$` walked past this rule, past sqlVerb
+	// (which searches anywhere and found the SELECT), and past every rule
+	// after it — stripDollarQuoted had already emptied the body, so there was
+	// no TRUNCATE left for anything to see. pgx runs it: measured, two
+	// campaigns' rows to none. The same `(?:^|;)` destructiveUnreadable uses.
 	procedural = regexp.MustCompile(
-		`^\s*DO\b|\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b`)
+		`(?:^|;)\s*DO\b|\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b`)
 	// A parenthesised group holding a SELECT is a SUBQUERY: its predicates
 	// constrain what IT reads, never the statement around it. Any other group
 	// is an expression belonging to the level that wrote it.

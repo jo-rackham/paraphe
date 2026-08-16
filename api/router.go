@@ -62,8 +62,19 @@ func (s *Server) router() chi.Router {
 	// probe addresses the pod's IP, whose hostname matches no subdomain —
 	// /api/config would answer 404 and the pod would never become ready.
 	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.pool.Ping(r.Context()); err != nil {
-			slog.Error("readiness probe: database unreachable", "error", err)
+		// A PING is not readiness. Restored from an empty database, this pod
+		// answered 200 here with not a single table in place: the probe was
+		// green, traffic arrived, and every screen was broken — the exact
+		// shape of failure this application refuses everywhere else. The
+		// schema is built at startup, so a table missing means the build did
+		// not happen, and no request can be served.
+		//
+		// `LIMIT 0` reads no row: it costs a plan and answers 42P01 when the
+		// table is absent, which is the whole question.
+		if _, err := s.pool.Exec(r.Context(),
+			"SELECT 1 FROM orgs LIMIT 0"); err != nil {
+			slog.Error("readiness probe: the database cannot serve a request",
+				"error", err)
 			errorJSON(w, http.StatusServiceUnavailable, "Base injoignable.")
 			return
 		}

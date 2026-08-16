@@ -494,7 +494,13 @@ func (s *Server) routeRedeemLink(w http.ResponseWriter, r *http.Request) {
 	// is for: the row is gone by now, so this line is the only place an
 	// operator can see whether a campaign's invitations are being taken up
 	// or whether people are recovering forgotten passwords.
-	s.openSession(w, r, c, departments, "signin_link_succeeded",
+	// nil: this route counts NOTHING per account — the token carries no
+	// address, so the source ceiling is its whole bound and the router says
+	// so. Refunding the request ceiling here credited an event nobody spent,
+	// and that credit told an attacker watching the ceiling the moment its
+	// owner clicked their link.
+	s.openSession(w, r, c, departments, nil,
+		"signin_link_succeeded",
 		"link", purpose)
 }
 

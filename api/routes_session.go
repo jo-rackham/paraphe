@@ -185,7 +185,8 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
-	s.openSession(w, r, c, departments, "signin_succeeded")
+	s.openSession(w, r, c, departments, &limitSignInAccount,
+		"signin_succeeded")
 }
 
 // openSession is what happens once a caller has PROVED who they are, by
@@ -199,35 +200,41 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 // The account and its departments are read by the CALLER, before it
 // commits — the transaction closes with that commit, and everything this
 // answer needs must already be in hand.
+// countedUnder names the account-keyed ceiling THIS ROUTE spent an event on,
+// or nil when it spent none. Not the door the caller came through: redeeming
+// a link carries a token and no address, so it counts nothing per account —
+// and refunding the request ceiling there gave back an event nobody had
+// spent, which is the same observable credit the refund exists to avoid.
 func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
-	c *Account, departments []string, event string, extra ...any) {
+	c *Account, departments []string, countedUnder *limitClass, event string,
+	extra ...any) {
 	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
 		return
 	}
-	// The attempt counters served their purpose: a signed-in account starts
-	// its next window clean, so a shared team box that fumbles a few times
-	// and then succeeds is not carrying failures towards the ceiling. BOTH
-	// classes, whichever door was used — the two count the same subject.
+	// The attempt is GIVEN BACK, not forgiven, and only on the door it was
+	// spent at.
 	//
-	// KNOWN LIMIT, measured and left standing on purpose: this clearing is
-	// observable. The account-keyed ceiling is one an anonymous caller can
-	// fill for an address of their choosing just by submitting it, so burning
-	// it and then polling it turns its reopening into "somebody just signed
-	// in as this address" — which names one, and the constant sentence and
-	// the decoy hash exist to refuse exactly that.
-	// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn walks it.
+	// Clearing the counter reads better and answers a question the rest of
+	// this package refuses. The per-address ceiling is one an ANONYMOUS
+	// caller fills for an address of their choosing, just by submitting it:
+	// burn it, poll it, and its reopening says somebody has just signed in as
+	// that address — so the address names one, which the constant sentence
+	// and the decoy hash exist to withhold. Leaving it alone instead locks an
+	// account out of its own password after ten legitimate sign-ins, because
+	// the ceiling counts successes too; the end-to-end journeys found that
+	// within a minute of trying it.
 	//
-	// Removing the clearing closes the oracle and opens something worse: the
-	// ceiling counts every attempt, SUCCESSES INCLUDED, so ten legitimate
-	// sign-ins in a quarter of an hour would lock the account out of its own
-	// password. The end-to-end journeys found that within a minute. Closing
-	// both needs the ceiling to count failures only, or to refuse in the same
-	// words as a wrong password — a change to the shape of the limiter, not
-	// to this line, and one to decide rather than improvise.
-	if subject, ok := s.signInSubjectFor(r, c.Email); ok {
-		s.limiter.forget(r.Context(), limitSignInAccount, subject)
-		s.limiter.forget(r.Context(), limitMagicLinkAccount, subject)
+	// A refund does both. Counted on arrival like every other event — which
+	// is what still bounds a flood whose handlers never finish — and given
+	// back once the attempt has proved legitimate, so the bucket ends exactly
+	// where it stood. An attacker watching it sees the same thing whether the
+	// owner signed in or not, and the owner's own sign-ins cost nothing.
+	//
+	if countedUnder != nil {
+		if subject, ok := s.signInSubjectFor(r, c.Email); ok {
+			s.limiter.refund(r.Context(), *countedUnder, subject)
+		}
 	}
 	s.securityEvent(r, slog.LevelInfo, event,
 		append([]any{"account", s.accountPseudonym(c.Email)}, extra...)...)

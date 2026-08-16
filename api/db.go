@@ -54,6 +54,18 @@ func takeLock(ctx context.Context, c *pgxpool.Conn, key int) error {
 		int(lockWait.Seconds()))); err != nil {
 		return fmt.Errorf("setting lock_timeout: %w", err)
 	}
+	// …and put back, whichever way this ends. SET is a SESSION setting and
+	// pgx hands the connection back to the pool as it found it — so without
+	// this, every request served by that connection afterwards inherits a
+	// forty-five second cap on every lock it waits for, and an operator
+	// reading a timeout has nothing to trace it to. The cap is wanted for
+	// the one statement below and nothing else.
+	defer func() {
+		if _, err := c.Exec(ctx, "RESET lock_timeout"); err != nil {
+			slog.Warn("lock_timeout not reset: the connection carries it back "+
+				"to the pool", "error", err)
+		}
+	}()
 	if _, err := c.Exec(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 		var pge *pgconn.PgError
 		if errors.As(err, &pge) && pge.Code == "55P03" {

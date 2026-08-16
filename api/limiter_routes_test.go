@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // Which ceiling covers which route — declared HERE, checked against the
@@ -327,36 +328,45 @@ func TestSignInCeilingPerAccountIsBlindToExistence(t *testing.T) {
 	}
 }
 
-// Signing in clears the account counters, and it has to.
+// Signing in costs nothing, and erases nothing.
 //
 // The ceiling counts every attempt against the submitted address, SUCCESSES
-// INCLUDED. Without the clearing, ten legitimate sign-ins in a quarter of an
-// hour lock an account out of its own password — the end-to-end journeys
-// find it within a minute, and a shared team box would find it on a Tuesday.
+// INCLUDED, so a door that only counted would lock an account out of its own
+// password after ten legitimate sign-ins — twice what a volunteer does in a
+// day of switching between a phone and a desk, and the end-to-end journeys
+// hit it in under a minute.
 //
-// What it costs is written down beside it, in
-// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn: the clearing is
-// observable, so a ceiling burned for an address reports the moment that
-// address turns out to name somebody.
-func TestSignInSuccessResetsTheAccountCeiling(t *testing.T) {
+// Clearing the counter fixes that and opens what
+// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn walks. Refunding the
+// attempt is the third answer: the success is counted like everything else
+// and then given back, so it costs nothing — and it erases nothing either,
+// which is exactly why the bucket says nothing about the owner.
+func TestSignInSuccessCostsNothingAndErasesNothing(t *testing.T) {
 	s, srv := testServer(t)
 	password := createAccount(t, s, "team-box@exemple.fr", RoleVolunteer, nil)
 	c := newClient(t, srv)
-	// a shared team computer fumbles most of the window…
-	for i := 1; i < limitSignInAccount.events; i++ {
-		if code := c.signIn("team-box@exemple.fr", "wrong"); code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d: %d", i, code)
+
+	// Twice the ceiling in correct sign-ins, one after another: none of them
+	// may bring the account any closer to being locked out.
+	for i := 1; i <= 2*limitSignInAccount.events; i++ {
+		if code := c.signIn("team-box@exemple.fr", password); code != http.StatusOK {
+			t.Fatalf("legitimate sign-in %d answered %d: signing in spends "+
+				"the ceiling that exists to bound GUESSING, and an account is "+
+				"locked out of its own password by using it", i, code)
 		}
 	}
-	// …then gets it right
-	if code := c.signIn("team-box@exemple.fr", password); code != http.StatusOK {
-		t.Fatalf("the correct password answered %d below the ceiling", code)
-	}
-	for i := 1; i < limitSignInAccount.events; i++ {
+
+	// And the fumbles still count. All of them, up to the ceiling, whatever
+	// happened in between — a success that erased them is a success an
+	// attacker could watch for.
+	for i := 1; i <= limitSignInAccount.events; i++ {
 		if code := c.signIn("team-box@exemple.fr", "wrong"); code != http.StatusUnauthorized {
-			t.Fatalf("post-success attempt %d: %d — the success did not clear "+
-				"the counter, and the next fumble locks the whole team box", i, code)
+			t.Fatalf("fumble %d answered %d, want 401 below the ceiling", i, code)
 		}
+	}
+	if code := c.signIn("team-box@exemple.fr", "wrong"); code != http.StatusTooManyRequests {
+		t.Errorf("the ceiling did not close after %d wrong passwords (%d): "+
+			"the successes in between erased them", limitSignInAccount.events, code)
 	}
 }
 
@@ -481,74 +491,124 @@ func TestRefusalCarriesRetryAfterAndCORSWhereDue(t *testing.T) {
 	}
 }
 
-// The oracle this design currently carries, WRITTEN DOWN rather than left to
-// be rediscovered.
-//
 // A ceiling an anonymous caller can fill for an address of their choosing
-// should not report when that address turns out to name somebody. This one
-// does, and the test says so out loud rather than asserting a property the
-// code does not have. It goes red the day the shape changes — which is the
-// day to rewrite it as the blindness assertion it wants to be.
-func TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn(t *testing.T) {
+// must not report when that address turns out to name somebody.
+//
+// Burned on the SAME door the owner then comes through, which is the hard
+// case: clearing the counter on success made its reopening say "somebody
+// just signed in as this address". Refunding the attempt instead leaves the
+// bucket exactly where it stood, so the walk below — burn a real address and
+// a ghost, sign in as the real one, count how many attempts the ceiling
+// still allows — answers the same for both.
+// The door refunded is the one THIS ROUTE counted — which is not the door
+// the caller came through.
+//
+// Redeeming a link counts nothing per account: it carries a 256-bit token
+// and no address, so the source ceiling is its whole bound and the router
+// says so. Refunding the link-REQUEST ceiling there gives back an event the
+// redeem never spent, and that credit is addressable by anyone who knows an
+// e-mail: burn the request ceiling for it, wait, and the slot that reopens
+// says its owner has just clicked their link.
+func TestRedeemingALinkRefundsNothingItDidNotSpend(t *testing.T) {
 	s, srv := testServer(t)
 	withMailer(t, s, "https://campagne.exemple.fr")
 	const real = "marie@exemple.fr"
 	const ghost = "personne@exemple.fr"
 	createAccount(t, s, real, RoleVolunteer, nil)
-	hashed, err := HashPassword("un-mot-de-passe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	execAsMaintenance(t, s, "UPDATE accounts SET password_hash=$1 WHERE email=$2",
-		hashed, real)
 
-	burn := func(address string) int {
-		attacker := newClient(t, srv)
-		var code int
-		for range 4 {
-			code, _ = attacker.call(http.MethodPost, "/api/session/link",
-				map[string]string{"email": address})
+	// An INVITATION, because the purpose is part of the key: the attacker's
+	// requests below mint sign-in links, and each one replaces the last, so a
+	// sign-in link taken before the burn would be dead by the time its owner
+	// clicked it. An invitation survives them, which is the shape a volunteer
+	// meets in practice — invited on Monday, clicking on Tuesday.
+	org := orgID(t, s, testSlug)
+	var token string
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		var err error
+		if token, err = s.mintInvitation(context.Background(), tx, org, real); err != nil {
+			t.Fatal(err)
 		}
-		return code
-	}
-	if code := burn(real); code != http.StatusTooManyRequests {
-		t.Fatalf("the ceiling did not close for a real address: %d", code)
-	}
-	if code := burn(ghost); code != http.StatusTooManyRequests {
-		t.Fatalf("the ceiling did not close for an unknown address: %d", code)
-	}
+	})
 
-	// The owner signs in, by the OTHER door.
-	owner := newClient(t, srv)
-	if code, _ := owner.call(http.MethodPost, "/api/session",
-		map[string]string{"email": real, "password": "un-mot-de-passe"}); code != http.StatusOK {
-		t.Fatalf("the owner could not sign in: %d", code)
-	}
-
-	// And the attacker asks again, for both addresses.
-	after := func(address string) int {
+	// The attacker spends what is left of the ceiling on both addresses.
+	burn := func(address string) {
 		attacker := newClient(t, srv)
-		code, _ := attacker.call(http.MethodPost, "/api/session/link",
+		// EXACTLY to the ceiling and no further: driven well past it, one
+		// refunded event does not bring the bucket back under, and the walk
+		// would come out even for the wrong reason.
+		for i := 1; i <= limitMagicLinkAccount.events; i++ {
+			if code, _ := attacker.call(http.MethodPost, "/api/session/link",
+				map[string]string{"email": address}); code != http.StatusOK {
+				t.Fatalf("burning %s, request %d: %d", address, i, code)
+			}
+		}
+	}
+	burn(real)
+	burn(ghost)
+
+	// The owner clicks their link.
+	if code, _ := redeem(t, newClient(t, srv), token); code != http.StatusOK {
+		t.Fatalf("the owner could not use their link: %d", code)
+	}
+
+	// And the attacker asks again for each address.
+	after := func(address string) int {
+		code, _ := newClient(t, srv).call(http.MethodPost, "/api/session/link",
 			map[string]string{"email": address})
 		return code
 	}
 	realAfter, ghostAfter := after(real), after(ghost)
-	if realAfter == ghostAfter {
-		t.Fatalf("both answered %d: either the oracle is closed — in which "+
-			"case this test has become the wrong shape and should assert the "+
-			"blindness rather than the leak — or the ceiling never filled",
-			realAfter)
+	if realAfter != ghostAfter {
+		t.Errorf("the burned ceiling answers %d for an address whose owner "+
+			"has just redeemed a link and %d for one nobody bears: redeeming "+
+			"refunded a request it never made, and the ceiling reports the "+
+			"click", realAfter, ghostAfter)
 	}
-	t.Logf("KNOWN LIMIT, measured: a burned ceiling answers %d for an address "+
-		"whose owner has signed in and %d for one nobody bears. Whoever fills "+
-		"it for an address learns, by polling it, the moment that address "+
-		"turns out to name somebody — which the constant sentence and the "+
-		"decoy hash exist to refuse.\n\nThe clearing that causes it is not a "+
-		"kindness that can simply be dropped: the ceiling counts SUCCESSES "+
-		"too, so without it ten legitimate sign-ins in a quarter of an hour "+
-		"lock an account out of its own password — the end-to-end journeys "+
-		"proved that within a minute of trying. Closing both wants the "+
-		"ceiling to count failures ONLY, or to refuse in the same words as a "+
-		"wrong password. Either is a change to the limiter's shape.",
-		realAfter, ghostAfter)
+}
+
+func TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn(t *testing.T) {
+	s, srv := testServer(t)
+	const real = "marie@exemple.fr"
+	const ghost = "personne@exemple.fr"
+	password := createAccount(t, s, real, RoleVolunteer, nil)
+
+	// The attacker spends most of the window on each address, from their own
+	// source so the per-source ceiling is not what answers.
+	burn := func(address string) {
+		attacker := newClient(t, srv)
+		for i := 1; i < limitSignInAccount.events; i++ {
+			if code := attacker.signIn(address, "wrong"); code != http.StatusUnauthorized {
+				t.Fatalf("burning %s, attempt %d: %d", address, i, code)
+			}
+		}
+	}
+	burn(real)
+	burn(ghost)
+
+	// The owner comes through the same door.
+	if code := newClient(t, srv).signIn(real, password); code != http.StatusOK {
+		t.Fatalf("the owner could not sign in: %d", code)
+	}
+
+	// And the attacker measures what is left of each ceiling.
+	remaining := func(address string) int {
+		attacker := newClient(t, srv)
+		for n := 0; ; n++ {
+			if code := attacker.signIn(address, "wrong"); code == http.StatusTooManyRequests {
+				return n
+			}
+			if n > limitSignInAccount.events {
+				t.Fatalf("the ceiling for %s never closed", address)
+			}
+		}
+	}
+	realLeft, ghostLeft := remaining(real), remaining(ghost)
+	if realLeft != ghostLeft {
+		t.Errorf("the burned ceiling allows %d more attempts for an address "+
+			"whose owner has just signed in and %d for one nobody bears: "+
+			"whoever fills it for an address learns, by counting what is "+
+			"left, the moment that address turns out to name somebody — "+
+			"which the constant sentence and the decoy hash exist to refuse",
+			realLeft, ghostLeft)
+	}
 }

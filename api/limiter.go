@@ -79,9 +79,12 @@ type counterStore interface {
 	// count records one event and answers the window's total so far, with
 	// the time left until it resets.
 	count(ctx context.Context, key string, window time.Duration) (total int64, retryIn time.Duration, err error)
-	// forget drops a key before its window ends — a successful sign-in
-	// clears its own account counter.
+	// forget drops a key before its window ends.
 	forget(ctx context.Context, key string) error
+	// refund gives one event back, without creating a window or extending
+	// one. It is how an attempt that SUCCEEDED ends up having cost nothing:
+	// counted on arrival like every other, then given back.
+	refund(ctx context.Context, key string) error
 }
 
 // decision: what allow concluded about one event.
@@ -171,6 +174,37 @@ func (l *rateLimiter) count(ctx context.Context, key string, window time.Duratio
 	return l.local.count(ctx, key, window)
 }
 
+// refund gives back the event an attempt cost, once that attempt turned out
+// to be a legitimate one.
+//
+// It is the shape a per-ADDRESS ceiling needs, and the two obvious ones are
+// both wrong. Clearing the counter on success is observable: fill it for an
+// address you know, poll it, and its reopening says somebody just signed in
+// as that address — so the address names one, which the constant sentence
+// and the decoy hash exist to refuse. Not clearing it at all locks an
+// account out of its own password after ten legitimate sign-ins, because
+// the ceiling counts successes too.
+//
+// Counted on arrival like every other event, then given back: the bucket
+// ends exactly where it was, so an attacker watching it sees the same thing
+// whether the owner signed in or not, and the owner's own sign-ins cost
+// nothing. Counting on arrival is kept because it is what bounds a flood
+// whose handlers never finish.
+func (l *rateLimiter) refund(ctx context.Context, class limitClass, subject string) {
+	key := l.bucket(class, subject)
+	if l.shared != nil {
+		if err := l.shared.refund(ctx, key); err != nil {
+			// worst case the attempt counted; said, not hidden
+			slog.Warn("rate limit counter not refunded", "class", class.name,
+				"error", err)
+		}
+	}
+	if err := l.local.refund(ctx, key); err != nil {
+		slog.Warn("rate limit counter not refunded", "class", class.name,
+			"error", err)
+	}
+}
+
 func (l *rateLimiter) forget(ctx context.Context, class limitClass, subject string) {
 	key := l.bucket(class, subject)
 	// both stores: after a degraded spell the same key may live in each,
@@ -253,6 +287,21 @@ func (p *processStore) forget(_ context.Context, key string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.buckets, key)
+	return nil
+}
+
+// refund: one event back, and NOTHING else. No window is created and none is
+// extended — an attempt that arrived after the window closed has already been
+// counted in a fresh one, and giving it back must not make that window look
+// older than it is.
+func (p *processStore) refund(_ context.Context, key string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	w := p.buckets[key]
+	if w == nil || !p.now().Before(w.reset) || w.n == 0 {
+		return nil
+	}
+	w.n--
 	return nil
 }
 

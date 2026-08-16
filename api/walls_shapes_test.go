@@ -331,6 +331,52 @@ func onlyLogs(table string) {
 	}
 }
 
+// A procedural body is refused whatever leads it.
+//
+// `DO $$…$$` is the one shape no rule after it can read: stripDollarQuoted
+// empties the body before anything looks, so `procedural` is the whole
+// defence. Anchored on the beginning of the text alone, ANY statement in
+// front walked it past — `SELECT 1; DO $$ BEGIN TRUNCATE notes; END $$`
+// reached pgx and took two campaigns' rows to none, while the canary stayed
+// green: sqlVerb searches anywhere and found the SELECT, and the `;`-split
+// that follows never re-asks whether a half is procedural.
+//
+// The axis is "what leads the semicolon", so the axis is walked — every verb
+// sqlVerb knows, and a couple it does not. Adding a verb to that gate cannot
+// quietly reopen this.
+func TestAProceduralBodyIsRefusedWhateverLeadsIt(t *testing.T) {
+	const body = " DO $$ BEGIN TRUNCATE ACCOUNTS; END $$"
+	verbs := append(strings.Split(
+		strings.Trim(sqlVerb.String(), `\b()`), "|"), "MERGE", "CALL")
+	for _, verb := range verbs {
+		verb = strings.TrimSuffix(strings.TrimPrefix(verb, `\b(`), `)\b`)
+		if verb == "" {
+			continue
+		}
+		lead := verb + " 1;"
+		if !procedural.MatchString(normaliseSQL(lead + body)) {
+			t.Errorf("a procedural body led by %q is not refused, and nothing "+
+				"after it can read the body:\n\t%s", verb, lead+body)
+		}
+	}
+	// …and on its own, which is where it started.
+	if !procedural.MatchString(normaliseSQL(body)) {
+		t.Error("a bare procedural body is not refused")
+	}
+	// The refusal must NOT reach the `DO UPDATE` of every upsert in the
+	// package — the reason the anchor exists at all. A refusal here costs
+	// what a hole costs.
+	for _, ordinary := range []string{
+		`INSERT INTO ACCOUNTS $SUB0 VALUES $SUB1 ON CONFLICT $SUB2 DO UPDATE SET X=1`,
+		`INSERT INTO LOGIN_TOKENS $SUB0 VALUES $SUB1 ON CONFLICT $SUB2 DO NOTHING`,
+		`SELECT X FROM ACCOUNTS WHERE ORG_ID=$1`,
+	} {
+		if procedural.MatchString(normaliseSQL(ordinary)) {
+			t.Errorf("an ordinary upsert is refused as procedural:\n\t%s", ordinary)
+		}
+	}
+}
+
 // A rule that never runs guards nothing, and it passes its own unit test
 // while doing it. The main test drops any statement `sqlVerb` does not
 // recognise, BEFORE consulting the destructive rules — so the three verbs
