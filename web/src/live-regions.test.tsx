@@ -12,31 +12,20 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import App from "./App.tsx";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
 import { resetViewMemory } from "./common.tsx";
 import * as DB from "./db.ts";
 import Team from "./Team.tsx";
-import type { ServerConfig } from "./types.ts";
+import { teamConfig } from "./testing/fixtures.ts";
 
 vi.mock("./api.ts", { spy: true });
 vi.mock("./db.ts", { spy: true });
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-const CONFIG: ServerConfig = {
-  mode: "team",
-  departments: [],
-  campaign: Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, `valeur ${k}`])),
-  batch_size: 10,
-  unfilled: [],
-  source_url: "",
-  logo: null,
-  statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
-  ranks: [{ key: "has_endorsed", label: "A parrainé" }],
-};
+const CONFIG = teamConfig();
 
 let container: HTMLDivElement;
 let root: Root;

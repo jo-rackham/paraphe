@@ -144,6 +144,13 @@ licence for the RNE.
   Assumed exceptions: the transient « Chargement… » paragraphs mount with
   their text (a missed one costs nothing), and card borders (`--trait`)
   stay decorative.
+  **A re-entry guard is a REF, never state.** Two clicks in the same tick run
+  two handlers built by the same render, and both read the state as it was
+  before either of them: the button greys out and the request goes twice.
+  This project has paid for it twice now — once on a submit, once on
+  « Recevoir un lien », where it also spent two of the three links an address
+  is allowed per quarter of an hour AND killed the first one by minting the
+  second. `aria-disabled` is what the screen shows; `useRef` is what guards.
   **A control never vanishes or goes `disabled` under the user's focus**:
   a self-unmounting button (« fermer », « j'ai noté », accepting an offer)
   hands focus to the content first (`focusContenu`), and a busy submit
@@ -256,6 +263,44 @@ One instance can host several campaigns, one per subdomain.
   `postgresql-parser` brings 180 transitive modules against 4 direct ones).
   Seven adversarial rounds walked past it 46 times. It is the only wall:
   keeping it sharp is not optional.
+  **A table-position keyword belongs to THREE patterns, not one**: `sqlVerb`
+  (this text is a statement), `tableRef` (this is where its table is named)
+  and `unreadableTable` (its table is in that position and cannot be read).
+  PostgreSQL's `TABLE t` shorthand was taught to the first two and not the
+  third, and `TABLE `+t became a statement whose walled table nothing could
+  resolve — which the canary reads as a statement touching no walled table,
+  for all five of them at once. Whoever adds the next shorthand adds it to
+  all three. The same asymmetry one position further along cost a second
+  critical: `tableRef` has always read a COMMA as a table position, and
+  `unreadableTable` only ever looked at the first, so `FROM accounts a, `+t
+  named a walled table where the canary reads literals and never checks for
+  markers. It walks the list reference by reference — a wildcard between
+  `FROM` and the comma would swallow `ORDER BY x, %s`, which is nobody's
+  table, and a false positive here sends the next author around the wall.
+  A THIRD round produced the same shape again, so the rule now covers every
+  place a table stands in: after a keyword, after a verb no predicate can
+  bound (`"TRUNCATE "+t` and `"GRANT SELECT ON "+t` read as statements
+  touching nothing at all), and anywhere in a FROM list — that last one
+  written in Go, because the list ENDS at a clause keyword and RE2 cannot say
+  "up to the first of these words". `destructiveVerbs` is declared ONCE and
+  both rules are built from it, with
+  `TestEveryDestructiveVerbHasAnUnreadableForm` walking the list and
+  demanding both forms of each. **A marker is something format strings are
+  full of, where a table NAME is not**, so the destructive rule runs ONLY on
+  a string that reaches a call which executes it. Telling `"TRUNCATE "+t`
+  from `lock %d in progress` by the words around them cannot be done — the
+  first attempt listed what may follow the object, and that list is the
+  common English prepositions: five plausible messages were refused as
+  statements. What separates them is not their text, it is whether anything
+  runs them. `readsNoWalledTable` is still EMPTY, and keeping it so is the
+  measure of whether these rules judge statements or prose.
+  **A FOURTH round found the fourth square of the same grid** — the `ONLY`
+  modifier, which `tableRef` read and `unreadableTable` did not. So the grid
+  itself is now the guard: `tablePositions` and `tableModifier` are declared
+  once, both rules are built from them, and
+  `TestEveryTablePositionIsReadByBothRules` walks keyword × modifier
+  demanding that one read a NAME there and the other a MARKER. Teaching one
+  rule a position without the other goes red in the round that does it.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -325,6 +370,141 @@ is the campaign's coordination that decides.
   they are accepting is not the one they accept. Free text is exempt — a
   message is allowed its line breaks.
 
+## Signing in by email
+
+A second path beside the password, ON only when `PARAPHE_SMTP_URL` is set —
+`s.mailer == nil` IS the "off" state, `/api/config` says so, and the two
+routes answer 503 rather than accept a request whose effect never arrives.
+It ADDS a path: the password is still read down a telephone line, still
+works when the relay is down, and still bootstraps the instance.
+
+- **The token travels in the FRAGMENT** (`/connexion#jeton=…`), never in a
+  query or a path. A fragment reaches no server: no ingress access log, no
+  Referer, no proxy history — and it is invisible to the URL scanners
+  corporate mail systems run, which FETCH every link they see and would
+  otherwise spend a one-shot token before its recipient clicks. It is
+  redeemed by a POST with the token in the BODY, which also keeps it out of
+  every route parameter on the way back.
+- **The link's origin is `PARAPHE_PUBLIC_URL`, never `r.Host`.** In
+  single-campaign mode every Host resolves the bootstrap campaign, so a link
+  built from the header would send — to a real volunteer, over the campaign's
+  own name — a link to a server of the caller's choosing. Multi-campaign, the
+  slug is prefixed to the configured apex and the setting must name the base
+  domain; the three mail settings hold together or the start fails — **and
+  the chart refuses them half-filled at RENDER time**, where the person who
+  made the mistake is looking, rather than as a CrashLoopBackOff behind an
+  ArgoCD stuck on « Progressing ». CI renders the mail block too: it is off
+  by default, so no other case exercises those twenty-eight lines, and
+  `helm lint` parses a branch without executing it.
+- **Stored as a plain SHA-256, deliberately.** The token is 256 bits of
+  `crypto/rand`: there is nothing to search, so a memory-hard hash buys
+  nothing and would put a 32 MiB derivation behind `hashGate` on a PUBLIC
+  route — the amplifier `hashGate` exists to bound.
+- **Requesting a link: constant answer, and NOTHING that differs happens
+  before it.** The same status and the same body for an address that names an
+  account, a deactivated one, or nobody — the promise the decoy hash makes on
+  the password path. Detaching the SEND was not enough: minting is a DELETE,
+  an INSERT and a COMMIT, and while they sat before the reply an existing
+  address answered 3.5x to 6.5x slower — a stopwatch handing back the roster
+  the sentence withholds. Both branches now reply on the same SELECT, and the
+  mint happens on the other side of it, on its own connection
+  (`mintDetached`). `TestAnExistingAddressIsNoSlowerThanAnUnknownOne` measures
+  the ratio and refuses above 1.5. A failure in that detached work is logged
+  and NOT answered: the one assumed exception to "errors surface".
+- **STARTTLS is required, not attempted.** Opportunistic TLS is TLS an
+  attacker strips from the greeting, and the message carries a credential
+  with a fifteen-minute life. A relay that does not offer it is refused;
+  `smtps://` and the loopback are the two ways past that refusal, and the
+  loopback is the same exception `net/smtp` makes for credentials.
+  **The URL's user and `PARAPHE_SMTP_PASSWORD` hold together both ways**: a
+  password with no user is refused, and so is a user with no password, which
+  used to authenticate with an empty one — the relay then answered 535 to
+  every message, and that refusal reached an operator as a line in a detached
+  goroutine's log while volunteers waited on an inbox.
+- **Assumed**: whoever knows an address can burn its pending link (minting
+  deletes the previous row), bounded by three per quarter of an hour. The
+  password path is untouched by it, and the alternative — several live tokens
+  per address — trades a bounded nuisance for an unbounded table.
+- **Invitations: synchronous, and the outcome is told.** The opposite rule
+  for the opposite reason — the caller is authenticated and has just created
+  the account, so there is no existence to protect. `invitation_sent` travels
+  in the answer, the generated password stays on screen whatever happened,
+  and the token is minted in the SAME transaction as the account.
+- One live row per (campaign, address): minting deletes the previous one and
+  sweeps expired rows in passing, so a new link invalidates the old one and
+  the table cannot grow under a loop. Redeeming is `DELETE … RETURNING` —
+  single-use by construction, with no consumed row whose existence would
+  then have to be told apart from a token that never was.
+- **PRESENTING a token spends it, atomically**, and on the request's OWN
+  connection (`Scope.renew`: commit, then reopen a transaction behind it).
+  Three shapes were tried and two were wrong. Committing at the END of the
+  route let every failure in between roll the DELETE back — refused against
+  a DEACTIVATED account, the link came back live and opened a session the day
+  the account was switched on again, seven days later for an invitation.
+  Taking a SECOND pool connection made the spend independent and DEADLOCKED
+  the pool: the request already holds one, so eight simultaneous redemptions
+  against a pool of four hung until they timed out. Renewing costs neither.
+  **And that commit does NOT run under the request's context.** Cancelling it
+  is the one failure the CALLER controls: hang up between the DELETE and the
+  commit and PostgreSQL rolls the DELETE back, so the link just presented is
+  live again — a replay obtained on demand, then kept for the day the account
+  it was refused against is switched on. `context.WithoutCancel` plus a bound
+  of its own; `s.commit` keeps the request's context, because an ordinary
+  write that the caller abandons has promised nothing. **And a commit that
+  fails anyway is answered by spending the token AGAIN**, on a connection of
+  its own (`spendAlone`), the request's being handed back first so the count
+  is never two. A cluster rolling, a node evicted, a stall past the bound —
+  each of them aborts the transaction carrying the DELETE and hands the
+  presented link back, live for its whole remaining life. Best effort, and
+  the limit is stated rather than implied: **both attempts are bounded at
+  five seconds, so a database that stalls longer than that — not only one
+  that is gone — leaves the link live and says so in the log**. A longer
+  bound would pin a pooled connection on a request that has already failed;
+  no bound would pin it for ever. The failed spend is logged, never
+  answered.
+- **One live link per address AND PURPOSE is the DATABASE's promise**, not
+  the DELETE's: a unique index on `(org_id, email, purpose)` plus
+  `ON CONFLICT … DO UPDATE`. Under READ COMMITTED the DELETE cannot see a row
+  a neighbour has not committed, so two requests in the same instant both
+  inserted — two links in one inbox, the older already dead. The purpose is
+  in the key because the two kinds do not compete: a sign-in request used to
+  destroy a pending invitation the invitee had not asked about and would find
+  dead days later.
+- **Redacting an address out of a relay's answer matches the ORIGINAL text**
+  (`events.go`, a case-insensitive regexp), never a lowercased copy of it.
+  Lowercasing changes byte LENGTH — `Ⱦ` is two bytes, `ⱦ` is three — so an
+  offset found in the copy addresses somewhere else in the original: it left
+  half an address in the log, and past the end of the string it PANICKED, in
+  a detached goroutine, which takes the process with it.
+  **The LOCAL PART is redacted on its own too**, as a whole word: plenty of
+  relays name the recipient without its domain, and the domain is the half
+  that identifies nobody. It over-redacts when the local part is an ordinary
+  word (`contact`, `info`) — the cheaper mistake — and stays a whole word
+  because `connect@` would otherwise turn `connection reset` into nonsense.
+  **That boundary is decided on RUNES, not by `\b`**: Go's is ASCII-only
+  (`\w` is `[0-9A-Za-z_]`), so `\bhervé\b` has no boundary to find after the
+  `é` and never matches. In a French campaign that is not an edge case, it
+  is most of the volunteers — the accented name went into the log verbatim
+  while the ASCII one beside it was scrubbed. **Assumed limit**: a relay
+  answering with an ALIAS-EXPANDED recipient names an address this code was
+  never given, and no pseudonymisation keyed on the address sent can catch
+  it.
+- **The interface takes the token out of the URL at BOOT** (`main.tsx`),
+  hands it over EXACTLY ONCE (`consumeLinkToken`), and DROPS it when the
+  visit lands on a screen that cannot use it. Kept until a screen that could
+  use it finally mounted, it opened the first visitor's session for the
+  second: an outage, a tab left on the table, `Réessayer` pressed by someone
+  else. The link is still in its owner's inbox — clicking it again costs one
+  click.
+- `login_tokens` is a walled table: it carries `org_id` and is in
+  `walledTables`. A token minted on one campaign is not a credential on its
+  neighbour, and both guards were seen to go red on that mutation.
+- Nothing a human typed reaches a HEADER: the subjects are constants of the
+  package, addresses are refused if they carry a control character
+  (`normalizeEmail` only lowercases and trims), and the body — where the
+  campaign's name lives — is base64, an alphabet that cannot spell a header
+  break.
+
 ## Security and operations
 
 - `PARAPHE_INSTANCE_ADMIN_*` bootstrap the instance administration.
@@ -343,6 +523,18 @@ is the campaign's coordination that decides.
   The verifier never READS `alg`, it compares the header byte for byte, which
   is what rules out `alg:none`, HS/RS confusion and `kid`/`jku` injection. The repository's example
   values are refused at startup — they are public.
+- **KNOWN LIMIT, measured and left standing**: signing in CLEARS the
+  account-keyed counters, and that clearing is observable. Fill the ceiling
+  for an address you know, poll it, and the moment it reopens is the moment
+  somebody signed in as that address — so it names one, which the constant
+  sentence and the decoy hash exist to refuse.
+  Dropping the clearing is not the fix: the ceiling counts SUCCESSES too, so
+  ten legitimate sign-ins in a quarter of an hour would lock an account out
+  of its own password — tried, and the end-to-end journeys found it within a
+  minute. Closing both wants the ceiling to count FAILURES only, or to refuse
+  in the same words as a wrong password; either is a change to the limiter's
+  shape and a decision to take, not to improvise in a review round.
+  `TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn` walks it and says so.
 - **Rate limits, declared once in `api/limiter.go`**: sign-in per source
   AND per submitted address (counted whether the account exists or not — a
   429 must reveal nothing the decoy hash withholds), public hosting form,

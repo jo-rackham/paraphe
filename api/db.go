@@ -254,7 +254,24 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 			personal_note TEXT DEFAULT '',
 			created_at TEXT, created_by TEXT,
 			PRIMARY KEY (org_id, email))`,
+		// Sign-in links. Only the token's SHA-256 is here: what arrives in an
+		// inbox exists nowhere on this side, so a dump of this table opens no
+		// account (link.go).
+		//
+		// expires_at is a real timestamptz and not the TEXT the display
+		// columns use: it is compared, not shown, and a comparison on a
+		// truncated string is a comparison that is wrong at a minute
+		// boundary.
+		`CREATE TABLE IF NOT EXISTS login_tokens(
+			org_id INTEGER NOT NULL,
+			token_hash TEXT NOT NULL,
+			email TEXT NOT NULL,
+			purpose TEXT NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TEXT,
+			PRIMARY KEY (org_id, token_hash))`,
 	}
+
 	for _, s := range statements {
 		if _, err := tx.Exec(ctx, s); err != nil {
 			return 0, fmt.Errorf("schema: %w", err)
@@ -266,6 +283,17 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 		`CREATE INDEX IF NOT EXISTS mayors_sort ON mayors(rank, score DESC, insee_code)`,
 		`CREATE INDEX IF NOT EXISTS notes_insee ON notes(org_id, insee_code)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS teams_org_name ON teams(org_id, name)`,
+		// ONE live link per address AND PURPOSE, enforced by PostgreSQL
+		// rather than by the DELETE that precedes the INSERT. Under READ
+		// COMMITTED that DELETE does not see a neighbour's uncommitted row,
+		// so two requests arriving together both inserted: two links in one
+		// inbox, the older already dead.
+		//
+		// The purpose is part of it because the two kinds do not compete: a
+		// volunteer who asks for a sign-in link while their INVITATION is
+		// still pending was destroying an invitation they had not asked
+		// about and would find dead days later.
+		`CREATE UNIQUE INDEX IF NOT EXISTS login_tokens_address ON login_tokens(org_id, email, purpose)`,
 	}
 	for _, s := range indexes {
 		if _, err := tx.Exec(ctx, s); err != nil {

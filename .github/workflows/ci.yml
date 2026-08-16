@@ -424,6 +424,47 @@ jobs:
           rendre sauvegarde --set postgres.cnpg.backup.enabled=true \
             --set postgres.cnpg.backup.s3CredentialsSecret=mes-cles
           rendre sans-valkey --set valkey.enabled=false
+          # Signing in by email is off by default, so its twenty-eight lines
+          # of template render in no other case here — and `helm lint` parses
+          # a branch without executing it. A `.Values.mail.from.broken` left
+          # in that block passed the lint and all six renders above.
+          rendre courriel --set mail.url=smtp://envoi@relais.exemple.fr:587 \
+            --set mail.from=contact@exemple.fr \
+            --set mail.publicUrl=https://paraphe.exemple.fr \
+            --set secrets.smtpPassword=motdepasse
+          # All four, named one by one. Asserting on a couple of them leaves
+          # the others free to disappear — the same gap the loop below exists
+          # to close, one level down.
+          for reglage in PARAPHE_SMTP_URL PARAPHE_MAIL_FROM PARAPHE_PUBLIC_URL; do
+            grep -q "name: $reglage" /tmp/courriel.yaml
+          done
+          # The relay's password comes from the Secret, never from the value
+          # inline: a URL travels into logs and into a `describe pod`.
+          grep -q "key: PARAPHE_SMTP_PASSWORD" /tmp/courriel.yaml
+          if grep -q "PARAPHE_SMTP" /tmp/defaut.yaml; then
+            echo "::error::mail settings on a chart that configures no relay"
+            exit 1
+          fi
+          # The three hold together. Half of them renders a pod that refuses
+          # to start, which reads as CrashLoopBackOff behind an ArgoCD stuck
+          # on « Progressing » — the chart says it where the mistake is made.
+          # Written as an `if`, not `! helm`: `!` suspends errexit, so the
+          # assertion would pass on whatever the render did.
+          #
+          # Each half is refused SEPARATELY. Asserting only on `url` alone
+          # stays green as long as EITHER guard survives — one of the two
+          # could be deleted and nothing here would notice.
+          for manque in mail.from=contact@exemple.fr mail.publicUrl=https://p.exemple.fr; do
+            if helm template paraphe chart/paraphe \
+              --set secrets.adminPassword=x --set secrets.secretKey=y \
+              --set secrets.valkeyPassword=w \
+              --set postgres.cnpg.backup.acknowledgedDisabled=true \
+              --set mail.url=smtp://envoi@relais.exemple.fr:587 \
+              --set "$manque" > /dev/null 2>&1; then
+              echo "::error::mail.url renders with only $manque beside it"
+              exit 1
+            fi
+          done
           grep -q "kind: Deployment" /tmp/defaut.yaml
           # ONE application container, and no volume: nothing is written to
           # disk, and a mount reappearing means something is again. Judged
@@ -464,4 +505,4 @@ jobs:
             -ignore-missing-schemas -skip Cluster,ScheduledBackup \
             /tmp/defaut.yaml /tmp/ingress.yaml /tmp/multi-campagnes.yaml \
             /tmp/autoscaling.yaml /tmp/base-externe.yaml /tmp/sauvegarde.yaml \
-            /tmp/sans-valkey.yaml
+            /tmp/sans-valkey.yaml /tmp/courriel.yaml

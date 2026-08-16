@@ -31,7 +31,18 @@ export default function App() {
     let alive = true;
     setMode(null);
     API.detectMode().then((m) => {
-      if (alive) setMode(m);
+      if (!alive) return;
+      // A sign-in link that lands on a screen which cannot use it is DROPPED
+      // here, and not kept waiting for one that can.
+      //
+      // Somebody who opens their link, meets the outage screen and walks
+      // away leaves the tab on the table. The next person presses
+      // « Réessayer », the campaign answers this time, and the screen that
+      // finally mounts would open the FIRST person's session for them. The
+      // link is still in their inbox and still valid: asking them to click
+      // it again costs one click and closes that.
+      if (m.kind === "outage" || m.kind === "browser") API.consumeLinkToken();
+      setMode(m);
     });
     return () => {
       alive = false;

@@ -66,7 +66,7 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 				"chiffres et tirets, et ne pas être un nom réservé : %q.", slug)
 		return
 	}
-	if name == "" || requester == "" || !strings.Contains(email, "@") {
+	if name == "" || requester == "" || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de la campagne, votre nom et votre adresse email sont requis.")
 		return
@@ -248,30 +248,39 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// newCampaign: what creating one produced. The password and the invitation
+// token are both one-shot secrets — they exist here, travel once, and are
+// stored nowhere in the clear.
+type newCampaign struct {
+	org      int
+	password string
+	token    string
+}
+
 // createCampaign creates the organisation and, in the same stroke, its
-// coordination account — without which the address opens for nobody. The
-// password is returned to be shown ONCE and is never stored in the clear.
+// coordination account — without which the address opens for nobody — and
+// the invitation that lets it in without anyone relaying a password.
 // Approving a hosting request and the administration's direct creation both
 // end here: one implementation, so the two doors cannot drift apart.
-func createCampaign(ctx context.Context, tx pgx.Tx, slug, name string,
+func (s *Server) createCampaign(ctx context.Context, tx pgx.Tx, slug, name string,
 	campaign []byte, coordinationEmail, coordinationName, createdBy string,
 	listed bool,
-) (int, string, error) {
-	var orgID int
+) (newCampaign, error) {
+	var out newCampaign
 	if err := tx.QueryRow(ctx,
 		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at, listed) "+
 			"VALUES($1,$2,$3::jsonb,$4,$5,$6,$7) RETURNING id",
 		slug, name, string(campaign), defaultBatchSize, OrgActive,
-		shortTimestamp(), listed).Scan(&orgID); err != nil {
-		return 0, "", err
+		shortTimestamp(), listed).Scan(&out.org); err != nil {
+		return newCampaign{}, err
 	}
 	password, err := ReadablePassword()
 	if err != nil {
-		return 0, "", err
+		return newCampaign{}, err
 	}
 	hashed, err := HashPassword(password)
 	if err != nil {
-		return 0, "", err
+		return newCampaign{}, err
 	}
 	// the account is born INSIDE the created campaign, which is what org_id
 	// names here: creation is the one place the instance scope writes into
@@ -279,11 +288,20 @@ func createCampaign(ctx context.Context, tx pgx.Tx, slug, name string,
 	if _, err := tx.Exec(ctx,
 		"INSERT INTO accounts(org_id, email, name, password_hash, role, created_at, created_by) "+
 			"VALUES($1,$2,$3,$4,$5,$6,$7)",
-		orgID, coordinationEmail, coordinationName, hashed, RoleCoordination,
+		out.org, coordinationEmail, coordinationName, hashed, RoleCoordination,
 		shortTimestamp(), createdBy); err != nil {
-		return 0, "", err
+		return newCampaign{}, err
 	}
-	return orgID, password, nil
+	// The same crossing, one row further: the invitation belongs to the
+	// campaign just created, not to the instance scope this request runs in.
+	// It is what spares an administrator from relaying a password to somebody
+	// they have never spoken to.
+	token, err := s.mintInvitation(ctx, tx, out.org, coordinationEmail)
+	if err != nil {
+		return newCampaign{}, err
+	}
+	out.password, out.token = password, token
+	return out, nil
 }
 
 type hostingDecision struct {
@@ -332,6 +350,9 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]any{"id": id, "slug": slug, "decision": d.Decision}
+	// Filled on acceptance, sent once the transaction has closed: a link must
+	// not arrive before the campaign it opens exists.
+	var invite invitation
 	if d.Decision == RequestAccepted {
 		taken, err := slugTaken(ctx, s.tx(r), slug)
 		if err != nil {
@@ -363,18 +384,23 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			s.failure(w, err)
 			return
 		}
-		orgID, password, err := createCampaign(ctx, s.tx(r), slug, name,
+		created, err := s.createCampaign(ctx, s.tx(r), slug, name,
 			blank, requesterEmail, requesterName, accountOf(r).Email, listed)
 		if err != nil {
 			s.failure(w, err)
 			return
 		}
-		response["organisation"] = orgID
+		response["organisation"] = created.org
 		response["address"] = fmt.Sprintf("%s.%s", slug, BaseDomain())
 		response["coordination"] = requesterEmail
 		// returned ONCE, never stored in the clear: the administrator
-		// passes it on
-		response["password"] = password
+		// passes it on — unless the invitation below did it for them
+		response["password"] = created.password
+		invite = invitation{
+			email: requesterEmail, name: requesterName,
+			by: accountOf(r).Name, campaign: name, slug: slug,
+			token: created.token,
+		}
 	}
 
 	if _, err := s.tx(r).Exec(ctx,
@@ -387,6 +413,17 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
+	}
+	s.release(r) // before the relay, which may take thirty seconds
+	// The SAME shape as the two other doors, always: a key that appears only
+	// sometimes is a key the interface reads by accident when it is there and
+	// by luck when it is not.
+	if d.Decision == RequestAccepted {
+		sent, warning := s.sendInvitation(invite)
+		response["invitation_sent"] = sent
+		if warning != "" {
+			response["invitation_error"] = warning
+		}
 	}
 	// the slug is on its way to being a public subdomain — not a secret;
 	// the moderator, like every account in these logs, is a pseudonym
@@ -428,7 +465,7 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 				"chiffres et tirets, et ne pas être un nom réservé : %q.", slug)
 		return
 	}
-	if name == "" || coordination == "" || !strings.Contains(email, "@") {
+	if name == "" || coordination == "" || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de la campagne, ainsi que le nom et l'adresse email du "+
 				"compte de coordination, sont requis.")
@@ -471,8 +508,17 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	orgID, password, err := createCampaign(ctx, s.tx(r), slug, name, campaign,
+	created, err := s.createCampaign(ctx, s.tx(r), slug, name, campaign,
 		email, coordination, accountOf(r).Email, d.Listed == nil || *d.Listed)
+	// The slug check above is a plain SELECT, so two administrators can both
+	// read "free" and both proceed. PostgreSQL settles it on the unique
+	// index; what an operator must not read is "erreur interne, prévenez la
+	// coordination" for a race that resolves itself by picking another name.
+	if isUniqueViolation(err) {
+		errorJSON(w, http.StatusConflict,
+			"L'adresse %s.%s a été prise entre-temps.", slug, BaseDomain())
+		return
+	}
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -481,16 +527,26 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	s.release(r) // before the relay, which may take thirty seconds
+	sent, warning := s.sendInvitation(invitation{
+		email: email, name: coordination, by: accountOf(r).Name,
+		campaign: name, slug: slug, token: created.token,
+	})
 	s.securityEvent(r, slog.LevelInfo, "campaign_created",
 		"slug", slug, "by", s.accountPseudonym(accountOf(r).Email))
-	replyJSON(w, http.StatusCreated, map[string]any{
-		"organisation": orgID, "slug": slug,
+	reply := map[string]any{
+		"organisation": created.org, "slug": slug,
 		"address":      fmt.Sprintf("%s.%s", slug, BaseDomain()),
 		"coordination": email,
 		// returned ONCE, never stored in the clear: the administrator
-		// passes it on
-		"password": password,
-	})
+		// passes it on — unless the invitation did it for them
+		"password":        created.password,
+		"invitation_sent": sent,
+	}
+	if warning != "" {
+		reply["invitation_error"] = warning
+	}
+	replyJSON(w, http.StatusCreated, reply)
 }
 
 // GET /api/campaigns — the public directory of hosted campaigns, on the

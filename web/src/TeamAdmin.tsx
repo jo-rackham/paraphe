@@ -18,6 +18,11 @@ interface NewAccess {
   name: string;
   role: string;
   password: string;
+  // The invitation the API tried to send with it. Absent when the instance
+  // sends no email at all; false with a reason when the relay refused —
+  // either way the one-time password below is what gets the person in.
+  invitation_sent?: boolean;
+  invitation_error?: string;
 }
 
 // Labels of the campaign keys. A campaign opened from a hosting request
@@ -369,6 +374,12 @@ export function GestionEquipe({
     name: "",
     departments: [],
   });
+  // A REF, and it guards the route that OPENS AN ACCESS. Two clicks in the
+  // same tick run two handlers built by the same render: two accounts, two
+  // invitations, and `setCreated` keeps the last — so the first volunteer's
+  // password, shown once and never stored, is gone from the screen that was
+  // the only place it existed.
+  const [openingAccess, accessOpened] = useSubmitGuard();
 
   const reload = useCallback(async () => {
     try {
@@ -386,6 +397,7 @@ export function GestionEquipe({
 
   const createAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (openingAccess()) return;
     try {
       const r = await API.createAccount({
         email: draft.email,
@@ -399,6 +411,8 @@ export function GestionEquipe({
       await reload();
     } catch (err) {
       onError(err);
+    } finally {
+      accessOpened();
     }
   };
 
@@ -422,8 +436,16 @@ export function GestionEquipe({
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
         {created
-          ? `Un accès vient d'être créé pour ${created.name}. Le mot de ` +
-            "passe provisoire est affiché à l'écran, à transmettre de vive voix."
+          ? `Un accès vient d'être créé pour ${created.name}. ` +
+            (created.invitation_sent
+              ? `Une invitation est partie à ${created.email}. `
+              : "") +
+            // Said here too, and not only on the card: this announcement is
+            // what somebody who cannot see the screen acts on, and an
+            // invitation that did not leave changes what they must do next.
+            (created.invitation_error ? `${created.invitation_error} ` : "") +
+            "Le mot de passe provisoire est affiché à l'écran, à " +
+            "transmettre de vive voix."
           : ""}
       </span>
       {created && (
@@ -433,6 +455,20 @@ export function GestionEquipe({
               Accès créé pour {created.name} ({created.email}).
             </strong>
           </p>
+          {created.invitation_sent && (
+            <p>
+              Une invitation vient de partir à cette adresse : le lien qu'elle
+              contient ouvre l'accès sans mot de passe.
+            </p>
+          )}
+          {created.invitation_error && (
+            <p>
+              <strong>{created.invitation_error}</strong>
+            </p>
+          )}
+          {/* The password stays on screen whatever the invitation did: a
+              relay can be down tomorrow, and reading it out is the path
+              that has always worked. */}
           <p>
             Mot de passe provisoire — <strong>affiché une seule fois</strong>, à
             transmettre de vive voix :

@@ -92,7 +92,8 @@ func testDatabase(t *testing.T) *pgxpool.Pool {
 	// the tables may have been created by another role in a previous run:
 	// cleanup happens under the administration account
 	if _, err := admin.Exec(ctx, "DROP TABLE IF EXISTS mayors, notes, accounts, "+
-		"teams, settings, assignments, orgs, hosting_requests, team_requests"); err != nil {
+		"teams, settings, assignments, orgs, hosting_requests, team_requests, "+
+		"login_tokens"); err != nil {
 		t.Fatal(err)
 	}
 	for _, sql := range []string{

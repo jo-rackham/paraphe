@@ -30,6 +30,7 @@ import (
 // new per-campaign table is covered the day it is added here.
 var walledTables = []string{
 	"assignments", "notes", "teams", "accounts", "team_requests",
+	"login_tokens",
 }
 
 func orgSchema(ctx context.Context, tx pgx.Tx) error {

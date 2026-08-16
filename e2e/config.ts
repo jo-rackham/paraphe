@@ -14,10 +14,14 @@ export const WORK_DIR = join(ROOT, "e2e", ".tmp");
 /** Ports well clear of the ones a developer runs by hand (8047, 5180). */
 export const API_PORT = 8399;
 export const STATIC_PORT = 8398;
+/** The throwaway relay, and the window onto what it received. */
+export const SMTP_PORT = 8397;
+export const SINK_PORT = 8396;
 
 export const BASE_DOMAIN = "localhost";
 export const API_ORIGIN = `http://${BASE_DOMAIN}:${API_PORT}`;
 export const STATIC_ORIGIN = `http://127.0.0.1:${STATIC_PORT}`;
+export const SINK_ORIGIN = `http://127.0.0.1:${SINK_PORT}`;
 
 export const campaignOrigin = (slug: string) =>
   `http://${slug}.${BASE_DOMAIN}:${API_PORT}`;

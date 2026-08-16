@@ -77,6 +77,8 @@ export interface ServerConfig {
   ranks: Rank[];
   /** Departments of the common mayor list: the perimeter a team can ask for. */
   departments: string[];
+  /** L'instance sait envoyer un email : la connexion par lien est offerte. */
+  magic_link: boolean;
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
 }
@@ -89,6 +91,8 @@ export interface InstanceConfig {
   // URL publique de la version navigateur (sans compte) — vide : pas de lien
   browser_version_url: string;
   campaign_keys: string[];
+  /** L'instance sait envoyer un email : la connexion par lien est offerte. */
+  magic_link: boolean;
 }
 
 export interface CampaignRequest {
