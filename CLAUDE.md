@@ -349,6 +349,15 @@ One instance can host several campaigns, one per subdomain.
 - A public request form plus moderation: a request creates NOTHING until an
   instance administrator approves it. Without that, the first abuse is
   squatting a candidate's name, with no recourse for the campaign squatted.
+  **Its pending ceiling is applied BY THE INSERT and its queue read carries
+  no LIMIT** — the same two halves as the team form one level down, and the
+  reason they are written twice is that the lesson was learned there and not
+  here. Read separately, two clients both saw 999 and both wrote; the read
+  then showed its newest thousand and dropped the OLDEST, the legitimate
+  early requests, off the only screen that can accept them, with no decision
+  ever bringing them back. `TestEveryReadOfAnAppendOnlyTableIsBounded` knows
+  the exemption by name: the pending set is bounded by the insert, whatever
+  is not pending keeps a LIMIT of its own.
 
 ## Accounts and teams
 

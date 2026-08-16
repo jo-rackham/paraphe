@@ -1959,6 +1959,63 @@ func TestTheModerationQueueCannotBeDrowned(t *testing.T) {
 	}
 }
 
+// …and it hides none once the table is PAST the ceiling, which is the only
+// state where the read's own LIMIT could bite.
+//
+// The twin of TestTheQueueHidesNoPendingRequestEvenOverTheCeiling, written
+// twice because the lesson was learned on the team form and not here. The
+// ceiling was read before the insert, so two clients both saw 999 and both
+// wrote; the read then carried a LIMIT of its own, showed its newest
+// thousand, and dropped the OLDEST — the legitimate early requests — off the
+// only screen that can accept them, with no way for those campaigns to know
+// and no decision ever bringing them back.
+//
+// The rows go in directly, as a race is able to leave them: through the
+// route, limitHostingIP refuses the fourth probe of the hour.
+func TestTheHostingQueueHidesNoPendingRequestEvenOverTheCeiling(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	const over = maxPendingRequests + 25
+	execAsMaintenance(t, s,
+		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
+			"requester_name, message, state, ts, listed) "+
+			"SELECT 'squat-'||i, 'Campagne', '{}'::jsonb, 'x@exemple.fr', "+
+			"'X', '', 'pending', '2026-01-01T00:00', true "+
+			"FROM generate_series(1,$1) AS i", over)
+
+	// the administration lives in the INSTANCE scope, not in a campaign
+	email := "admin@paraphe.test"
+	execAsMaintenance(t, s,
+		"INSERT INTO accounts(org_id, email, name, password_hash, role) "+
+			"VALUES($1,$2,$3,$4,$5)",
+		OrgInstance, email, "Administration",
+		testHash(t, "mot-de-passe-admin"), RoleAdministration)
+	admin := clientOn(t, srv, "paraphe.test")
+	if code := admin.signIn(email, "mot-de-passe-admin"); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	code, body := admin.call(http.MethodGet, "/api/admin/requests", nil)
+	if code != http.StatusOK {
+		t.Fatalf("moderation queue: %d %v", code, body)
+	}
+	queue, _ := body["requests"].([]any)
+	if len(queue) != over {
+		t.Fatalf("the queue shows %d of %d pending requests: %d are hidden "+
+			"from the only screen that can accept them, and the oldest go "+
+			"first", len(queue), over, over-len(queue))
+	}
+	// and the earliest one — the one a flood pushes off the page — is there
+	shown := map[string]bool{}
+	for _, row := range queue {
+		if m, ok := row.(map[string]any); ok {
+			shown[text(m["slug"])] = true
+		}
+	}
+	if !shown["squat-1"] {
+		t.Error("the oldest pending request is not on the screen")
+	}
+}
+
 // A body over the ceiling is distinguishable from invalid JSON: the
 // sender can shorten what they wrote instead of hunting a syntax error.
 func TestAnOversizedBodyIsRefusedAsTooLarge(t *testing.T) {
