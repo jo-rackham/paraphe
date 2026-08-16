@@ -1299,3 +1299,71 @@ func handler(org int) {
 			"so the canary passes over it:\n\tgot  %q\n\twant %q", got, want)
 	}
 }
+
+// R15. Every form that WRITES an address must judge it with the same
+// predicate. `strings.Contains(email, "@")` passes an address carrying a CR
+// or an LF in its middle — normalizeEmail only trims the edges — and that
+// address becomes the primary key of `accounts`. The person who typed the
+// clean form of it can never sign in; safeAddress refuses it at send time,
+// so no invitation and no link ever arrives; and the coordination approving
+// the moderation screen reads one identity and accepts another.
+//
+// Three of the four public forms used storableEmail and the fourth did not:
+// the helper came from one branch, the form from another, both landed in one
+// merge and nothing wired them together. No conflict marker, no failing
+// test, no diff to read — which is why the rule is checked here rather than
+// remembered.
+func TestEveryFormJudgesAnAddressTheSameWay(t *testing.T) {
+	files := apiPackage(t)
+	var loose []string
+	seen := 0
+	for name, file := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			// normalizing an address is READING it — signing in, looking an
+			// account up. What this rule is about is the address that gets
+			// WRITTEN: an INSERT in the same handler is what makes it a key
+			// nobody can correct afterwards.
+			normalises, inserts, strict := false, false, false
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if lit, ok := n.(*ast.BasicLit); ok &&
+					strings.Contains(strings.ToUpper(lit.Value), "INSERT INTO") {
+					inserts = true
+				}
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch calledName(call) {
+				case "normalizeEmail":
+					normalises = true
+				case "storableEmail":
+					strict = true
+				}
+				return true
+			})
+			writesAddress := normalises && inserts
+			if writesAddress && !strict {
+				loose = append(loose, name+":"+fn.Name.Name)
+			}
+			if strict {
+				seen++
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no handler checks an address with storableEmail: this guard " +
+			"is reading nothing")
+	}
+	if len(loose) > 0 {
+		t.Errorf("these read an address and do not judge it with "+
+			"storableEmail, so a CR or an LF in the middle reaches the "+
+			"column it becomes the key of:\n\t%s", strings.Join(loose, "\n\t"))
+	}
+}

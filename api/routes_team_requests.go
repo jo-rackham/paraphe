@@ -54,7 +54,7 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 	requester := strings.TrimSpace(d.RequesterName)
 	email := normalizeEmail(d.RequesterEmail)
 
-	if name == "" || requester == "" || !strings.Contains(email, "@") {
+	if name == "" || requester == "" || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de l'équipe, votre nom et votre adresse email sont requis.")
 		return
