@@ -476,6 +476,36 @@ describe("focus survives the control's own destruction", () => {
       shown,
       "the first password is shown once and nowhere else: it must survive",
     ).toContain("MOT-DE-PASSE-ALPHA");
+
+    // Each card says WHICH one it closes. Several stand at once, and a
+    // screen reader that hears « J'ai noté » twice cannot tell them apart.
+    const noted = [...container.querySelectorAll("button")].filter((b) =>
+      b.textContent?.includes("J'ai noté"),
+    );
+    expect(noted.length, "one dismiss button per password").toBe(2);
+    expect(
+      new Set(noted.map((b) => b.textContent)).size,
+      "the two dismiss buttons must not share one accessible name",
+    ).toBe(2);
+
+    // Noting a card announces NOTHING. The region carries the event that
+    // happened, not a value derived from what is still on screen: derived,
+    // closing the newest made it announce the opening of the one before —
+    // an opening that never happened, and a password to hand to the wrong
+    // person.
+    const region = () =>
+      [...container.querySelectorAll("[role='status']")]
+        .map((n) => n.textContent ?? "")
+        .join(" ");
+    expect(region(), "it speaks of the campaign just opened").toContain(
+      "beta.paraphe.test",
+    );
+    await click(noted[1]);
+    await flush();
+    expect(
+      region(),
+      "closing a card must not announce the opening of another",
+    ).not.toContain("La campagne alpha.paraphe.test vient d'être ouverte");
   });
 
   it("Demande: a request accepted replaces the whole form — focus is rescued", async () => {

@@ -19,6 +19,21 @@ interface OpenedCampaign {
   invitation_error?: string;
 }
 
+// What the live region says when a campaign opens. It names the campaign, so
+// two openings never produce the same sentence and the second is read.
+function opening(o: OpenedCampaign): string {
+  return (
+    `La campagne ${o.address} vient d'être ouverte. ` +
+    (o.invitation_sent
+      ? `Une invitation est partie à ${o.coordination}. `
+      : "") +
+    // an invitation that did not leave changes what the administrator has to
+    // do next, sighted or not
+    (o.invitation_error ? `${o.invitation_error} ` : "") +
+    "Le mot de passe de coordination est affiché à l'écran."
+  );
+}
+
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -39,6 +54,14 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // handler cannot say the same: by then the other write is already in
   // flight.
   const [opened, setOpened] = useState<OpenedCampaign[]>([]);
+  // The announcement is an EVENT, and it is written only when a password is
+  // APPENDED. Derived from the list instead, it moved every time a card was
+  // dismissed: noting the newest made the region announce the opening of the
+  // one before it — an opening that did not happen, and a wrong password to
+  // attribute. The count is state, not an event, so it stays OUT of here:
+  // `status` implies aria-atomic, and a count that moves re-reads the whole
+  // sentence at every dismissal.
+  const [announced, setAnnounced] = useState("");
 
   const load = async () => {
     try {
@@ -84,16 +107,15 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           },
       );
       if (rep.password && rep.address && rep.coordination) {
-        setOpened((shown) => [
-          ...shown,
-          {
-            address: rep.address as string,
-            coordination: rep.coordination as string,
-            password: rep.password as string,
-            invitation_sent: rep.invitation_sent,
-            invitation_error: rep.invitation_error,
-          },
-        ]);
+        const o: OpenedCampaign = {
+          address: rep.address,
+          coordination: rep.coordination,
+          password: rep.password,
+          invitation_sent: rep.invitation_sent,
+          invitation_error: rep.invitation_error,
+        };
+        setOpened((shown) => [...shown, o]);
+        setAnnounced(opening(o));
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
       }
@@ -114,24 +136,21 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // one display, whatever the door the campaign came through.
   const create = async (creation: Parameters<typeof API.createCampaign>[0]) => {
     const rep = await API.createCampaign(creation);
-    setOpened((shown) => [
-      ...shown,
-      {
-        address: rep.address,
-        coordination: rep.coordination,
-        password: rep.password,
-        invitation_sent: rep.invitation_sent,
-        invitation_error: rep.invitation_error,
-      },
-    ]);
+    const o: OpenedCampaign = {
+      address: rep.address,
+      coordination: rep.coordination,
+      password: rep.password,
+      invitation_sent: rep.invitation_sent,
+      invitation_error: rep.invitation_error,
+    };
+    setOpened((shown) => [...shown, o]);
+    setAnnounced(opening(o));
     await load();
   };
 
   if (!queue) return <p role="status">Chargement…</p>;
   const pending = queue.requests.filter((d) => d.state === "pending");
   const decided = queue.requests.filter((d) => d.state !== "pending");
-  // the announcement speaks of the newest, and says how many wait behind it
-  const last = opened[opened.length - 1];
 
   return (
     <>
@@ -143,22 +162,17 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {last
-          ? `La campagne ${last.address} vient d'être ouverte. ` +
-            (last.invitation_sent
-              ? `Une invitation est partie à ${last.coordination}. `
-              : "") +
-            // an invitation that did not leave changes what the
-            // administrator has to do next, sighted or not
-            (last.invitation_error ? `${last.invitation_error} ` : "") +
-            "Le mot de passe de coordination est affiché à l'écran." +
-            // said only when there is one, and it is what tells a
-            // non-sighted administrator that nothing was lost behind it
-            (opened.length > 1
-              ? ` ${opened.length} mots de passe attendent d'être notés.`
-              : "")
-          : ""}
+        {announced}
       </span>
+      {/* how many wait: ordinary text, in the document for everyone, and
+          carrying NO live role — it is a state, and a state that moved
+          inside the region above made every dismissal re-read an opening */}
+      {opened.length > 1 && (
+        <p className="gris">
+          {opened.length} mots de passe sont affichés et n'ont pas encore été
+          notés.
+        </p>
+      )}
       {opened.map((o) => (
         <div className="carte" key={o.address}>
           <h2>Campagne ouverte : {o.address}</h2>
@@ -195,6 +209,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             }}
           >
             J'ai noté
+            {/* several of these stand at once: without the address, a
+                screen reader enumerates N buttons of one name and none of
+                them says which card it closes */}
+            <span className="sr-only"> {o.address}</span>
+            {/* several of these stand at once: without the address, a
+                screen reader enumerates N buttons of one name and none of
+                them says which card it closes */}
           </button>
         </div>
       ))}

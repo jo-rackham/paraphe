@@ -12,6 +12,22 @@ import {
 } from "./common.tsx";
 import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
 
+// What the live region says when an access opens. It names the ADDRESS as
+// well as the person: two volunteers can share a name, and a sentence
+// identical to the one already in the region is never read out again.
+function creation(c: NewAccess): string {
+  return (
+    `Un accès vient d'être créé pour ${c.name} (${c.email}). ` +
+    (c.invitation_sent ? `Une invitation est partie à ${c.email}. ` : "") +
+    // Said here too, and not only on the card: this announcement is what
+    // somebody who cannot see the screen acts on, and an invitation that did
+    // not leave changes what they must do next.
+    (c.invitation_error ? `${c.invitation_error} ` : "") +
+    "Le mot de passe provisoire est affiché à l'écran, à transmettre de " +
+    "vive voix."
+  );
+}
+
 /** An access just opened, whose password is shown once and never again. */
 interface NewAccess {
   email: string;
@@ -378,6 +394,12 @@ export function GestionEquipe({
   // while the first password was still on screen wiped it. An append cannot
   // lose one, and a guard read at the top of a handler cannot say the same.
   const [created, setCreated] = useState<NewAccess[]>([]);
+  // The announcement is an EVENT, written only when a password is APPENDED.
+  // Derived from the list instead, it moved every time a card was dismissed:
+  // noting the newest made the region announce the creation of the access
+  // before it — a creation that did not happen, and a wrong password to
+  // attribute. The count is state, not an event, so it stays OUT of here.
+  const [announced, setAnnounced] = useState("");
   const [draft, setDraft] = useState({
     email: "",
     name: "",
@@ -408,8 +430,6 @@ export function GestionEquipe({
 
   if (!data) return <p role="status">Chargement…</p>;
   const coordination = me.account.role === "coordination";
-  // the announcement speaks of the newest, and says how many wait behind it
-  const lastCreated = created[created.length - 1];
 
   const createAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -423,6 +443,7 @@ export function GestionEquipe({
           coordination && draft.team_id ? Number(draft.team_id) : undefined,
       });
       setCreated((shown) => [...shown, r]);
+      setAnnounced(creation(r));
       setDraft({ email: "", name: "", role: "volunteer", team_id: "" });
       await reload();
     } catch (err) {
@@ -451,26 +472,17 @@ export function GestionEquipe({
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {lastCreated
-          ? `Un accès vient d'être créé pour ${lastCreated.name}. ` +
-            (lastCreated.invitation_sent
-              ? `Une invitation est partie à ${lastCreated.email}. `
-              : "") +
-            // Said here too, and not only on the card: this announcement is
-            // what somebody who cannot see the screen acts on, and an
-            // invitation that did not leave changes what they must do next.
-            (lastCreated.invitation_error
-              ? `${lastCreated.invitation_error} `
-              : "") +
-            "Le mot de passe provisoire est affiché à l'écran, à " +
-            "transmettre de vive voix." +
-            // what tells someone who cannot see the screen that nothing was
-            // lost behind the newest card
-            (created.length > 1
-              ? ` ${created.length} mots de passe attendent d'être notés.`
-              : "")
-          : ""}
+        {announced}
       </span>
+      {/* how many wait: ordinary text, in the document for everyone, and
+          carrying NO live role — it is a state, and a state that moved
+          inside the region above made every dismissal re-read a creation */}
+      {created.length > 1 && (
+        <p className="gris">
+          {created.length} mots de passe sont affichés et n'ont pas encore été
+          notés.
+        </p>
+      )}
       {created.map((c) => (
         <div className="carte alerte" key={c.email}>
           <p>
@@ -507,6 +519,10 @@ export function GestionEquipe({
             }}
           >
             j'ai noté
+            {/* several of these stand at once: without the address, a
+                screen reader enumerates N buttons of one name and none of
+                them says which card it closes */}
+            <span className="sr-only"> {c.email}</span>
           </button>
         </div>
       ))}
@@ -604,7 +620,10 @@ export function GestionEquipe({
             );
             // appended, never assigned: a moderator accepting a second
             // request before noting the first password must not lose it
-            if (access) setCreated((shown) => [...shown, access]);
+            if (access) {
+              setCreated((shown) => [...shown, access]);
+              setAnnounced(creation(access));
+            }
             // through the SHELL's region, which pre-exists this screen: an
             // acceptance leaves a password card that says what happened, a
             // refusal leaves nothing but one card fewer
