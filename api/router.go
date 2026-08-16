@@ -295,7 +295,13 @@ var signInAdmission = make(chan struct{}, cap(hashGate))
 //
 // TWO, and not one: what this bounds is two writers of the same campaign
 // racing, and TestARemovedLogoCannotDestroyTheOneThatReplacedIt has to be
-// able to run that race. Two of four leaves the probe a connection.
+// able to run that race.
+//
+// Two admitted uploads are not the whole bill: each one leaves behind a
+// deferred deletion that takes a connection of its own, so the real figure
+// is THREE of four, and the margin is one connection, not two. Measured on
+// a paused store with a mixed flow: at four, eight readiness probes out of
+// eight answered; at three, two were lost. Below four the start says so.
 //
 // REFUSED rather than queued, which is the opposite of signInAdmission
 // above and for its very reason: that gate sits BEFORE inScope, so waiting

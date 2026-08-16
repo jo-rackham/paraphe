@@ -635,6 +635,12 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   cannot quietly empty it. Same measurement after: six probes out of six at
   200. The deferred deletion is bounded on its own (one per instance): it
   answers nobody and holds both a connection and the row lock.
+  **The bill is THREE connections, not two**: each admitted upload leaves a
+  deferred deletion behind, and that deletion takes a connection of its own.
+  So the margin at the pgx default of four is ONE, and a smaller pool has
+  none — measured at three, two readiness probes out of eight lost. The
+  start warns below four rather than refusing: a small pool is a legitimate
+  choice, and pgx only goes under four when a DSN says so.
 - **The XML DECLARATION is not a processing instruction to refuse.**
   `<?xml version="1.0" encoding="UTF-8"?>` is the first line Inkscape,
   Illustrator and Sketch write, so refusing every `xml.ProcInst` refused
