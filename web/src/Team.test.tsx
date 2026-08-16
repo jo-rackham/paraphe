@@ -289,3 +289,30 @@ describe("unsent card work in team mode", () => {
     ).toBe(true);
   });
 });
+
+// The header of a free card is the ONE place the interface speaks about
+// reservation, and it kept promising « enregistrer un statut vous
+// l'attribue » after the claim was removed from the write. Standing, it was
+// worse than a stale sentence: two volunteers each read that the fiche was
+// about to become theirs, both wrote, and both called the same mayor —
+// dressing up the one case the new rule accepts as a reservation. Nothing
+// pinned it, which is how it stayed true-looking.
+describe("what the header of a free card promises", () => {
+  it("does not say a status write reserves it, and names what does", async () => {
+    vi.mocked(API.me).mockResolvedValueOnce(ALICE);
+    await act(async () => {
+      root.render(<Team config={CONFIG} />);
+    });
+    await until(
+      () => text().includes("Mon tableau"),
+      "Alice's session is restored",
+    );
+    await openCard();
+    expect(text(), "the write no longer takes the card").not.toContain(
+      "vous l'attribue",
+    );
+    expect(text(), "the door that DOES reserve has to be named").toContain(
+      "prenez un lot",
+    );
+  });
+});

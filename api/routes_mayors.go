@@ -324,7 +324,8 @@ type statusRequest struct {
 	Note   string `json:"note"`
 }
 
-// POST /api/mayors/{insee}/status — setting a status claims the card.
+// POST /api/mayors/{insee}/status — recording what a contact gave. It does
+// NOT claim the card; taking a lot is what reserves.
 func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	insee := pathParam(r, "insee")
 	m, ok := s.loadMayor(w, r, insee)
@@ -332,10 +333,11 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := accountOf(r)
-	// Setting a status on a FREE card claims it: the geographic scope must
-	// apply here as it applies to /lot. Without this check, a team annexes
-	// another department's cards one by one, and the legitimate team gets
-	// turned away (403) from an elected official of their own.
+	// The geographic scope applies here as it applies to /lot. It no longer
+	// stops a team ANNEXING another department's cards — writing a status
+	// takes nothing — but it still stops it writing on them: the status is
+	// what every other team reads, and a note lands under the writer's name
+	// in a department that is not theirs.
 	// A card ALREADY reserved by the team is not concerned: a scope
 	// narrowed after the fact must not lock up work in progress.
 	if _, reserved := integer(m["team_id"]); !reserved {

@@ -481,10 +481,18 @@ function Connexion({
 }
 
 function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
+  // « vous l'attribue » was true when writing a status claimed the card, and
+  // it stopped being true when that claim was removed. Left standing it was
+  // worse than a stale sentence: two volunteers each read that the fiche was
+  // about to become theirs, both wrote, and both called the same mayor —
+  // dressing the one case the new rule accepts up as a reservation. Taking a
+  // lot is what reserves, and it is where this sends them.
   if (!mayor.volunteer) {
     return (
       <p className="gris">
-        Fiche libre — enregistrer un statut vous l'attribue.
+        Fiche libre. Enregistrer un statut le note pour toute l'équipe, sans
+        vous réserver la fiche : pour cela, prenez un lot depuis « Mon tableau
+        ».
       </p>
     );
   }
