@@ -442,12 +442,86 @@ describe("focus survives the control's own destruction", () => {
       "the click was swallowed, and nothing was sent",
     ).toBe(0);
 
+    // Reached by « next button » rather than by Tab, an inert control says
+    // only « indisponible ». It points at the sentence that would make it
+    // live, and that sentence carries the address.
+    const describedBy = open[0].getAttribute("aria-describedby");
+    expect(
+      describedBy,
+      "the inert button says what would make it live",
+    ).not.toBeNull();
+    expect(
+      container.querySelector(`#${describedBy}`)?.textContent,
+      "and that description names the address being confirmed",
+    ).toContain("qui@exemple.fr");
+
     // …and it opens the moment the address is confirmed
     await confirmAddresses();
     expect(open[0].getAttribute("aria-disabled")).toBeNull();
     await click(open[0]);
     await flush();
     expect(decideRequest.mock.calls.length).toBe(1);
+  });
+
+  // What the tick confirms is an ADDRESS, not a row number. Keyed by the id
+  // alone, one confirmation would carry over to a different address — and a
+  // moderator would have confirmed one thing while the system sent to
+  // another, which is the only failure this box exists to prevent.
+  it("Moderation: a confirmation is bound to the address it names", async () => {
+    vi.mocked(API.me).mockResolvedValueOnce({
+      account: {
+        email: "admin@exemple.fr",
+        name: "Administration",
+        role: "administration" as unknown as "coordination",
+        team_id: null,
+        active: true,
+        personal_note: "",
+        team_name: null,
+      },
+      departments: [],
+      may_manage: true,
+    });
+    // the same row identity, two different addresses: what a reordering, a
+    // reused identifier or an edited row would look like from here
+    const row = (slug: string, email: string) => ({
+      id: 7,
+      slug,
+      name: `Campagne ${slug}`,
+      requester_email: email,
+      requester_name: "Qui",
+      message: "",
+      state: "pending" as const,
+      listed: true,
+      reason: "",
+      ts: "2026-01-01T00:00",
+      decided_at: "",
+      decided_by: "",
+    });
+    vi.mocked(API.moderationQueue).mockResolvedValue({
+      requests: [
+        row("une", "premiere@exemple.fr"),
+        row("deux", "seconde@exemple.fr"),
+      ],
+      organisations: [],
+      base_domain: "paraphe.test",
+    });
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    await flush();
+
+    const boxes = [...container.querySelectorAll("label")]
+      .filter((l) => l.textContent?.includes("J'ai vérifié"))
+      .map((l) => l.querySelector<HTMLInputElement>('input[type="checkbox"]'));
+    expect(boxes.length, "one confirmation per card").toBe(2);
+    await act(async () => {
+      boxes[0]?.click();
+    });
+    expect(
+      boxes[1]?.checked,
+      "confirming one address must not confirm another",
+    ).toBe(false);
   });
 
   // The coordination password is returned once and stored nowhere in the

@@ -10,7 +10,13 @@ import {
   ROLES,
   useSubmitGuard,
 } from "./common.tsx";
-import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
+import type {
+  Me,
+  Message,
+  ServerConfig,
+  TeamData,
+  TeamRequest,
+} from "./types.ts";
 
 // What the live region says when an access opens. It names the ADDRESS as
 // well as the person: two volunteers can share a name, and a sentence
@@ -27,6 +33,10 @@ function creation(c: NewAccess): string {
     "vive voix."
   );
 }
+
+// What a tick confirms: this row AND this address. Either changing is a new
+// confirmation to make.
+const seal = (r: TeamRequest) => `${r.id}:${r.requester_email}`;
 
 /** An access just opened, whose password is shown once and never again. */
 interface NewAccess {
@@ -210,7 +220,13 @@ function DemandesEquipes({
   const [deciding, setDeciding] = useState<number | null>(null);
   // Ticked per card, and only the ACCEPT path reads it: accepting sends a
   // session link to an address a stranger typed.
-  const [verified, setVerified] = useState<Record<number, boolean>>({});
+  //
+  // Keyed by the id AND the address, not by the id alone. What the
+  // coordination confirmed is an ADDRESS; a key naming only the row would
+  // carry the tick over to a different address the day one is edited, or
+  // share it between two rows that came back with the same identity. The
+  // whole point of the box is that the thing confirmed is the thing sent to.
+  const [verified, setVerified] = useState<Record<string, boolean>>({});
   const [busy, done] = useSubmitGuard();
 
   if (data.requests.length === 0) return null;
@@ -221,6 +237,7 @@ function DemandesEquipes({
     id: number,
     decision: "accepted" | "refused",
     draft: { name: string; departments: string[] },
+    seal: string,
   ) => {
     // BEFORE the submit guard, which TAKES it as a side effect: refusing
     // after it would leave the guard held by a click that did nothing, and
@@ -228,7 +245,7 @@ function DemandesEquipes({
     //
     // What the greyed button shows, enforced: aria-disabled leaves a control
     // clickable on purpose, so the refusal has to live in the handler too.
-    if (decision === "accepted" && !verified[id]) return;
+    if (decision === "accepted" && !verified[seal]) return;
     if (busy()) return;
     setDeciding(id);
     // captured BEFORE the round trip: this card leaves the queue when the
@@ -341,14 +358,20 @@ function DemandesEquipes({
               <label>
                 <input
                   type="checkbox"
-                  checked={verified[r.id] ?? false}
+                  checked={verified[seal(r)] ?? false}
                   onChange={(e) =>
-                    setVerified({ ...verified, [r.id]: e.target.checked })
+                    setVerified({ ...verified, [seal(r)]: e.target.checked })
                   }
                 />{" "}
-                J'ai vérifié que <strong>{r.requester_email}</strong> est bien
-                l'adresse de la personne qui demande : l'ouverture lui envoie un
-                lien qui ouvre sa session de référent.
+                {/* named, and pointed at by the button below: reached by
+                    « next button » rather than by Tab, an inert control says
+                    only « indisponible » and nothing ties it to what would
+                    make it live again */}
+                <span id={`confirmation-${r.id}`}>
+                  J'ai vérifié que <strong>{r.requester_email}</strong> est bien
+                  l'adresse de la personne qui demande : l'ouverture lui envoie
+                  un lien qui ouvre sa session de référent.
+                </span>
               </label>
             </p>
             {/* `deciding !== null`, not `=== r.id`: ONE submit guard covers
@@ -356,8 +379,11 @@ function DemandesEquipes({
                 button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={deciding !== null || !verified[r.id] || undefined}
-              onClick={() => decide(r.id, "accepted", draft)}
+              aria-disabled={
+                deciding !== null || !verified[seal(r)] || undefined
+              }
+              aria-describedby={`confirmation-${r.id}`}
+              onClick={() => decide(r.id, "accepted", draft, seal(r))}
             >
               Accepter — ouvrir l'équipe
               <span className="sr-only"> {r.name}</span>
@@ -366,7 +392,7 @@ function DemandesEquipes({
               type="button"
               className="secondaire"
               aria-disabled={deciding !== null || undefined}
-              onClick={() => decide(r.id, "refused", draft)}
+              onClick={() => decide(r.id, "refused", draft, seal(r))}
             >
               Refuser
               <span className="sr-only"> {r.name}</span>

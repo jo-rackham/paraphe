@@ -34,6 +34,10 @@ function opening(o: OpenedCampaign): string {
   );
 }
 
+// What a tick confirms: this row AND this address. Either changing is a new
+// confirmation to make.
+const seal = (d: QueuedRequest) => `${d.id}:${d.requester_email}`;
+
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -44,7 +48,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [reasons, setReasons] = useState<Record<number, string>>({});
   // Ticked per card, and only the ACCEPT path reads it: approving sends a
   // session link to an address a stranger typed.
-  const [verified, setVerified] = useState<Record<number, boolean>>({});
+  //
+  // Keyed by the id AND the address, not by the id alone. What the moderator
+  // confirmed is an ADDRESS; a key that names only the row would carry the
+  // tick over to a different address the day one is edited, or shared between
+  // two rows that came back with the same identity. The whole point of the
+  // box is that the thing confirmed is the thing sent to.
+  const [verified, setVerified] = useState<Record<string, boolean>>({});
   // The coordination password is returned only ONCE: it does not go back to
   // the database in the clear, and there is no way to retrieve it afterwards.
   //
@@ -94,7 +104,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     //
     // What the greyed button shows, enforced: aria-disabled leaves a control
     // clickable on purpose, so the refusal has to live in the handler too.
-    if (decision === "accepted" && !verified[d.id]) return;
+    if (decision === "accepted" && !verified[seal(d)]) return;
     if (deciding()) return;
     setBusy(d.id);
     // captured BEFORE the round trip: the card leaves the queue when the
@@ -267,14 +277,20 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             <label>
               <input
                 type="checkbox"
-                checked={verified[d.id] ?? false}
+                checked={verified[seal(d)] ?? false}
                 onChange={(e) =>
-                  setVerified({ ...verified, [d.id]: e.target.checked })
+                  setVerified({ ...verified, [seal(d)]: e.target.checked })
                 }
               />{" "}
-              J'ai vérifié que <strong>{d.requester_email}</strong> est bien
-              l'adresse de la personne qui demande : l'ouverture lui envoie un
-              lien qui ouvre la session de coordination.
+              {/* named, and pointed at by the button below: reached by « next
+                  button » rather than by Tab, an inert control says only
+                  « indisponible » and nothing ties it to what would make it
+                  live again */}
+              <span id={`confirmation-${d.id}`}>
+                J'ai vérifié que <strong>{d.requester_email}</strong> est bien
+                l'adresse de la personne qui demande : l'ouverture lui envoie un
+                lien qui ouvre la session de coordination.
+              </span>
             </label>
           </p>
           <p>
@@ -284,7 +300,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
                 button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={busy !== null || !verified[d.id] || undefined}
+              aria-disabled={busy !== null || !verified[seal(d)] || undefined}
+              aria-describedby={`confirmation-${d.id}`}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne
