@@ -539,6 +539,54 @@ func (s *Server) mintInvitation(ctx context.Context, tx pgx.Tx, org int,
 // whether the message left. The generated password stays on their screen
 // either way — relay down, the lead reads it out as they always have, and
 // nothing about today's path gets worse.
+// A team request is moderation work: every active coordination access is
+// told one arrived. The SUBJECT is a constant on purpose — the team and
+// requester names are visitor-chosen text, and visitor text belongs in the
+// body, never in a header.
+const teamRequestSubject = "Nouvelle demande d'équipe pour votre campagne"
+
+func teamRequestMailBody(campaign, team, departments, requester, email, url string) string {
+	if departments == "" {
+		departments = "aucun département précisé"
+	}
+	return fmt.Sprintf(`Bonjour,
+
+%s demande l'ouverture d'une équipe locale sur %s :
+
+  Équipe : %s
+  Départements : %s
+  À recontacter : %s
+
+Connectez-vous puis ouvrez « Mon équipe » pour accepter ou refuser :
+
+%s
+
+— l'application de campagne`, requester, campaign, team, departments, email, url)
+}
+
+// notifyTeamRequest sends it to every recipient, DETACHED from the request:
+// the caller is an anonymous visitor, and neither the relay's slowness nor
+// its existence is theirs to observe. Failures are logged and nothing more —
+// the request itself is committed either way, and the coordination still
+// finds it in the queue.
+func (s *Server) notifyTeamRequest(campaign, slug, team, departments,
+	requester, email string, recipients []string) {
+	if s.mailer == nil || len(recipients) == 0 {
+		return
+	}
+	body := teamRequestMailBody(campaign, team, departments, requester, email,
+		campaignURL(s.publicURL, slug).String())
+	s.detach(smtpDialTimeout+smtpIOTimeout, func(ctx context.Context) {
+		for _, to := range recipients {
+			if err := s.mailer.Send(ctx, to, teamRequestSubject, body); err != nil {
+				slog.Error("team request notice not sent",
+					"account", s.accountPseudonym(to),
+					"error", s.withoutAddress(err, to))
+			}
+		}
+	})
+}
+
 func (s *Server) sendInvitation(inv invitation) (bool, string) {
 	if inv.token == "" || s.mailer == nil {
 		return false, ""

@@ -302,6 +302,118 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 	replyJSON(w, http.StatusOK, map[string]any{"email": target, "active": active})
 }
 
+// POST /api/team/account/{email}/role — moves an existing account to
+// another campaign role. Coordination only, and the door multi-coordination
+// walks through: promoting a trusted account is how a campaign stops
+// depending on a single person.
+func (s *Server) routeChangeRole(w http.ResponseWriter, r *http.Request) {
+	var d struct {
+		Role   string `json:"role"`
+		TeamID *int   `json:"team_id"`
+	}
+	if !readBody(w, r, &d) {
+		return
+	}
+	me := accountOf(r)
+	// unescaped, like the toggle above: chi matches the raw path
+	target := normalizeEmail(pathParam(r, "email"))
+	// validRole knows only the campaign roles: that is what keeps this door
+	// from minting an instance administrator.
+	if !validRole(d.Role) {
+		errorJSON(w, http.StatusBadRequest, "Rôle inconnu : %q.", d.Role)
+		return
+	}
+	team := d.TeamID
+	if d.Role == RoleCoordination {
+		// coordination sees the whole campaign: a team on the account would
+		// only pretend to bound it
+		team = nil
+	} else if team != nil {
+		if *team > math.MaxInt32 || *team < math.MinInt32 {
+			errorJSON(w, http.StatusBadRequest,
+				"Aucune équipe n'a l'identifiant %d.", *team)
+			return
+		}
+		var exists bool
+		err := s.tx(r).QueryRow(r.Context(),
+			"SELECT TRUE FROM teams WHERE org_id=$1 AND id=$2",
+			scopeOrg(r), *team).Scan(&exists)
+		if errors.Is(err, pgx.ErrNoRows) {
+			errorJSON(w, http.StatusBadRequest,
+				"Aucune équipe n'a l'identifiant %d.", *team)
+			return
+		}
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
+
+	if d.Role != RoleCoordination {
+		// The LAST active coordination access never leaves the role: nobody
+		// could open, close or promote anything afterwards, and only whoever
+		// operates the deployment could repair it (the bootstrap variables).
+		// The caller is an active coordinator, so this only ever bites a
+		// coordinator demoting THEMSELVES while alone — but FOR UPDATE still
+		// serialises two demotions racing each other: both lock the same
+		// rows, the loser recounts on the winner's outcome.
+		rows, err := s.tx(r).Query(r.Context(),
+			"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active "+
+				"FOR UPDATE", scopeOrg(r), RoleCoordination)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+		others := 0
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				rows.Close()
+				s.failure(w, err)
+				return
+			}
+			if e != target {
+				others++
+			}
+		}
+		if err := rows.Err(); err != nil {
+			s.failure(w, err)
+			return
+		}
+		if others == 0 {
+			errorJSON(w, http.StatusConflict,
+				"Impossible : ce compte est le dernier accès de coordination "+
+					"actif de la campagne.")
+			return
+		}
+	}
+
+	req := scoped(r)
+	var role string
+	err := s.tx(r).QueryRow(r.Context(),
+		"UPDATE accounts SET role="+req.p(d.Role)+", team_id="+req.p(team)+
+			" WHERE org_id=$1 AND email="+req.p(target)+" RETURNING role",
+		req.args...).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		errorJSON(w, http.StatusNotFound, "Aucun compte %s.", target)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.securityEvent(r, slog.LevelInfo, "account_role_changed",
+		"account", s.accountPseudonym(target),
+		"by", s.accountPseudonym(me.Email), "role", role)
+	replyJSON(w, http.StatusOK, map[string]any{
+		"email": target, "role": role, "team_id": team,
+	})
+}
+
 func isUniqueViolation(err error) bool {
 	var pge *pgconn.PgError
 	return errors.As(err, &pge) && pge.Code == "23505"

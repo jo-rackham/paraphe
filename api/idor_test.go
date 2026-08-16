@@ -196,6 +196,22 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				}
 			}},
 		},
+		"POST /api/team/account/{email}/role": {
+			{"a coordinator cannot move a role in another campaign", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorCoord)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorCoordB+"/role",
+					map[string]any{"role": RoleVolunteer})
+				if code != http.StatusNotFound {
+					t.Fatalf("naming another campaign's account: %d, want 404 — a "+
+						"403 would say the address exists there", code)
+				}
+				if got := scalar[string](t, s, "SELECT role FROM accounts WHERE "+
+					"org_id=$1 AND email=$2", f.orgB, idorCoordB); got != RoleCoordination {
+					t.Fatalf("the neighbour's role moved to %q", got)
+				}
+			}},
+		},
 		"POST /api/team/account/{email}/active": {
 			{"a lead cannot toggle an account outside their team", func(t *testing.T) {
 				c := f.signedInClient(t, idorHostA, idorLead1)

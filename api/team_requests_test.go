@@ -577,9 +577,24 @@ func TestAcceptingATeamRequestInvitesTheLeadItJustOpened(t *testing.T) {
 		t.Error("the one-time password left the answer")
 	}
 
-	sent := mails.only(t)
-	if sent.to != requesterAddress {
-		t.Fatalf("the invitation went to %q, not to the person who asked", sent.to)
+	// TWO messages by design: the REQUEST already wrote its notice to the
+	// coordination when it was filed, and the acceptance now writes the
+	// invitation. The invitation is the one under test here.
+	s.outbound.Wait()
+	all := mails.all()
+	if len(all) != 2 {
+		t.Fatalf("expected the notice and the invitation, %d message(s) went "+
+			"out: %+v", len(all), all)
+	}
+	var sent sentMail
+	found := false
+	for _, m := range all {
+		if m.to == requesterAddress {
+			sent, found = m, true
+		}
+	}
+	if !found {
+		t.Fatalf("no invitation reached the person who asked; sent: %+v", all)
 	}
 	// It GREETS the requester, and does not merely reach them: the field is
 	// one argument away from the moderator's own name, and swapping the two

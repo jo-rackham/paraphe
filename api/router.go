@@ -174,6 +174,9 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.managers),
 				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/account/{email}/active", s.routeToggleAccount)
+			r.With(guard(s.coordinationOnly),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/account/{email}/role", s.routeChangeRole)
 		})
 		r.With(guard(s.coordinationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).

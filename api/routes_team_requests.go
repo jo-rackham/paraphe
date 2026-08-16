@@ -190,10 +190,38 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// The recipients of the notice, read while the transaction is open: the
+	// coordination this request lands on is the one of this snapshot.
+	var recipients []string
+	if s.mailer != nil {
+		rows, err := s.tx(r).Query(r.Context(),
+			"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active",
+			scopeOrg(r), RoleCoordination)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				rows.Close()
+				s.failure(w, err)
+				return
+			}
+			recipients = append(recipients, e)
+		}
+		if err := rows.Err(); err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
+	campaign, slug := campaignName(r), campaignSlug(r)
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
 	}
+	// the pool connection has no business waiting on a relay
+	s.release(r)
 	// The identity is NOT returned. `team_requests.id` is one sequence for the
 	// whole table, hence for every campaign on the instance: handed to an
 	// anonymous visitor, the gap between two of them counts what the
@@ -204,6 +232,10 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		"message": "Demande enregistrée. La coordination de la campagne " +
 			"l'examinera et vous répondra à " + email + ".",
 	})
+	// Detached (s.detach): the visitor observes neither the relay's slowness
+	// nor its existence.
+	s.notifyTeamRequest(campaign, slug, name, strings.Join(departments, ", "),
+		requester, email, recipients)
 }
 
 // knownDepartments keeps what the mayor list actually carries and names the
