@@ -256,6 +256,33 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 			`<animateColor attributeName="href" to="https://ailleurs.example/"/>` +
 			`<rect width="10" height="10"/></a></svg>`,
 	}
+	// The rule each case exercises, as it appears in the sentence that
+	// refuses it. Reading only THAT it was refused leaves the suite green
+	// when a rule is deleted and another one happens to catch the same
+	// fixture: removing `foreignObject` from the list changed nothing,
+	// because that case also carries an <iframe> — and a foreignObject with
+	// no iframe in it would have walked straight through.
+	by := map[string]string{
+		"a script element":                          "<script>",
+		"an event handler":                          "onload",
+		"an event handler on a child":               "onclick",
+		"embedded HTML":                             "<foreignobject>",
+		"a DOCTYPE, hence entity declarations":      "DOCTYPE",
+		"an external reference":                     "ressource extérieure",
+		"a javascript: link":                        "javascript",
+		"not an SVG at all":                         "ne commence pas",
+		"not even XML":                              "XML valide",
+		"an XSLT stylesheet instruction":            "instruction de traitement",
+		"an animate rewriting href":                 "<animate>",
+		"a set rewriting href":                      "<set>",
+		"an animate pointing a link somewhere else": "<animate>",
+		"a link whose scheme carries a tab":         "javascript",
+		"an HTML data: link":                        "ressource extérieure",
+		"an HTML data: link wearing an image MIME":  "ressource extérieure",
+		"an image MIME with something after it":     "ressource extérieure",
+		"an inline SVG carrying a script":           "ressource extérieure",
+		"an animateColor rewriting href":            "<animatecolor>",
+	}
 	for name, body := range cases {
 		logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(body)))
 		if logo != nil {
@@ -267,6 +294,16 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 		}
 		if why == "" {
 			t.Errorf("%s: refused without saying why", name)
+		}
+		fragment, named := by[name]
+		if !named {
+			t.Errorf("%s: no rule declared for this case — say which one it "+
+				"exercises, or it proves only that something refused it", name)
+			continue
+		}
+		if !strings.Contains(why, fragment) {
+			t.Errorf("%s: refused, but not by the rule it names (%q): %s",
+				name, fragment, why)
 		}
 	}
 }

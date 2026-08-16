@@ -511,6 +511,14 @@ jobs:
           grep -q "key: PARAPHE_MEDIA_ACCESS_KEY" /tmp/stockage.yaml
           grep -q "kind: StatefulSet" /tmp/stockage.yaml
           grep -q "kind: Job" /tmp/stockage.yaml
+          # capacityBytes is QUOTED in values.yaml, and nothing said so until
+          # here: unquoted, YAML reads a float and Garage is handed `1e+10`,
+          # which it refuses. An operator raising the capacity edits that
+          # line, and the render is where the mistake shows.
+          if grep -A1 "name: GARAGE_CAPACITY" /tmp/stockage.yaml | grep -q "e+"; then
+            echo "::error::GARAGE_CAPACITY rendered in scientific notation — quote capacityBytes in values.yaml"
+            exit 1
+          fi
           if grep -q "PARAPHE_MEDIA" /tmp/defaut.yaml; then
             echo "::error::media settings on a chart that configures no store"
             exit 1

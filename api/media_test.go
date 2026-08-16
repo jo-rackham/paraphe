@@ -427,6 +427,101 @@ func TestAnUploadHoldsNoConnectionWhileTheStoreIsSilent(t *testing.T) {
 	}
 }
 
+// The object goes in BEFORE the pointer moves, and nothing used to hold that
+// order in place: a review inverted it — lock, update, commit, then write —
+// and every test stayed green. Inverted, a write that FAILS leaves the row
+// naming a key the bucket never received, so every screen of that campaign
+// shows a broken image until somebody uploads again.
+func TestAFailedWriteLeavesThePointerWhereItWas(t *testing.T) {
+	s, srv := testServer(t)
+	if s.media == nil {
+		t.Skip("no object store: set PARAPHE_TEST_MEDIA_* (task garage)")
+	}
+	seedMayors(t, s, 1, "01")
+	email := "coord@exemple.fr"
+	pw := createAccount(t, s, email, RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn(email, pw); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+
+	body := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 30, 30))}
+	if code, rep := c.call(http.MethodPost, "/api/campaign/logo", body); code != http.StatusOK {
+		t.Fatalf("the first upload was refused: %d %v", code, rep)
+	}
+	_, first := c.call(http.MethodGet, "/api/config", nil)
+	established, _ := first["logo"].(map[string]any)
+	if established == nil {
+		t.Fatal("/api/config names no logo after a successful upload")
+	}
+
+	// A store that refuses everything, in place of the one that worked —
+	// under the SAME public origin, so what this test compares is the KEY
+	// and not the address the answer happens to be built from.
+	public := s.media.publicURL
+	refusing := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+	defer refusing.Close()
+	endpoint, err := url.Parse(refusing.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.media = &MediaStore{
+		endpoint: endpoint, bucket: "seau", region: "garage",
+		accessKey: "GKtest", secretKey: "secret",
+		publicURL: public,
+		client:    &http.Client{Timeout: mediaTimeout},
+	}
+
+	replacement := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 31, 30))}
+	if code, _ := c.call(http.MethodPost, "/api/campaign/logo", replacement); code != http.StatusBadGateway {
+		t.Errorf("a refused write answered %d, want 502", code)
+	}
+	_, after := c.call(http.MethodGet, "/api/config", nil)
+	still, _ := after["logo"].(map[string]any)
+	if still == nil || still["url"] != established["url"] {
+		t.Errorf("the pointer moved on a write that failed: %v then %v — the "+
+			"campaign now names an object the store never received",
+			established["url"], still)
+	}
+}
+
+// An instance with no object store is a supported state — the default one for
+// a developer, and for most of this suite. Both routes say so in a sentence.
+// Removing BOTH guards left all 318 tests green, and without them the upload
+// dereferences a nil store: a panic, a 500, and no sentence at all.
+func TestTheLogoRoutesSayWhenNoStoreIsConfigured(t *testing.T) {
+	s, srv := testServer(t)
+	s.media = nil
+	seedMayors(t, s, 1, "01")
+	email := "coord@exemple.fr"
+	pw := createAccount(t, s, email, RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn(email, pw); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	body := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 30, 30))}
+	for _, call := range []struct {
+		method string
+		body   map[string]any
+	}{
+		{http.MethodPost, body},
+		{http.MethodDelete, map[string]any{}},
+	} {
+		code, rep := c.call(call.method, "/api/campaign/logo", call.body)
+		if code != http.StatusNotImplemented {
+			t.Errorf("%s answered %d, want 501", call.method, code)
+		}
+		text, _ := rep["error"].(string)
+		if !strings.Contains(text, "stockage d'images") {
+			t.Errorf("%s: the answer does not say what is missing: %q",
+				call.method, text)
+		}
+	}
+}
+
 // A deletion in flight when SIGTERM lands must be waited for, like a message
 // on its way to a relay. Started as a bare goroutine it is simply cut, and
 // the object it was removing stays in the bucket for ever with nothing
