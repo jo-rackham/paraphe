@@ -1787,7 +1787,11 @@ func TestOversizedNameAndEmailAreRefused(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Errorf("255-rune email: %d %v — over the announced bound", code, body)
 	}
-	// and the bounds still accept what a real campaign types
+	// and the bounds still accept what a real campaign types. The department
+	// is one the seeded mayors bear: this door reads a perimeter like every
+	// other now, so a label nobody carries is refused here too — which is
+	// what the test below asserts on purpose.
+	seedMayors(t, s, 2, "71")
 	code, body = c.call(http.MethodPost, "/api/team/group", map[string]any{
 		"name": "Équipe Saône-et-Loire — secteur nord", "departments": []string{"71"},
 	})

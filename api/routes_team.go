@@ -106,11 +106,21 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 			"Le nom de l'équipe ne doit pas dépasser 200 caractères.")
 		return
 	}
-	var departments []string
-	for _, x := range d.Departments {
-		if x = strings.TrimSpace(x); x != "" {
-			departments = append(departments, x)
-		}
+	// …and the perimeter is read like every other perimeter, which this door
+	// was the only one not to do. A label no mayor bears is a team that draws
+	// zero cards for ever, and nothing downstream ever says why: the request
+	// form checks it, accepting a request checks it, and coordination's own
+	// door — the one most used — did not. The comment above says a door left
+	// unchecked is how the class comes back; it came back one field along.
+	departments, unknown, err := s.knownDepartments(r, d.Departments)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if unknown != "" {
+		errorJSON(w, http.StatusBadRequest,
+			"« %s » ne correspond à aucun département de la liste.", unknown)
+		return
 	}
 	id, err := insertTeam(r.Context(), s.tx(r), orgOf(r).ID, name, departments)
 	if isUniqueViolation(err) {
@@ -183,6 +193,17 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		if !validRole(role) {
 			errorJSON(w, http.StatusBadRequest, "Rôle inconnu : %q.", role)
+			return
+		}
+		if role == RoleCoordination {
+			// the rule routeChangeRole already applies, and the two doors
+			// disagreed: coordination sees the whole campaign, so a team on
+			// the account only pretends to bound it — and the lead of that
+			// team then reads the coordinator as one of their own members.
+			team = nil
+		}
+		if role == RoleLead && team == nil {
+			errorJSON(w, http.StatusBadRequest, leadNeedsATeam)
 			return
 		}
 		if team != nil {
@@ -322,6 +343,16 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 const lastCoordinatorMessage = "Impossible : ce compte est le dernier accès " +
 	"de coordination actif de la campagne."
 
+// A lead without a team is a contradiction the code cannot hold: the role IS
+// « opens volunteer access for THEIR team », and MyTeam() answers
+// NationalTeam — zero — for an account carrying none. Every lead-side filter
+// then reads `team_id=0`, and TWO such leads see and deactivate each other's
+// volunteers, having created them under that same zero. Refused where the
+// role is set, both doors, rather than papered over in the filters.
+const leadNeedsATeam = "Un référent conduit une équipe : choisissez-en une. " +
+	"Sans équipe, il partagerait ses bénévoles avec tous les autres référents " +
+	"sans équipe."
+
 // soleActiveCoordinator locks the campaign's active coordinators and reports
 // whether `target` is one of them AND the only one. Both routes that can
 // take a coordinator out of the active set — a self-demotion
@@ -384,6 +415,9 @@ func (s *Server) routeChangeRole(w http.ResponseWriter, r *http.Request) {
 		// coordination sees the whole campaign: a team on the account would
 		// only pretend to bound it
 		team = nil
+	} else if d.Role == RoleLead && team == nil {
+		errorJSON(w, http.StatusBadRequest, leadNeedsATeam)
+		return
 	} else if team != nil {
 		if *team > math.MaxInt32 || *team < math.MinInt32 {
 			errorJSON(w, http.StatusBadRequest,
