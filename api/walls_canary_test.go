@@ -558,20 +558,46 @@ func localScopeVariants(
 		return found
 	}
 	// the branch bodies of every conditional that assigns
-	var groups [][]ast.Node
+	hasDefault := func(body *ast.BlockStmt) bool {
+		for _, c := range body.List {
+			if cc, ok := c.(*ast.CaseClause); ok && cc.List == nil {
+				return true
+			}
+		}
+		return false
+	}
+	type group struct {
+		branches []ast.Node
+		// a branching that may take NO branch at all: `if` without `else`,
+		// `switch` without `default`. The base alone is then a reading the
+		// driver can execute, and it is the one a wall added INSIDE the
+		// branch does not cover.
+		mayTakeNone bool
+	}
+	var groups []group
 	ast.Inspect(fn, func(n ast.Node) bool {
 		var branches []ast.Node
+		none := false
 		switch s := n.(type) {
 		case *ast.IfStmt:
 			branches = append(branches, s.Body)
 			if s.Else != nil {
 				branches = append(branches, s.Else)
+			} else {
+				none = true
 			}
 		case *ast.SwitchStmt:
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
+			none = !hasDefault(s.Body)
 		case *ast.TypeSwitchStmt:
+			for _, c := range s.Body.List {
+				branches = append(branches, c)
+			}
+			none = !hasDefault(s.Body)
+		case *ast.SelectStmt:
+			// every communication clause is a branch, and exactly one runs
 			for _, c := range s.Body.List {
 				branches = append(branches, c)
 			}
@@ -584,19 +610,30 @@ func localScopeVariants(
 				assigning = append(assigning, b)
 			}
 		}
-		if len(assigning) > 1 {
-			groups = append(groups, assigning)
+		// ONE assigning branch is enough when the branching may take none:
+		// `sql := base; if x { sql += " WHERE org_id=$1" }` read as one text
+		// carries the predicate, and the driver runs `base` alone whenever x
+		// is false.
+		if len(assigning) > 1 || (len(assigning) == 1 && none) {
+			groups = append(groups, group{assigning, none})
 		}
 		return true
 	})
 	var out []map[string]string
-	for _, group := range groups {
-		for _, keep := range group {
+	for _, g := range groups {
+		for _, keep := range g.branches {
 			skip := map[ast.Node]bool{}
-			for _, other := range group {
+			for _, other := range g.branches {
 				if other != keep {
 					skip[other] = true
 				}
+			}
+			out = append(out, localScopeSkipping(values, fn, skip))
+		}
+		if g.mayTakeNone {
+			skip := map[ast.Node]bool{}
+			for _, b := range g.branches {
+				skip[b] = true
 			}
 			out = append(out, localScopeSkipping(values, fn, skip))
 		}

@@ -47,6 +47,24 @@ func text(v any) string {
 	}
 }
 
+// csvSafe neutralises a spreadsheet formula in a CSV cell. Excel and
+// LibreOffice evaluate any cell whose first character is one of = + - @ (or a
+// leading tab/CR), so a volunteer name a lead chose — "=HYPERLINK(...)",
+// "=WEBSERVICE(...)" — runs as a formula when coordination opens the export.
+// A leading apostrophe is the tools' own "this is text" marker and disarms it.
+// Applied to every exported cell: the mayor list is public, but the work
+// columns carry text a lead types.
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
 // integer: reads a nullable INTEGER as returned by pgx. The second return
 // value tells 0 (the national team) apart from NULL (unassigned card) —
 // conflating them would reopen the shared pool to cards already taken.

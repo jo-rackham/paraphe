@@ -37,7 +37,12 @@ func bootstrap(ctx context.Context, tx pgx.Tx, bootstrapOrg int) error {
 			Get("admin_name"), password, RoleCoordination); err != nil {
 			return err
 		}
-		slog.Info("coordination account", "email", email)
+		// No address in the log line. The keyed pseudonym the security events
+		// use is not available this early — the session secret is drawn after
+		// bootstrap — and an unkeyed hash of a guessable address would protect
+		// nothing while pretending to. The operator set PARAPHE_ADMIN_EMAIL and
+		// reads the confirmation as the fact that it was seeded.
+		slog.Info("coordination account seeded")
 	}
 	// Asked WHATEVER the variables say. Seeding refreshes a password, it does
 	// not reactivate: an instance whose only coordination was switched off is
@@ -110,7 +115,8 @@ func bootstrapAdministration(ctx context.Context, tx pgx.Tx) error {
 		RoleAdministration); err != nil {
 		return err
 	}
-	slog.Info("instance administrator", "email", email)
+	// no address, like the coordination line above
+	slog.Info("instance administrator seeded")
 	return nil
 }
 
@@ -142,10 +148,11 @@ func seedAccount(ctx context.Context, tx pgx.Tx, org int,
 		return fmt.Errorf("seeding account %s (%s): %w", email, role, err)
 	}
 	if !active {
+		// the role tells coordination from administration; no address, and the
+		// operator knows which one they seeded
 		slog.Warn("the seeded account is DEACTIVATED and stays so; its password "+
 			"was refreshed but it opens nothing. Reactivate it from the "+
-			"interface, or drop the variables that seed it.",
-			"email", email, "role", role)
+			"interface, or drop the variables that seed it.", "role", role)
 	}
 	return nil
 }
