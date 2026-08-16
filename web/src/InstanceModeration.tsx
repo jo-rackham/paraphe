@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import * as API from "./api.ts";
 import {
   focusContenu,
+  holdFocusThrough,
   label,
   ORG_STATES,
   REQUEST_STATES,
-  rescueFocusAfterCommit,
 } from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
@@ -40,6 +40,9 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const decide = async (d: QueuedRequest, decision: "accepted" | "refused") => {
     if (busy !== null) return; // aria-disabled keeps the pair focusable
     setBusy(d.id);
+    // captured BEFORE the round trip: the card leaves the queue when the
+    // reload lands, not when the decision answers
+    const restoreFocus = holdFocusThrough();
     try {
       const rep = await API.decideRequest(d.id, decision, reasons[d.id] ?? "");
       if (rep.password && rep.address && rep.coordination) {
@@ -56,8 +59,10 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
       onMessage({ tone: "erreur", text: (e as Error).message });
     } finally {
       setBusy(null);
-      // the decided card unmounts with the very button that decided it
-      rescueFocusAfterCommit();
+      // the decided card unmounts with the very button that decided it —
+      // and it does so when `load()` above lands, which is why the focus is
+      // held across the whole round trip rather than rescued at its end
+      restoreFocus();
     }
   };
 

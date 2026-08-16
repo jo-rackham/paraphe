@@ -5,9 +5,9 @@ import {
   ChampsCampagne,
   campaignLabel,
   focusContenu,
+  holdFocusThrough,
   label,
   ROLES,
-  rescueFocusAfterCommit,
   useSubmitGuard,
 } from "./common.tsx";
 import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
@@ -176,7 +176,7 @@ function DemandesEquipes({
 }: {
   data: TeamData;
   onError: (e: unknown) => void;
-  onDecided: (r: NewAccess | null) => void;
+  onDecided: (r: NewAccess | null, said: string) => Promise<void>;
 }) {
   // one draft per request, seeded from what was asked
   const [drafts, setDrafts] = useState<
@@ -196,18 +196,20 @@ function DemandesEquipes({
   ) => {
     if (busy()) return;
     setDeciding(id);
+    // captured BEFORE the round trip: this card leaves the queue when the
+    // reload lands, and by then the button under the moderator's finger is
+    // gone and focus is on <body>
+    const restoreFocus = holdFocusThrough();
     try {
       const r = await API.decideTeamRequest(id, decision, {
         name: draft.name,
         departments: draft.departments,
       });
-      // the card carrying this button is about to vanish from the queue
-      rescueFocusAfterCommit();
       // an acceptance opens the lead's access, and its password is shown
       // once, in the same card every new access uses. A refusal opens
       // nothing, and the three fields come back together or not at all.
       const lead = r.lead ?? "";
-      onDecided(
+      await onDecided(
         r.password
           ? {
               email: lead,
@@ -216,7 +218,13 @@ function DemandesEquipes({
               password: r.password,
             }
           : null,
+        decision === "accepted"
+          ? `L'équipe « ${r.name ?? draft.name} » est ouverte.`
+          : // an acceptance shows the password card, which says it happened;
+            // a refusal leaves nothing on screen but one card fewer
+            `Demande refusée : « ${draft.name} ».`,
       );
+      restoreFocus();
     } catch (e) {
       onError(e);
     } finally {
@@ -285,9 +293,12 @@ function DemandesEquipes({
                 </select>
               </label>
             </p>
+            {/* `deciding !== null`, not `=== r.id`: ONE submit guard covers
+                the whole list, so while any card is in flight every other
+                button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={deciding === r.id || undefined}
+              aria-disabled={deciding !== null || undefined}
               onClick={() => decide(r.id, "accepted", draft)}
             >
               Accepter — ouvrir l'équipe
@@ -296,7 +307,7 @@ function DemandesEquipes({
             <button
               type="button"
               className="secondaire"
-              aria-disabled={deciding === r.id || undefined}
+              aria-disabled={deciding !== null || undefined}
               onClick={() => decide(r.id, "refused", draft)}
             >
               Refuser
@@ -517,8 +528,12 @@ export function GestionEquipe({
         <DemandesEquipes
           data={data}
           onError={onError}
-          onDecided={async (access) => {
+          onDecided={async (access, said) => {
             setCreated(access);
+            // through the SHELL's region, which pre-exists this screen: an
+            // acceptance leaves a password card that says what happened, a
+            // refusal leaves nothing but one card fewer
+            onMessage({ tone: "ok", text: said });
             await reload();
           }}
         />

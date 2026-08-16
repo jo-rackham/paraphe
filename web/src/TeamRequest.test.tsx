@@ -305,4 +305,103 @@ describe("the coordination's moderation queue", () => {
     await openTeamTab("lead", []);
     expect(text()).not.toContain("Demandes d'équipe");
   });
+
+  // The decided card unmounts when the RELOAD lands, not when the decision
+  // answers. A rescue fired at the decision watches a button that is still
+  // there, finds focus intact, and is done long before the unmount — so on
+  // any server slower than 60 ms, which is every server, focus falls to
+  // <body> and the next Tab restarts at the skip link.
+  const decideWithASlowReload = async (
+    label: string,
+    answer: Awaited<ReturnType<typeof API.decideTeamRequest>>,
+  ) => {
+    await openTeamTab("coordination", [PENDING]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    vi.mocked(API.decideTeamRequest).mockResolvedValue(answer);
+    // the reload the decision triggers takes 200 ms, as a round trip does
+    vi.mocked(API.team).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                accounts: [],
+                teams: [],
+                departments: ["01", "02", "03"],
+                requests: [
+                  { ...PENDING, state: answer.decision as "accepted" },
+                ],
+              }),
+            200,
+          ),
+        ),
+    );
+
+    const decide = button(label);
+    await act(async () => {
+      decide.focus();
+    });
+    await act(async () => {
+      decide.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    for (const ms of [5, 40, 80, 150, 250, 300]) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, ms));
+      });
+    }
+  };
+
+  it("keeps focus when the reload that unmounts the card is slower than the rescue", async () => {
+    await decideWithASlowReload("Accepter", {
+      id: 7,
+      decision: "accepted",
+      team: 3,
+      name: "Équipe du 01",
+      lead: "referente@exemple.fr",
+      password: "mot-de-passe-provisoire",
+    });
+    expect(text(), "the card left the pending list").not.toContain(
+      "Nom de l'équipe ouverte",
+    );
+    expect(document.activeElement?.id).toBe("contenu");
+  });
+
+  // A refusal opens no access, so it lands in no password card: with no
+  // message either, the queue simply loses a card and a moderator who cannot
+  // see the screen is told nothing at all.
+  it("says out loud that a refusal was recorded", async () => {
+    await decideWithASlowReload("Refuser", { id: 7, decision: "refused" });
+    const spoken = [...container.querySelectorAll("[role='status']")]
+      .map((n) => n.textContent ?? "")
+      .join(" ");
+    expect(spoken).toContain("refus");
+    expect(document.activeElement?.id).toBe("contenu");
+  });
+
+  // One submit guard covers the whole list, but only the card in flight
+  // wears aria-disabled: every other Accepter looks live, swallows the
+  // click, and leaves the moderator believing they accepted it.
+  it("does not leave a second decision looking live while one is in flight", async () => {
+    const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
+    await openTeamTab("coordination", [PENDING, second]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    vi.mocked(API.decideTeamRequest).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ id: 7, decision: "refused" }), 200),
+        ),
+    );
+    const [first, secondAccept] = [
+      ...container.querySelectorAll("button"),
+    ].filter((b) => b.textContent?.includes("Accepter"));
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      secondAccept.getAttribute("aria-disabled"),
+      "the other card's button must not look live while the guard would eat it",
+    ).toBe("true");
+  });
 });

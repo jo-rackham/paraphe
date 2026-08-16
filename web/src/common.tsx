@@ -285,6 +285,59 @@ export function rescueFocusAfterCommit() {
 }
 
 /**
+ * For a control that dies at the completion of an AWAITED RELOAD rather
+ * than at the click — a moderated card leaves the queue when the refetch
+ * lands, not when the decision answers.
+ *
+ * `rescueFocusAfterCommit` is the wrong tool there, at both ends. Called
+ * before the await, its two checks watch a button that is still mounted and
+ * are long done by the time the reload unmounts it — 60 ms, against a round
+ * trip. Called after, it finds focus already on `<body>` and returns,
+ * because it cannot tell "nobody was holding anything" from "the holder
+ * just died". Holding the ELEMENT tells the two apart.
+ *
+ * Call before the await, call what it returns after:
+ *
+ *	const restore = holdFocusThrough();
+ *	await decideAndReload();
+ *	restore();
+ */
+export function holdFocusThrough(): () => void {
+  const holder = document.activeElement;
+  return () => {
+    // nobody was holding anything: leave the browser's own position alone,
+    // or the skip link stops being the first Tab of the page
+    if (!holder || holder === document.body) return;
+    const rescue = () => {
+      const now = document.activeElement;
+      // focus moved on to something real in the meantime: not ours to take
+      if (now && now !== document.body) return;
+      focusContenu();
+    };
+    if (!holder.isConnected) {
+      rescue();
+      return;
+    }
+    // WATCHED, not polled. The rescue above waits 0 ms then 60 ms, which is
+    // a bet on when React commits — and it loses: the reload's setState
+    // returns before the commit, so both checks read a button still in the
+    // page and decline. An observer fires on the removal itself, whenever
+    // that is.
+    const observer = new MutationObserver(() => {
+      if (holder.isConnected) return;
+      observer.disconnect();
+      clearTimeout(giveUp);
+      rescue();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // the control may simply survive — the same handler runs on screens
+    // where nothing unmounts. Stop watching rather than keep a live
+    // observer for the rest of the session.
+    const giveUp = setTimeout(() => observer.disconnect(), 5000);
+  };
+}
+
+/**
  * The re-entry guard of a busy submit, told by a REF and not by state.
  *
  * `aria-disabled` greys the button and deliberately keeps it clickable — a
