@@ -551,6 +551,17 @@ works when the relay is down, and still bootstraps the instance.
   Refunding does both: counted on arrival like every event — which is what
   still bounds a flood whose handlers never finish — and given back once the
   attempt proved legitimate, so the bucket ends where it stood.
+  **And a bucket the refund EMPTIES is dropped, because the window is as
+  observable as the count.** Giving the count back and keeping the bucket
+  left its reset standing, and `count` only arms a window when it finds
+  none: the next caller on that key inherited the owner's, so the delay the
+  429 handed back was short by exactly the time since the owner signed in —
+  in seconds, in a `Retry-After` header, to an anonymous caller who chose
+  the address. Measured one-for-one, four minutes of gap read as four
+  minutes of difference. The shared store never had it, its `count`
+  re-arming whenever `INCR` answers 1, which a key sitting at zero does:
+  **the two stores answer the same callers, so any difference between them
+  is readable from outside**, and both now hold the same test.
   **What is refunded is what THIS ROUTE counted, not the door the caller
   came through.** Redeeming a link counts nothing per account — the token
   carries no address, so the source ceiling is its whole bound — and
