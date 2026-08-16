@@ -110,6 +110,19 @@ func (s *Server) withoutAddress(err error, email string) string {
 	// is the cheaper mistake — the other one puts a volunteer's name in a log
 	// that is kept. Which is also why it must stay a WHOLE word: a local part
 	// of `connect` would otherwise turn `connection reset` into nonsense.
+	// Below three BYTES the local part is left alone, and the limit is
+	// deliberate: a one- or two-letter word standing alone in a French
+	// sentence IS a word — `a` is the verb — and redacting it would eat the
+	// relay's answer rather than clean it. What it costs is small and worth
+	// stating: a local part that short is not redacted ON ITS OWN, and one or
+	// two characters name nobody; the whole address is still redacted by the
+	// pass above.
+	//
+	// Bytes rather than runes, and measured on the NORMALISED address, so the
+	// threshold does not move with the spelling — `é` is two bytes here
+	// whichever form arrived. Counted in runes it would sit HIGHER for
+	// accented names and stop redacting a two-letter one that is redacted
+	// today: a stricter rule for no gain.
 	local, _, ok := strings.Cut(email, "@")
 	if !ok || len(local) < 3 {
 		return text

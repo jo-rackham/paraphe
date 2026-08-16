@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // A relay answers refusals in its own spelling, and plenty of them quote the
@@ -89,6 +91,38 @@ func TestAnAccentedNameIsRedactedLikeAnyOther(t *testing.T) {
 		if strings.Contains(strings.ToLower(got), c.leaks) {
 			t.Errorf("the recipient's name survived into the log line:"+
 				"\n\tfrom: %s\n\tgot:  %s", c.answer, got)
+		}
+	}
+
+	// The short-local threshold sits AFTER the normalisation, so it does not
+	// move with the spelling: an address stored one way and quoted the other
+	// gets the same treatment, on either side of the line.
+	//
+	// Built with norm.NFD rather than typed: two literals meant to differ in
+	// normalisation are two literals an editor is free to make identical, and
+	// a test comparing a string with itself passes whatever the code does.
+	for _, address := range []string{
+		"é@exemple.fr",   // one character: below the line, left alone
+		"héo@exemple.fr", // three: above it, redacted
+	} {
+		composed, decomposed := norm.NFC.String(address), norm.NFD.String(address)
+		if composed == decomposed {
+			t.Fatalf("%q is the same in both forms, so it proves nothing", address)
+		}
+		// Not compared byte for byte: the pseudonym is derived from the
+		// address AS STORED, so the two forms carry two pseudonyms, and that
+		// is correct — a stored address has one spelling, and its pseudonym
+		// is stable for it. What must hold either way is that the address
+		// does not survive.
+		answer := "550 recipient <" + composed + "> unknown"
+		for _, stored := range []string{composed, decomposed} {
+			got := s.withoutAddress(errors.New(answer), stored)
+			if strings.Contains(got, "@exemple.fr") {
+				t.Errorf("the address survived when it was stored %s:"+
+					"\n\tfrom: %s\n\tgot:  %s",
+					map[bool]string{true: "composed", false: "decomposed"}[stored == composed],
+					answer, got)
+			}
 		}
 	}
 

@@ -47,21 +47,24 @@ const tableName = `(?:ONLY\s+)?(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*)` +
 // for a table position all look for the SAME thing.
 const marker = `(?:%|\$\?|,|;|$)`
 
-// sqlContinues: what may follow the OBJECT of a destructive statement. A
-// closed list, because the alternative is prose — `lock %d unavailable after
-// %s` is not a LOCK statement, and nothing else tells the two apart once the
-// table name has been replaced by a marker. Missing an exotic continuation
-// costs coverage of that one spelling; destructiveRef still catches it
-// whenever the table is named.
-// markerObject: the same marker, but consuming the WHOLE format verb —
-// `%S`, `%D`, `%[2]S`. The rules that only ask whether a marker is THERE can
-// stop at the `%`; the one that also asks what FOLLOWS the object cannot, or
-// it reads the verb's own letter as the continuation.
-const markerObject = `(?:%\[?\d*\]?[A-Z]?|\$\?|,|;|$)`
+// tableModifier: what PostgreSQL allows between a table keyword and the name
+// — ONLY, which suppresses inheritance. Declared once and applied at EVERY
+// position, because four rounds running found a keyword or a modifier that
+// one rule knew and its neighbour did not, and the fourth was this one:
+// tableRef read `FROM ONLY t`, unreadableTable did not, so `FROM ONLY `+t
+// named a walled table where nothing looked for a marker.
+// tablePositions: the keywords after which a table name stands. tableRef
+// reads a NAME there, unreadableTable reads a MARKER there, and both are
+// built from THIS list — the two drifting apart is what four rounds running
+// found, one square of the grid at a time.
+const tablePositions = `FROM|JOIN|INTO|USING|TABLE`
 
-const sqlContinues = `\s*(?:$|;|\(|\b(?:IN|TO|FROM|USING|WITH|CASCADE` +
-	`|RESTRICT|ADD|DROP|RENAME|SET|RESET|OWNER|ENABLE|DISABLE|ALTER` +
-	`|VALIDATE|ATTACH|DETACH|INHERIT|NO|REPLICA|CLUSTER|OPTIONS)\b)`
+const tableModifier = `(?:ONLY\s+)?`
+
+// markerObject: the same marker, consuming the WHOLE format verb — `%S`,
+// `%D`, `%[2]S`. The destructive rule names its object rather than merely
+// noticing one, so it cannot stop at the `%`.
+const markerObject = `(?:%\[?\d*\]?[A-Z]?|\$\?|,|;|$)`
 
 // destructiveVerbs: the commands no predicate can bound, written ONCE.
 //
@@ -135,17 +138,17 @@ var (
 	// nobody's table. Only a comma reached through comma-separated table
 	// references counts.
 	unreadableTable = regexp.MustCompile(
-		`\b(?:FROM|JOIN|INTO|USING)\s*` + marker +
+		`\b(?:FROM|JOIN|INTO|USING)\s*` + tableModifier + marker +
 			// TABLE takes the modifiers PostgreSQL allows between the keyword
 			// and the name: `TABLE ONLY t` is the shorthand on one partition.
-			`|\bTABLE\s*(?:ONLY\s+)?` + marker +
+			`|\bTABLE\s*` + tableModifier + marker +
 			// UPDATE is listed apart, and without the end-of-text case: the
 			// row locking this application allocates cards with ends its
 			// statement on `FOR UPDATE`, which is a locking clause and not a
 			// table position. Only an operand it could not read counts.
-			`|\bUPDATE\s*(?:%|\$\?|,)` +
+			`|\bUPDATE\s*` + tableModifier + `(?:%|\$\?|,)` +
 			`|\b(?:FROM|USING)\s+` + tableName +
-			`(?:\s*,\s*` + tableName + `)*\s*,\s*(?:ONLY\s+)?` + marker)
+			`(?:\s*,\s*` + tableName + `)*\s*,\s*` + tableModifier + marker)
 	// The destructive verbs, with an operand that cannot be read.
 	//
 	// destructiveRef catches every one of these when the table is NAMED,
@@ -169,7 +172,7 @@ var (
 		// in a guard that BLOCKS that costs what a hole costs.
 		`(?:^|;)\s*(?:` + destructiveVerbs + `)\s+` +
 			`(?:TABLE\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(?:ONLY\s+)?` +
-			markerObject + sqlContinues +
+			markerObject +
 			`|(?:^|;)\s*(?:CREATE|DROP|ALTER)\s+` +
 			`(?:POLICY|TRIGGER|RULE|INDEX|CONSTRAINT)\b` +
 			`[^;]*?\bON\s+(?:ONLY\s+)?(?:%|\$\?)` +
@@ -469,7 +472,7 @@ func tableRef(table string) *regexp.Regexp {
 		// walked past this canary and every other one — for EVERY walled
 		// table, not just one. A shorthand nobody writes by hand is still a
 		// shorthand PostgreSQL executes.
-		`((?:FROM|JOIN|INTO|USING|UPDATE|TABLE)\s+|,\s*)(?:ONLY\s+)?` +
+		`((?:` + tablePositions + `|UPDATE)\s+|,\s*)` + tableModifier +
 			`(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
@@ -483,8 +486,23 @@ func tableRef(table string) *regexp.Regexp {
 // list ENDS at a clause keyword — `FROM t ORDER BY a, %s` names a dynamic
 // COLUMN, which is nobody's table — and RE2 cannot say "up to the first of
 // these words".
-func unreadablePosition(sql string) (string, bool) {
-	for _, rule := range []*regexp.Regexp{unreadableTable, destructiveUnreadable} {
+func unreadablePosition(sql string, executed bool) (string, bool) {
+	rules := []*regexp.Regexp{unreadableTable}
+	// The destructive rule ONLY on a string that is run.
+	//
+	// Telling `"TRUNCATE "+t` from `lock %d in progress` by the words around
+	// them cannot be done: the first shape of this rule listed what may
+	// follow the object, and that list is the common English prepositions —
+	// five plausible messages were refused as statements, and a guard that
+	// refuses prose is one the next author writes around. What separates
+	// them is not their text, it is whether anything EXECUTES them.
+	//
+	// unreadableTable needs no such gate: its keywords are table positions,
+	// and `sqlVerb` already drops a sentence that carries a FROM and no verb.
+	if executed {
+		rules = append(rules, destructiveUnreadable)
+	}
+	for _, rule := range rules {
 		if loc := rule.FindStringIndex(sql); loc != nil {
 			return strings.TrimSpace(sql[loc[0]:loc[1]]), true
 		}
@@ -863,7 +881,14 @@ func localScopeSkipping(
 	return scoped
 }
 
-type statement struct{ File, Func, SQL string }
+type statement struct {
+	File, Func, SQL string
+	// Executed: this string reached a call that RUNS it. The canary reads
+	// every readable string on purpose — a query hidden in a helper is still
+	// a query — so it also reads error messages, and `LOCK`, `DROP`, `COPY`
+	// and `ALTER` are ordinary words as well as statements.
+	Executed bool
+}
 
 // sqlStatements walks the package and yields every SQL string reaching a
 // call, with the file and enclosing function it is written in.
@@ -908,7 +933,8 @@ func sqlStatements(t *testing.T) []statement {
 							continue
 						}
 						seen[key] = true
-						out = append(out, statement{name, fn.Name.Name, sql})
+						out = append(out, statement{name, fn.Name.Name, sql,
+							queryCalls[calledName(call)]})
 					}
 					return true
 				})
@@ -1160,7 +1186,7 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		// a name. Refused rather than passed over: an unresolved reference
 		// used to mean the statement carried no walled table, which is how
 		// three of the four criticals of the eighth round read as compliant.
-		if seen, found := unreadablePosition(st.SQL); found {
+		if seen, found := unreadablePosition(st.SQL, st.Executed); found {
 			if _, declared := readsNoWalledTable[print]; declared {
 				used[print] = true
 			} else {

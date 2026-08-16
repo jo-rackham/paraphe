@@ -572,28 +572,58 @@ func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
 			// variable of the type is not enough: ReadOrg and readAccount
 			// declare one and fill it from the database, where the length is
 			// whatever was stored — bounded on the way IN, which is here.
+			//
+			// EVERY way of naming the type counts. Reading `var d req` alone
+			// let `d := req{}` and `d := new(req)` — the more idiomatic
+			// spellings — walk past a canary written to catch exactly the
+			// route that forgot. A guard that knows one syntax of three
+			// guards the syntax its author happened to use.
 			declares, reads := false, false
+			mentions := func(e ast.Expr) {
+				switch t := e.(type) {
+				case *ast.Ident: // var d req
+					if carriesName[t.Name] {
+						declares = true
+					}
+				case *ast.CompositeLit: // d := req{}
+					if id, ok := t.Type.(*ast.Ident); ok && carriesName[id.Name] {
+						declares = true
+					}
+				case *ast.CallExpr: // d := new(req)
+					if id, ok := t.Fun.(*ast.Ident); ok && id.Name == "new" &&
+						len(t.Args) == 1 {
+						if arg, ok := t.Args[0].(*ast.Ident); ok && carriesName[arg.Name] {
+							declares = true
+						}
+					}
+				}
+			}
 			ast.Inspect(fn, func(n ast.Node) bool {
-				if call, ok := n.(*ast.CallExpr); ok {
-					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "readBody" {
+				switch node := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := node.Fun.(*ast.Ident); ok && id.Name == "readBody" {
 						reads = true
 					}
-				}
-				decl, ok := n.(*ast.DeclStmt)
-				if !ok {
-					return true
-				}
-				gen, ok := decl.Decl.(*ast.GenDecl)
-				if !ok {
-					return true
-				}
-				for _, sp := range gen.Specs {
-					vs, ok := sp.(*ast.ValueSpec)
-					if !ok {
-						continue
+				case *ast.AssignStmt:
+					for _, rhs := range node.Rhs {
+						mentions(rhs)
 					}
-					if id, ok := vs.Type.(*ast.Ident); ok && carriesName[id.Name] {
-						declares = true
+				case *ast.DeclStmt:
+					gen, ok := node.Decl.(*ast.GenDecl)
+					if !ok {
+						return true
+					}
+					for _, sp := range gen.Specs {
+						vs, ok := sp.(*ast.ValueSpec)
+						if !ok {
+							continue
+						}
+						if vs.Type != nil {
+							mentions(vs.Type)
+						}
+						for _, v := range vs.Values {
+							mentions(v)
+						}
 					}
 				}
 				return true

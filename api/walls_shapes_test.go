@@ -170,7 +170,7 @@ func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
 		}
 		// …and the same statement with the name taken out
 		for _, unreadable := range []string{verb + " %S", verb + " $?"} {
-			if _, found := unreadablePosition(unreadable); !found {
+			if _, found := unreadablePosition(unreadable, true); !found {
 				t.Errorf("%q names a table nobody can read and no rule says "+
 					"so — the statement reads as touching no walled table:"+
 					"\n\t%s", verb, unreadable)
@@ -186,7 +186,7 @@ func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
 		`DROP POLICY P ON $?`,
 		`CREATE TRIGGER T AFTER DELETE ON %S FOR EACH ROW EXECUTE F$SUB0`,
 	} {
-		if _, found := unreadablePosition(unreadable); !found {
+		if _, found := unreadablePosition(unreadable, true); !found {
 			t.Errorf("the table this governs cannot be read and no rule says "+
 				"so:\n\t%s", unreadable)
 		}
@@ -202,9 +202,67 @@ func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
 		`TAKING LOCK %D: %W`,
 		`COPY OF THE LIST REFUSED AFTER %D ROWS`,
 	} {
-		if seen, found := unreadablePosition(message); found {
+		if seen, found := unreadablePosition(message, false); found {
 			t.Errorf("an error message was refused as a statement, on %q:"+
 				"\n\t%s", seen, message)
+		}
+	}
+}
+
+// Every place a table can stand, read by BOTH rules.
+//
+// tableRef looks for a NAME there; unreadablePosition looks for a MARKER.
+// Four rounds running found a place one of them knew and the other did not —
+// the TABLE shorthand, the comma, the destructive verbs, and the ONLY
+// modifier — and each time the fix taught the one rule and each time the next
+// round found the next square of the same grid.
+//
+// So the grid is walked here. tablePositions and tableModifier are the lists
+// both rules are built from; adding a keyword or a modifier to one of them
+// without teaching the other goes red on this test, in the round that adds
+// it.
+func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
+	modifiers := []string{"", "ONLY "}
+	for _, keyword := range strings.Split(tablePositions, "|") {
+		for _, modifier := range modifiers {
+			named := "SELECT X " + keyword + " " + modifier + "ACCOUNTS"
+			if !tableRef("ACCOUNTS").MatchString(named) {
+				t.Errorf("tableRef does not read a table after %q%s, so a "+
+					"walled table written there is invisible to every rule "+
+					"built on it:\n\t%s", keyword, " "+modifier, named)
+			}
+			unreadable := "SELECT X " + keyword + " " + modifier + "%S"
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("a marker after %q%s is a table nobody can read and "+
+					"no rule says so:\n\t%s", keyword, " "+modifier, unreadable)
+			}
+		}
+	}
+	// UPDATE stands apart in unreadableTable — `FOR UPDATE` ends a statement
+	// and is a locking clause, not a table position — so it is walked here
+	// rather than left out of the grid.
+	for _, modifier := range modifiers {
+		named := "UPDATE " + modifier + "ACCOUNTS SET X=1"
+		if !tableRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("tableRef does not read the table of %q", named)
+		}
+		unreadable := "UPDATE " + modifier + "%S SET X=1"
+		if _, found := unreadablePosition(unreadable, true); !found {
+			t.Errorf("a marker after UPDATE %sis a table nobody can read and "+
+				"no rule says so:\n\t%s", modifier, unreadable)
+		}
+	}
+	// …and the comma position, which tableRef has read since the day a second
+	// table hid behind one.
+	for _, modifier := range modifiers {
+		named := "SELECT X FROM TEAMS G, " + modifier + "ACCOUNTS C"
+		if !tableRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("tableRef does not read the table of %q", named)
+		}
+		unreadable := "SELECT X FROM TEAMS G, " + modifier + "%S"
+		if _, found := unreadablePosition(unreadable, true); !found {
+			t.Errorf("a marker after a comma %sis a table nobody can read "+
+				"and no rule says so:\n\t%s", modifier, unreadable)
 		}
 	}
 }

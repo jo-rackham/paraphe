@@ -275,11 +275,21 @@ One instance can host several campaigns, one per subdomain.
   both rules are built from it, with
   `TestEveryDestructiveVerbHasAnUnreadableForm` walking the list and
   demanding both forms of each. **A marker is something format strings are
-  full of, where a table NAME is not**: the destructive rule therefore
-  anchors its verb at the start of a statement and requires SQL after the
-  object, or `lock %d unavailable after %s` is refused as a LOCK statement.
-  `readsNoWalledTable` is still EMPTY, and keeping it so is the measure of
-  whether these rules judge statements or prose.
+  full of, where a table NAME is not**, so the destructive rule runs ONLY on
+  a string that reaches a call which executes it. Telling `"TRUNCATE "+t`
+  from `lock %d in progress` by the words around them cannot be done — the
+  first attempt listed what may follow the object, and that list is the
+  common English prepositions: five plausible messages were refused as
+  statements. What separates them is not their text, it is whether anything
+  runs them. `readsNoWalledTable` is still EMPTY, and keeping it so is the
+  measure of whether these rules judge statements or prose.
+  **A FOURTH round found the fourth square of the same grid** — the `ONLY`
+  modifier, which `tableRef` read and `unreadableTable` did not. So the grid
+  itself is now the guard: `tablePositions` and `tableModifier` are declared
+  once, both rules are built from them, and
+  `TestEveryTablePositionIsReadByBothRules` walks keyword × modifier
+  demanding that one read a NAME there and the other a MARKER. Teaching one
+  rule a position without the other goes red in the round that does it.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
