@@ -97,6 +97,25 @@ const click = (label: string) =>
     button(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
+/**
+ * Ticks the « J'ai vérifié cette adresse » box of every pending card.
+ *
+ * Approving sends a session link to an address a stranger typed, so the
+ * accept button stays inert until the moderator confirms having read it.
+ * The tests take the same path a person does.
+ */
+async function confirmAddresses() {
+  for (const l of container.querySelectorAll("label")) {
+    if (!l.textContent?.includes("J'ai vérifié")) continue;
+    const box = l.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (box && !box.checked) {
+      await act(async () => {
+        box.click();
+      });
+    }
+  }
+}
+
 /** A labelled field, found the way a person reads the form. */
 function field<T extends HTMLElement>(labelStart: string): T {
   const l = [...container.querySelectorAll("label")].find((el) =>
@@ -263,6 +282,7 @@ describe("the coordination's moderation queue", () => {
     // not the campaign's map
     await fill("Nom de l'équipe ouverte", "Équipe Nord-Est");
     await select("Départements accordés", ["01", "02"]);
+    await confirmAddresses();
     // the queue comes back empty: the decided card unmounts under the button
     vi.mocked(API.team).mockResolvedValue({
       accounts: [],
@@ -318,6 +338,7 @@ describe("the coordination's moderation queue", () => {
   ) => {
     await openTeamTab("coordination", [PENDING]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     vi.mocked(API.decideTeamRequest).mockResolvedValue(answer);
     // the reload the decision triggers takes 200 ms, as a round trip does
@@ -387,6 +408,7 @@ describe("the coordination's moderation queue", () => {
     const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
     await openTeamTab("coordination", [PENDING, second]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     vi.mocked(API.decideTeamRequest).mockImplementation(
       () =>
@@ -404,5 +426,134 @@ describe("the coordination's moderation queue", () => {
       secondAccept.getAttribute("aria-disabled"),
       "the other card's button must not look live while the guard would eat it",
     ).toBe("true");
+  });
+
+  // The lead's password is returned ONCE and stored nowhere in the clear. The
+  // reload that follows the acceptance can fail, and the queue is then never
+  // refreshed: the password card lands beside the very request it answers.
+  // A moderator reading that contradiction either presses Accepter again —
+  // 409, « déjà traitée », so they conclude it never worked — or dismisses
+  // the password as stale. Either way the team has a lead who cannot sign in.
+  it("leaves no pending card beside the password when the reload fails", async () => {
+    await openTeamTab("coordination", [PENDING]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
+
+    vi.mocked(API.decideTeamRequest).mockResolvedValue({
+      id: 7,
+      decision: "accepted",
+      team: 3,
+      name: "Équipe du 01",
+      lead: "referente@exemple.fr",
+      password: "mot-de-passe-provisoire",
+    });
+    vi.mocked(API.team).mockRejectedValue(new Error("réseau coupé"));
+
+    const accept = button("Accepter");
+    // the moderator's focus is ON the button they press: that is the whole
+    // case, and holdFocusThrough rescues nobody who was holding nothing
+    await act(async () => {
+      accept.focus();
+    });
+    await act(async () => {
+      accept.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(text(), "the one-time password is on screen").toContain(
+      "mot-de-passe-provisoire",
+    );
+    expect(
+      text(),
+      "the decided card must not still be waiting beside its own password",
+    ).not.toContain("Nom de l'équipe ouverte");
+    // and the control that died with the card did not take the focus with it
+    expect(document.activeElement?.id).toBe("contenu");
+  });
+
+  // Accepting SENDS: an email signed by the campaign leaves for an address a
+  // stranger typed, carrying a link that opens the lead's session. The button
+  // stays inert until the coordination has said, on that card, that it read
+  // the address. The mirror screen is guarded the same way.
+  it("is inert until the coordination confirms the address", async () => {
+    await openTeamTab("coordination", [PENDING]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    const accept = button("Accepter");
+    expect(
+      accept.getAttribute("aria-disabled"),
+      "an unconfirmed accept must not look live",
+    ).toBe("true");
+    await act(async () => {
+      accept.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(
+      vi.mocked(API.decideTeamRequest).mock.calls.length,
+      "the click was swallowed, and nothing was sent",
+    ).toBe(0);
+
+    await confirmAddresses();
+    expect(button("Accepter").getAttribute("aria-disabled")).toBeNull();
+  });
+
+  // The lead's password is shown once and stored nowhere in the clear. It
+  // lived in a SINGLE slot written by two flows — accepting a request, and
+  // opening an access directly — each behind its own re-entry guard, so
+  // neither saw the other. Accepting a second request before noting the
+  // first password replaced it, and that is simply how a queue is worked
+  // through. Appending is what makes losing one impossible.
+  it("accepting a second request does not wipe the first password", async () => {
+    const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
+    await openTeamTab("coordination", [PENDING, second]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
+
+    // a REAL server: a decided request comes back decided
+    const settled = new Set<number>();
+    vi.mocked(API.team).mockImplementation(async () => ({
+      accounts: [],
+      teams: [],
+      departments: ["01", "02", "03"],
+      requests: [PENDING, second].map((r) =>
+        settled.has(r.id) ? { ...r, state: "accepted" as const } : r,
+      ),
+    }));
+    vi.mocked(API.decideTeamRequest).mockImplementation((async (id: number) => {
+      settled.add(id);
+      return {
+        id,
+        decision: "accepted",
+        team: id,
+        name: id === 7 ? "Équipe du 01" : "Équipe du 02",
+        lead: id === 7 ? "premiere@exemple.fr" : "seconde@exemple.fr",
+        password: id === 7 ? "MOT-DE-PASSE-UN" : "MOT-DE-PASSE-DEUX",
+      };
+    }) as unknown as typeof API.decideTeamRequest);
+
+    await act(async () => {
+      button("Accepter").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await until(() => text().includes("MOT-DE-PASSE-UN"), "the first password");
+
+    // …and now the second, WITHOUT pressing « j'ai noté » on the first
+    await act(async () => {
+      button("Accepter").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await until(
+      () => text().includes("MOT-DE-PASSE-DEUX"),
+      "the second password",
+    );
+
+    expect(
+      text(),
+      "the first password is shown once and nowhere else: it must survive",
+    ).toContain("MOT-DE-PASSE-UN");
   });
 });

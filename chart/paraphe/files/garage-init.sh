@@ -102,6 +102,7 @@ api_json() {
 # speaks the admin API.
 echo "waiting for $expected node(s) to answer…"
 attempt=0
+repaired=0
 while : ; do
   answering=""
   for url in $GARAGE_PEERS; do
@@ -115,6 +116,36 @@ while : ; do
   [ "$(echo "$answering" | wc -w)" -ge "$expected" ] && break
   attempt=$((attempt + 1))
   if [ "$attempt" -gt 60 ]; then
+    if [ "$repaired" = 0 ]; then
+      # A pod restart hands every node a fresh IP while its peers keep
+      # redialling the addresses they PERSISTED: each node knows the
+      # others' IDs, reaches none of them, quorum never returns, and this
+      # wait times out — the state a restarted cluster wakes up in. The
+      # repair is the introduction done backwards: ask an answering node
+      # which IDs it knows WITHOUT an address, and offer every peer DNS
+      # name for each of them. The RPC handshake verifies the ID, so a
+      # wrong pairing fails clean and the right one sticks; gossip then
+      # re-propagates the fresh addresses to everyone.
+      echo "stale peer addresses suspected: re-introducing by DNS…"
+      for url in $GARAGE_PEERS; do
+        lost=$(peer "$url" /v2/GetClusterStatus 2>/dev/null \
+          | jq -r '.nodes[] | select(.addr == null) | .id' 2>/dev/null || true)
+        [ -n "$lost" ] || continue
+        for id in $lost; do
+          for target in $GARAGE_PEERS; do
+            host=$(echo "$target" | sed -e 's|^http://||' -e 's|:[0-9]*$|:3901|')
+            curl -sS -X POST -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$url/v2/ConnectClusterNodes" -d "[\"$id@$host\"]" \
+              >/dev/null 2>&1 || true
+          done
+        done
+        break
+      done
+      repaired=1
+      attempt=0
+      continue
+    fi
     echo "only $(echo "$answering" | wc -w) of $expected nodes answered after" \
       "two minutes. The cluster must NOT be laid out on a subset: the" \
       "replication factor would never reach its quorum, and every write" \

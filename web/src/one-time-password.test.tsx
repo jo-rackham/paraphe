@@ -131,6 +131,17 @@ describe("a one-time password survives a double press", () => {
     await act(async () => {
       root.render(<Moderation onMessage={() => {}} />);
     });
+    // approving SENDS a session link to an address a stranger typed: the
+    // button stays inert until the moderator confirms having read it
+    for (const l of host.querySelectorAll("label")) {
+      if (!l.textContent?.includes("J'ai vérifié")) continue;
+      const box = l.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      if (box && !box.checked) {
+        await act(async () => {
+          box.click();
+        });
+      }
+    }
     const approve = button("Ouvrir");
     if (!approve) throw new Error(`no approve button on screen: ${text()}`);
     await act(async () => {

@@ -83,8 +83,17 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(d.Name)
-	if name == "" {
+	// read like every other name a person will read: the volunteers of this
+	// campaign see it on their own screen, and the public forms are checked
+	// this way — one door left unchecked is how the class comes back
+	if !visible(name) {
 		errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
+		return
+	}
+	if !legible(name) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de l'équipe ne doit contenir ni retour à la ligne ni "+
+				"caractère invisible.")
 		return
 	}
 	// the column is btree-indexed (teams_org_name): past ~2 690 bytes of
@@ -137,8 +146,15 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 	me := accountOf(r)
 	email := normalizeEmail(d.Email)
 	name := strings.TrimSpace(d.Name)
-	if email == "" || !storableEmail(email) || name == "" {
+	if email == "" || !storableEmail(email) || !visible(name) {
 		errorJSON(w, http.StatusBadRequest, "Nom et adresse email sont requis.")
+		return
+	}
+	// the name goes on the access list every lead and coordinator reads
+	if !legible(name) || !legible(email) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom et l'adresse ne doivent contenir ni retour à la ligne ni "+
+				"caractère invisible.")
 		return
 	}
 	// email is the primary key, so it is btree-indexed: past ~2 690 bytes

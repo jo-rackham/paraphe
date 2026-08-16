@@ -10,7 +10,33 @@ import {
   ROLES,
   useSubmitGuard,
 } from "./common.tsx";
-import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
+import type {
+  Me,
+  Message,
+  ServerConfig,
+  TeamData,
+  TeamRequest,
+} from "./types.ts";
+
+// What the live region says when an access opens. It names the ADDRESS as
+// well as the person: two volunteers can share a name, and a sentence
+// identical to the one already in the region is never read out again.
+function creation(c: NewAccess): string {
+  return (
+    `Un accès vient d'être créé pour ${c.name} (${c.email}). ` +
+    (c.invitation_sent ? `Une invitation est partie à ${c.email}. ` : "") +
+    // Said here too, and not only on the card: this announcement is what
+    // somebody who cannot see the screen acts on, and an invitation that did
+    // not leave changes what they must do next.
+    (c.invitation_error ? `${c.invitation_error} ` : "") +
+    "Le mot de passe provisoire est affiché à l'écran, à transmettre de " +
+    "vive voix."
+  );
+}
+
+// What a tick confirms: this row AND this address. Either changing is a new
+// confirmation to make.
+const seal = (r: TeamRequest) => `${r.id}:${r.requester_email}`;
 
 /** An access just opened, whose password is shown once and never again. */
 interface NewAccess {
@@ -181,13 +207,26 @@ function DemandesEquipes({
 }: {
   data: TeamData;
   onError: (e: unknown) => void;
-  onDecided: (r: NewAccess | null, said: string) => Promise<void>;
+  onDecided: (
+    decided: { id: number; state: "accepted" | "refused" },
+    r: NewAccess | null,
+    said: string,
+  ) => Promise<void>;
 }) {
   // one draft per request, seeded from what was asked
   const [drafts, setDrafts] = useState<
     Record<number, { name: string; departments: string[] }>
   >({});
   const [deciding, setDeciding] = useState<number | null>(null);
+  // Ticked per card, and only the ACCEPT path reads it: accepting sends a
+  // session link to an address a stranger typed.
+  //
+  // Keyed by the id AND the address, not by the id alone. What the
+  // coordination confirmed is an ADDRESS; a key naming only the row would
+  // carry the tick over to a different address the day one is edited, or
+  // share it between two rows that came back with the same identity. The
+  // whole point of the box is that the thing confirmed is the thing sent to.
+  const [verified, setVerified] = useState<Record<string, boolean>>({});
   const [busy, done] = useSubmitGuard();
 
   if (data.requests.length === 0) return null;
@@ -198,7 +237,15 @@ function DemandesEquipes({
     id: number,
     decision: "accepted" | "refused",
     draft: { name: string; departments: string[] },
+    seal: string,
   ) => {
+    // BEFORE the submit guard, which TAKES it as a side effect: refusing
+    // after it would leave the guard held by a click that did nothing, and
+    // every later decision in the queue would be swallowed for good.
+    //
+    // What the greyed button shows, enforced: aria-disabled leaves a control
+    // clickable on purpose, so the refusal has to live in the handler too.
+    if (decision === "accepted" && !verified[seal]) return;
     if (busy()) return;
     setDeciding(id);
     // captured BEFORE the round trip: this card leaves the queue when the
@@ -215,6 +262,7 @@ function DemandesEquipes({
       // nothing, and the three fields come back together or not at all.
       const lead = r.lead ?? "";
       await onDecided(
+        { id, state: decision },
         r.password
           ? {
               email: lead,
@@ -229,12 +277,15 @@ function DemandesEquipes({
             // a refusal leaves nothing on screen but one card fewer
             `Demande refusée : « ${draft.name} ».`,
       );
-      restoreFocus();
     } catch (e) {
       onError(e);
     } finally {
       done();
       setDeciding(null);
+      // in the `finally`, not after the await: the card leaves the pending
+      // list as soon as the decision answers, so a reload that THROWS still
+      // unmounts the button under the moderator's finger
+      restoreFocus();
     }
   };
 
@@ -298,13 +349,41 @@ function DemandesEquipes({
                 </select>
               </label>
             </p>
+            {/* Accepting SENDS: an email signed by the campaign leaves for
+                an address a stranger typed, carrying a link that opens the
+                lead's session. The address is on the card, but a queue is
+                read fast — this puts it back under the eye at the moment of
+                the decision. A refusal sends nothing and needs none of it. */}
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={verified[seal(r)] ?? false}
+                  onChange={(e) =>
+                    setVerified({ ...verified, [seal(r)]: e.target.checked })
+                  }
+                />{" "}
+                {/* named, and pointed at by the button below: reached by
+                    « next button » rather than by Tab, an inert control says
+                    only « indisponible » and nothing ties it to what would
+                    make it live again */}
+                <span id={`confirmation-${r.id}`}>
+                  J'ai vérifié que <strong>{r.requester_email}</strong> est bien
+                  l'adresse de la personne qui demande : l'ouverture lui envoie
+                  un lien qui ouvre sa session de référent.
+                </span>
+              </label>
+            </p>
             {/* `deciding !== null`, not `=== r.id`: ONE submit guard covers
                 the whole list, so while any card is in flight every other
                 button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={deciding !== null || undefined}
-              onClick={() => decide(r.id, "accepted", draft)}
+              aria-disabled={
+                deciding !== null || !verified[seal(r)] || undefined
+              }
+              aria-describedby={`confirmation-${r.id}`}
+              onClick={() => decide(r.id, "accepted", draft, seal(r))}
             >
               Accepter — ouvrir l'équipe
               <span className="sr-only"> {r.name}</span>
@@ -313,7 +392,7 @@ function DemandesEquipes({
               type="button"
               className="secondaire"
               aria-disabled={deciding !== null || undefined}
-              onClick={() => decide(r.id, "refused", draft)}
+              onClick={() => decide(r.id, "refused", draft, seal(r))}
             >
               Refuser
               <span className="sr-only"> {r.name}</span>
@@ -363,7 +442,19 @@ export function GestionEquipe({
   onMessage: (m: Message) => void;
 }) {
   const [data, setData] = useState<TeamData | null>(null);
-  const [created, setCreated] = useState<NewAccess | null>(null);
+  // A LIST, and appended to. A single slot is a slot the next password
+  // overwrites, and two flows mint one here: opening an access directly, and
+  // accepting a team request — each with its own re-entry guard, so neither
+  // sees the other. It did not even need a race: opening a second access
+  // while the first password was still on screen wiped it. An append cannot
+  // lose one, and a guard read at the top of a handler cannot say the same.
+  const [created, setCreated] = useState<NewAccess[]>([]);
+  // The announcement is an EVENT, written only when a password is APPENDED.
+  // Derived from the list instead, it moved every time a card was dismissed:
+  // noting the newest made the region announce the creation of the access
+  // before it — a creation that did not happen, and a wrong password to
+  // attribute. The count is state, not an event, so it stays OUT of here.
+  const [announced, setAnnounced] = useState("");
   const [draft, setDraft] = useState({
     email: "",
     name: "",
@@ -406,7 +497,8 @@ export function GestionEquipe({
         team_id:
           coordination && draft.team_id ? Number(draft.team_id) : undefined,
       });
-      setCreated(r);
+      setCreated((shown) => [...shown, r]);
+      setAnnounced(creation(r));
       setDraft({ email: "", name: "", role: "volunteer", team_id: "" });
       await reload();
     } catch (err) {
@@ -435,35 +527,33 @@ export function GestionEquipe({
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {created
-          ? `Un accès vient d'être créé pour ${created.name}. ` +
-            (created.invitation_sent
-              ? `Une invitation est partie à ${created.email}. `
-              : "") +
-            // Said here too, and not only on the card: this announcement is
-            // what somebody who cannot see the screen acts on, and an
-            // invitation that did not leave changes what they must do next.
-            (created.invitation_error ? `${created.invitation_error} ` : "") +
-            "Le mot de passe provisoire est affiché à l'écran, à " +
-            "transmettre de vive voix."
-          : ""}
+        {announced}
       </span>
-      {created && (
-        <div className="carte alerte">
+      {/* how many wait: ordinary text, in the document for everyone, and
+          carrying NO live role — it is a state, and a state that moved
+          inside the region above made every dismissal re-read a creation */}
+      {created.length > 1 && (
+        <p className="gris">
+          {created.length} mots de passe sont affichés et n'ont pas encore été
+          notés.
+        </p>
+      )}
+      {created.map((c) => (
+        <div className="carte alerte" key={c.email}>
           <p>
             <strong>
-              Accès créé pour {created.name} ({created.email}).
+              Accès créé pour {c.name} ({c.email}).
             </strong>
           </p>
-          {created.invitation_sent && (
+          {c.invitation_sent && (
             <p>
               Une invitation vient de partir à cette adresse : le lien qu'elle
               contient ouvre l'accès sans mot de passe.
             </p>
           )}
-          {created.invitation_error && (
+          {c.invitation_error && (
             <p>
-              <strong>{created.invitation_error}</strong>
+              <strong>{c.invitation_error}</strong>
             </p>
           )}
           {/* The password stays on screen whatever the invitation did: a
@@ -473,20 +563,24 @@ export function GestionEquipe({
             Mot de passe provisoire — <strong>affiché une seule fois</strong>, à
             transmettre de vive voix :
           </p>
-          <p className="grand-tel">{created.password}</p>
+          <p className="grand-tel">{c.password}</p>
           <button
             type="button"
             className="lien"
             onClick={() => {
               // this button unmounts with its card: hand focus back first
               focusContenu();
-              setCreated(null);
+              setCreated((shown) => shown.filter((x) => x !== c));
             }}
           >
             j'ai noté
+            {/* several of these stand at once: without the address, a
+                screen reader enumerates N buttons of one name and none of
+                them says which card it closes */}
+            <span className="sr-only"> {c.email}</span>
           </button>
         </div>
-      )}
+      ))}
 
       <div className="carte">
         <h2 style={{ marginTop: 0 }}>Ouvrir un accès</h2>
@@ -564,8 +658,27 @@ export function GestionEquipe({
         <DemandesEquipes
           data={data}
           onError={onError}
-          onDecided={async (access, said) => {
-            setCreated(access);
+          onDecided={async (decided, access, said) => {
+            // The server has answered: the card leaves the pending list HERE,
+            // not when the reload lands. A reload that fails — a blip, a 5xx —
+            // would otherwise leave the one-time password beside the very
+            // request it answers, and a moderator discards a password that
+            // contradicts the screen. It is shown once and never again.
+            setData(
+              (d) =>
+                d && {
+                  ...d,
+                  requests: d.requests.map((r) =>
+                    r.id === decided.id ? { ...r, state: decided.state } : r,
+                  ),
+                },
+            );
+            // appended, never assigned: a moderator accepting a second
+            // request before noting the first password must not lose it
+            if (access) {
+              setCreated((shown) => [...shown, access]);
+              setAnnounced(creation(access));
+            }
             // through the SHELL's region, which pre-exists this screen: an
             // acceptance leaves a password card that says what happened, a
             // refusal leaves nothing but one card fewer

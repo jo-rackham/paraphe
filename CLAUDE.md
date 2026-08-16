@@ -401,11 +401,37 @@ is the campaign's coordination that decides.
   campaign's team names appear in no public route. The hosting form may
   distinguish them — a slug is public by construction, every subdomain
   answers.
-- **A public form's names go through `legible`**: no control character, no
-  format character. A right-to-left override reverses what a moderator
-  reads without touching a byte of what is stored, so the row they believe
-  they are accepting is not the one they accept. Free text is exempt — a
-  message is allowed its line breaks.
+- **A public form's names go through `legible` and `visible`**, which ask two
+  different questions. `legible` refuses what REORDERS or BREAKS what a
+  moderator reads — control characters, the bidi embeddings and overrides,
+  U+2028/U+2029, a BOM — so the row they believe they are accepting is the
+  one they accept. It does NOT refuse `Cf` wholesale: the zero-width
+  non-joiner is orthographic in Persian, the joiner builds Devanagari
+  conjuncts and every composed emoji, and the directional marks hold a Latin
+  fragment inside an Arabic name. `visible` then requires at least one
+  graphic non-space rune, because `TrimSpace` does not trim zero-width runes
+  and a name of nothing but those reached the queue as a blank row. Both are
+  POSITIVE or bounded on purpose — the list of runes that render blank has no
+  end, and U+3164 and U+2800 still pass. Free text is exempt from both: a
+  message is allowed its line breaks. An address goes through `storableEmail`
+  as well, the same reader the team form uses.
+- **The public answer carries no identity.** `team_requests.id` is one
+  sequence for the whole table, hence for every campaign: returned to an
+  anonymous visitor, the gap between two of them counts what the neighbours
+  received, which is a number of the neighbour's.
+- **A decided card leaves the queue when the DECISION answers, not when the
+  reload lands.** The one-time password is shown once and stored nowhere in
+  the clear; a reload that fails left it beside the very request it answers,
+  and a moderator reading that contradiction either presses again (409, so
+  they conclude it never worked) or discards the credential. Both moderation
+  screens apply the decision to local state before awaiting the refetch.
+- **A one-time password is held in a LIST and appended to, never assigned.**
+  Both moderation screens have two flows that mint one — deciding a request,
+  and creating outright — each behind its own re-entry guard, so neither sees
+  the other. It took no race at all: deciding a second request before noting
+  the first password replaced it, which is how a queue gets worked through. A
+  guard read at the top of a handler cannot fix that, because the write comes
+  after the await; an append cannot lose one whatever the interleaving.
 
 ## Signing in by email
 

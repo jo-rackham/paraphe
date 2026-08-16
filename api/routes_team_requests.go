@@ -54,7 +54,14 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 	requester := strings.TrimSpace(d.RequesterName)
 	email := normalizeEmail(d.RequesterEmail)
 
-	if name == "" || requester == "" || !storableEmail(email) {
+	// `visible`, not `== ""`: a name of zero-width runes survives TrimSpace
+	// and lands in the queue as a blank row the coordination cannot tell from
+	// the next blank row.
+	//
+	// `storableEmail`, the same reader the team form uses: an address is
+	// refused here or it becomes an account this application can never write
+	// to, and the address is the primary key, so it cannot be corrected after.
+	if !visible(name) || !visible(requester) || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de l'équipe, votre nom et votre adresse email sont requis.")
 		return
@@ -76,11 +83,15 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
-	// The coordination READS these two before it decides on them.
-	if !legible(name) || !legible(requester) {
+	// The coordination READS these three before it decides on them, and the
+	// address is read like the rest: `storableEmail` above asks whether the
+	// application can still WRITE to it — control characters in a header —
+	// and this asks whether what the moderator reads is what is stored. A
+	// bidi override and a byte-order mark pass the first and fail the second.
+	if !legible(name) || !legible(requester) || !legible(email) {
 		errorJSON(w, http.StatusBadRequest,
-			"Le nom de l'équipe et votre nom ne doivent contenir ni retour à "+
-				"la ligne ni caractère invisible.")
+			"Le nom de l'équipe, votre nom et votre adresse email ne doivent "+
+				"contenir ni retour à la ligne ni caractère invisible.")
 		return
 	}
 	if utf8.RuneCountInString(d.Message) > maxNoteRunes {
@@ -128,10 +139,30 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The ceiling is applied BY THE INSERT, not by a count read before it.
-	// Read separately, two clients both saw 199 and both wrote — and the
-	// queue then dropped the oldest, legitimate requests off the only screen
-	// that can accept them. No row comes back when the campaign is full.
+	// The ceiling rides IN the insert rather than in a count read before it —
+	// but it is a bound with slack, not an invariant, and the difference
+	// matters enough to write down.
+	//
+	// Under READ COMMITTED, which is what every request runs at, the count
+	// subquery is evaluated on the transaction's own snapshot: concurrent
+	// writers each see the same total and each pass the test. Merging the
+	// read into the write narrows the window and closes nothing.
+	//
+	// What bounds the overshoot is how many transactions can hold a snapshot
+	// at once — `max_connections`, not any constant. Measured: 95 dedicated
+	// connections released together against a table at 199 leave it at 294.
+	// Through the pool the API actually uses, the same test overshoots by one
+	// or two, which is the number this comment used to state and it was the
+	// wrong one to reason from.
+	//
+	// It is left that way deliberately. An exact cap needs
+	// `pg_advisory_xact_lock` per campaign or SERIALIZABLE with a retry, and
+	// a blocking lock on an anonymous form makes every request queue while
+	// holding a pool connection — the failure this codebase buffers request
+	// bodies to avoid (auth.go, jsonOnly). What the slack costs is a heavier
+	// moderation payload (1.6 MiB measured at 294 pending, served in 250 ms);
+	// what it must NOT cost is a request the coordination never sees, and
+	// that is why the queue below reads without a LIMIT.
 	var id int64
 	err = s.tx(r).QueryRow(r.Context(),
 		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
@@ -163,8 +194,13 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// The identity is NOT returned. `team_requests.id` is one sequence for the
+	// whole table, hence for every campaign on the instance: handed to an
+	// anonymous visitor, the gap between two of them counts what the
+	// neighbouring campaigns received. The coordination finds the request in
+	// its queue; the visitor has no route that takes an identity.
 	replyJSON(w, http.StatusCreated, map[string]any{
-		"id": id, "name": name,
+		"name": name,
 		"message": "Demande enregistrée. La coordination de la campagne " +
 			"l'examinera et vous répondra à " + email + ".",
 	})
@@ -292,18 +328,44 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	response := map[string]any{"id": id, "decision": d.Decision}
+	var invitationToken string
 	if d.Decision == RequestAccepted {
+		// The row was written by a public form and is read back HERE to open
+		// an account from it. Hardening that form does not harden what is
+		// already in the table, and rows filed before it are still pending on
+		// a live instance: one can carry an address that renders as somebody
+		// else's, which then becomes a primary key nobody can correct. This
+		// is the last place it can be caught, and refusing the request is
+		// still open to the coordination.
+		if !storableEmail(requesterEmail) || !legible(requesterEmail) ||
+			!visible(requesterName) || !legible(requesterName) {
+			errorJSON(w, http.StatusConflict,
+				"Cette demande a été enregistrée avant que la saisie ne soit "+
+					"durcie : son adresse ou son nom ne peuvent pas ouvrir de "+
+					"compte. Refusez-la en l'expliquant.")
+			return
+		}
 		if d.Name != nil {
-			if name = strings.TrimSpace(*d.Name); name == "" {
-				errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
-				return
-			}
+			name = strings.TrimSpace(*d.Name)
 			if utf8.RuneCountInString(name) > maxNameRunes {
 				errorJSON(w, http.StatusBadRequest,
 					"Le nom de l'équipe ne doit pas dépasser 200 caractères.")
 				return
 			}
 		}
+		// Whether it was edited here or read from the row, this name becomes
+		// `teams.name` and every volunteer of the campaign reads it.
+		if !visible(name) {
+			errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
+			return
+		}
+		if !legible(name) {
+			errorJSON(w, http.StatusBadRequest,
+				"Le nom de l'équipe ne doit contenir ni retour à la ligne ni "+
+					"caractère invisible.")
+			return
+		}
+
 		perimeter := splitDepartments(departments)
 		if d.Departments != nil {
 			corrected, unknown, err := s.knownDepartments(r, d.Departments)
@@ -359,6 +421,19 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 			s.failure(w, err)
 			return
 		}
+		// Minted in the SAME transaction as the account: an invitation whose
+		// account rolled back opens nothing, and an account whose token
+		// vanished is a lead nobody wrote to. Without it, the password shown
+		// once in this answer was the ONLY way in — a closed tab and the team
+		// had a lead who could never sign in. The direct creation of an
+		// access and the hosting approval both send one; this door did not,
+		// because it was written before there was a relay to send with.
+		invitationToken, err = s.mintInvitation(ctx, s.tx(r), scopeOrg(r),
+			requesterEmail)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
 		response["team"] = teamID
 		response["name"] = name
 		response["departments"] = perimeter
@@ -381,6 +456,23 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
+	}
+	if invitationToken != "" {
+		// The database is done with; the relay may take thirty seconds, and a
+		// pool connection has no business waiting on it.
+		s.release(r)
+		// Sent once the account exists, and its outcome is told. The password
+		// stays in the answer either way — relay down, the coordination reads
+		// it out as it always has.
+		sent, warning := s.sendInvitation(invitation{
+			email: requesterEmail, name: requesterName, by: me.Name,
+			campaign: campaignName(r), slug: campaignSlug(r),
+			token: invitationToken,
+		})
+		response["invitation_sent"] = sent
+		if warning != "" {
+			response["invitation_error"] = warning
+		}
 	}
 	// the team name is the campaign's own vocabulary, not a person; the
 	// requester and the moderator are pseudonyms, like every account in

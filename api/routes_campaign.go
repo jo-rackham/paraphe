@@ -53,6 +53,16 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 		values[k] = strings.TrimSpace(v)
 	}
+	// `candidat` becomes `orgs.name` below, and `orgs.name` is what the apex
+	// prints in its PUBLIC directory of hosted campaigns. A right-to-left
+	// override there reverses a neighbouring campaign's line on a page no
+	// campaign owns — the one place a campaign's own text leaves its walls.
+	if candidate := values["candidat"]; candidate != "" && !legible(candidate) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom du candidat ne doit contenir ni retour à la ligne ni "+
+				"caractère invisible.")
+		return
+	}
 	if len(unknown) > 0 {
 		errorJSON(w, http.StatusBadRequest,
 			"Clés de campagne inconnues : %s. Attendues : %s.",

@@ -10,21 +10,71 @@ import {
 } from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
+/** A campaign just opened, whose password is shown once and never again. */
+interface OpenedCampaign {
+  address: string;
+  coordination: string;
+  password: string;
+  invitation_sent?: boolean;
+  invitation_error?: string;
+}
+
+// What the live region says when a campaign opens. It names the campaign, so
+// two openings never produce the same sentence and the second is read.
+function opening(o: OpenedCampaign): string {
+  return (
+    `La campagne ${o.address} vient d'être ouverte. ` +
+    (o.invitation_sent
+      ? `Une invitation est partie à ${o.coordination}. `
+      : "") +
+    // an invitation that did not leave changes what the administrator has to
+    // do next, sighted or not
+    (o.invitation_error ? `${o.invitation_error} ` : "") +
+    "Le mot de passe de coordination est affiché à l'écran."
+  );
+}
+
+// What a tick confirms: this row AND this address. Either changing is a new
+// confirmation to make.
+const seal = (d: QueuedRequest) => `${d.id}:${d.requester_email}`;
+
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  // `busy` says a decision is in flight, so EVERY pair can wear
+  // aria-disabled: the guard below covers the whole queue, so a button that
+  // stayed live would only swallow the click.
   const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
-  // The coordination password is returned only ONCE: it does not go back
-  // to the database in the clear, and there is no way to retrieve it
-  // afterwards.
-  const [opened, setOpened] = useState<{
-    address: string;
-    coordination: string;
-    password: string;
-    invitation_sent?: boolean;
-    invitation_error?: string;
-  } | null>(null);
+  // Ticked per card, and only the ACCEPT path reads it: approving sends a
+  // session link to an address a stranger typed.
+  //
+  // Keyed by the id AND the address, not by the id alone. What the moderator
+  // confirmed is an ADDRESS; a key that names only the row would carry the
+  // tick over to a different address the day one is edited, or shared between
+  // two rows that came back with the same identity. The whole point of the
+  // box is that the thing confirmed is the thing sent to.
+  const [verified, setVerified] = useState<Record<string, boolean>>({});
+  // The coordination password is returned only ONCE: it does not go back to
+  // the database in the clear, and there is no way to retrieve it afterwards.
+  //
+  // Hence a LIST, and hence appending to it. A single slot is a slot the
+  // next password overwrites, and two flows mint one: approving a request
+  // and creating a campaign outright, each with its own re-entry guard. It
+  // did not even need a race — approving a second request while the first
+  // password is still on screen wiped it, which is how a queue gets worked
+  // through. An append cannot lose one, and a guard tested at the top of a
+  // handler cannot say the same: by then the other write is already in
+  // flight.
+  const [opened, setOpened] = useState<OpenedCampaign[]>([]);
+  // The announcement is an EVENT, and it is written only when a password is
+  // APPENDED. Derived from the list instead, it moved every time a card was
+  // dismissed: noting the newest made the region announce the opening of the
+  // one before it — an opening that did not happen, and a wrong password to
+  // attribute. The count is state, not an event, so it stays OUT of here:
+  // `status` implies aria-atomic, and a count that moves re-reads the whole
+  // sentence at every dismissal.
+  const [announced, setAnnounced] = useState("");
 
   const load = async () => {
     try {
@@ -48,6 +98,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     // and `setOpened` keeps the LAST — so the first coordinator's password,
     // shown once and stored nowhere, is gone from the only screen it existed
     // on. `aria-disabled` is what the pair shows; this is what guards it.
+    // BEFORE the submit guard, which TAKES it as a side effect: refusing
+    // after it would leave the guard held by a click that did nothing, and
+    // every later decision in the queue would be swallowed for good.
+    //
+    // What the greyed button shows, enforced: aria-disabled leaves a control
+    // clickable on purpose, so the refusal has to live in the handler too.
+    if (decision === "accepted" && !verified[seal(d)]) return;
     if (deciding()) return;
     setBusy(d.id);
     // captured BEFORE the round trip: the card leaves the queue when the
@@ -55,14 +112,30 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     const restoreFocus = holdFocusThrough();
     try {
       const rep = await API.decideRequest(d.id, decision, reasons[d.id] ?? "");
+      // The server has answered: the card leaves the pending list HERE, not
+      // when the reload lands. `load` swallows its own failure into a message,
+      // so a blip would otherwise leave the one-time password beside the very
+      // request it answers — and a moderator discards a password that
+      // contradicts the screen. It is shown once and never again.
+      setQueue(
+        (q) =>
+          q && {
+            ...q,
+            requests: q.requests.map((x) =>
+              x.id === d.id ? { ...x, state: decision } : x,
+            ),
+          },
+      );
       if (rep.password && rep.address && rep.coordination) {
-        setOpened({
+        const o: OpenedCampaign = {
           address: rep.address,
           coordination: rep.coordination,
           password: rep.password,
           invitation_sent: rep.invitation_sent,
           invitation_error: rep.invitation_error,
-        });
+        };
+        setOpened((shown) => [...shown, o]);
+        setAnnounced(opening(o));
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
       }
@@ -83,13 +156,15 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // one display, whatever the door the campaign came through.
   const create = async (creation: Parameters<typeof API.createCampaign>[0]) => {
     const rep = await API.createCampaign(creation);
-    setOpened({
+    const o: OpenedCampaign = {
       address: rep.address,
       coordination: rep.coordination,
       password: rep.password,
       invitation_sent: rep.invitation_sent,
       invitation_error: rep.invitation_error,
-    });
+    };
+    setOpened((shown) => [...shown, o]);
+    setAnnounced(opening(o));
     await load();
   };
 
@@ -107,33 +182,33 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {opened
-          ? `La campagne ${opened.address} vient d'être ouverte. ` +
-            (opened.invitation_sent
-              ? `Une invitation est partie à ${opened.coordination}. `
-              : "") +
-            // an invitation that did not leave changes what the
-            // administrator has to do next, sighted or not
-            (opened.invitation_error ? `${opened.invitation_error} ` : "") +
-            "Le mot de passe de coordination est affiché à l'écran."
-          : ""}
+        {announced}
       </span>
-      {opened && (
-        <div className="carte">
-          <h2>Campagne ouverte : {opened.address}</h2>
-          {opened.invitation_sent ? (
+      {/* how many wait: ordinary text, in the document for everyone, and
+          carrying NO live role — it is a state, and a state that moved
+          inside the region above made every dismissal re-read an opening */}
+      {opened.length > 1 && (
+        <p className="gris">
+          {opened.length} mots de passe sont affichés et n'ont pas encore été
+          notés.
+        </p>
+      )}
+      {opened.map((o) => (
+        <div className="carte" key={o.address}>
+          <h2>Campagne ouverte : {o.address}</h2>
+          {o.invitation_sent ? (
             <p>
-              Une invitation vient de partir à {opened.coordination} : le lien
+              Une invitation vient de partir à {o.coordination} : le lien
               qu'elle contient ouvre l'accès, sans que vous ayez à transmettre
               quoi que ce soit.
             </p>
           ) : (
             <p>
-              Transmettez ces accès à {opened.coordination}.
-              {opened.invitation_error && (
+              Transmettez ces accès à {o.coordination}.
+              {o.invitation_error && (
                 <>
                   {" "}
-                  <strong>{opened.invitation_error}</strong>
+                  <strong>{o.invitation_error}</strong>
                 </>
               )}
             </p>
@@ -143,20 +218,24 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             il n'est stocké nulle part en clair.
           </p>
           <p>
-            <code>{opened.password}</code>
+            <code>{o.password}</code>
           </p>
           <button
             type="button"
             onClick={() => {
               // this button unmounts with its card: hand focus back first
               focusContenu();
-              setOpened(null);
+              setOpened((shown) => shown.filter((x) => x !== o));
             }}
           >
             J'ai noté
+            {/* several of these stand at once: without the address, a
+                screen reader enumerates N buttons of one name and none of
+                them says which card it closes */}
+            <span className="sr-only"> {o.address}</span>
           </button>
         </div>
-      )}
+      ))}
 
       {pending.length === 0 && (
         <p className="gris">Aucune demande en attente.</p>
@@ -188,11 +267,41 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
               />
             </label>
           </p>
+          {/* Approving SENDS: an email signed by this instance leaves for an
+              address a stranger typed, carrying a link that opens a session.
+              The address is on the card above, but a queue is read fast —
+              this puts it back under the eye at the moment of the decision,
+              and the accept button stays inert until it has been. A refusal
+              sends nothing and needs none of this. */}
           <p>
-            {/* one pair of buttons per request: the name says which */}
+            <label>
+              <input
+                type="checkbox"
+                checked={verified[seal(d)] ?? false}
+                onChange={(e) =>
+                  setVerified({ ...verified, [seal(d)]: e.target.checked })
+                }
+              />{" "}
+              {/* named, and pointed at by the button below: reached by « next
+                  button » rather than by Tab, an inert control says only
+                  « indisponible » and nothing ties it to what would make it
+                  live again */}
+              <span id={`confirmation-${d.id}`}>
+                J'ai vérifié que <strong>{d.requester_email}</strong> est bien
+                l'adresse de la personne qui demande : l'ouverture lui envoie un
+                lien qui ouvre la session de coordination.
+              </span>
+            </label>
+          </p>
+          <p>
+            {/* one pair of buttons per request: the name says which.
+                `busy !== null`, not `=== d.id`: ONE submit guard covers the
+                whole queue, so while any card is in flight every other
+                button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={busy === d.id || undefined}
+              aria-disabled={busy !== null || !verified[seal(d)] || undefined}
+              aria-describedby={`confirmation-${d.id}`}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne
@@ -201,7 +310,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             <button
               type="button"
               className="lien"
-              aria-disabled={busy === d.id || undefined}
+              aria-disabled={busy !== null || undefined}
               onClick={() => decide(d, "refused")}
             >
               Refuser

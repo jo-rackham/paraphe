@@ -189,6 +189,9 @@ test.describe
       // the name is the campaign's call, the perimeter too
       await queued.getByLabel("Nom de l'équipe ouverte").fill(OPENED);
       await queued.getByLabel("Départements accordés").selectOption("Cantal");
+      // accepting SENDS a session link to the address a stranger typed: the
+      // button is inert until the coordination confirms having read it
+      await queued.getByLabel(/J'ai vérifié/).check();
       await queued
         .getByRole("button", { name: "Accepter — ouvrir l'équipe" })
         .click();
