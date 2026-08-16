@@ -214,9 +214,29 @@ tasks:
             --header-upload 'Cache-Control: public, max-age=31536000, immutable' \
             "$@"
         }
-        remettre --exclude '*.svg'
-        remettre --include '*.svg' \
+        # Ce qui est restauré est NOMMÉ, et la casse ne décide de rien. Écrit
+        # en `--exclude '*.svg'` puis `--include '*.svg'`, un objet déposé
+        # sous `.SVG` passait la première passe — donc sans l'en-tête — et
+        # ratait la seconde : mesuré, il revenait en `image/svg+xml` sans
+        # `attachment`, c'est-à-dire en page exécutable. L'application n'écrit
+        # que des minuscules, mais une migration, un outil tiers ou une main
+        # d'opérateur, si.
+        remettre --include '*.[Pp][Nn][Gg]' --include '*.[Jj][Pp][Gg]' \
+          --include '*.[Jj][Pp][Ee][Gg]' --include '*.[Ww][Ee][Bb][Pp]'
+        remettre --include '*.[Ss][Vv][Gg]' \
           --header-upload 'Content-Disposition: attachment'
+        # Et ce qui n'est ni l'un ni l'autre n'est PAS remis. rclone tire le
+        # type de l'extension : un fichier aux octets de SVG nommé .html
+        # reviendrait en text/html, sans en-tête, exécutable. Nommés plutôt
+        # que téléversés en silence — une sauvegarde qui contient autre chose
+        # que les quatre formats est une sauvegarde dont il faut parler.
+        inconnus=$(find "$DOSSIER" -type f ! -iname '*.png' ! -iname '*.jpg' \
+          ! -iname '*.jpeg' ! -iname '*.webp' ! -iname '*.svg' | head -20)
+        if [ -n "$inconnus" ]; then
+          echo "attention : ces fichiers ne portent aucun des quatre formats" \
+            "acceptés et n'ont PAS été restaurés :" >&2
+          echo "$inconnus" >&2
+        fi
         echo "logos restaurés depuis $DOSSIER/"
 
   restore:
