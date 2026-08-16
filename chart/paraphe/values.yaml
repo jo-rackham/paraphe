@@ -292,6 +292,12 @@ garage:
   initImage:
     repository: alpine
     tag: "3.22"
+  # L'uid du Job d'amorçage. 0 (root) pour l'image alpine ci-dessus — `apk`
+  # l'exige pour installer curl et jq. Une plateforme qui refuse les pods
+  # root : pointer initImage sur une image qui porte déjà curl et jq
+  # (ex. alpine/k8s) et poser ici n'importe quel uid non nul — le pod se
+  # déclare alors runAsNonRoot et n'installe rien.
+  initRunAsUser: 0
   storage:
     className: ""
     meta: 1Gi
