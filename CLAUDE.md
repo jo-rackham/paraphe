@@ -425,6 +425,13 @@ is the campaign's coordination that decides.
   and a moderator reading that contradiction either presses again (409, so
   they conclude it never worked) or discards the credential. Both moderation
   screens apply the decision to local state before awaiting the refetch.
+- **A one-time password is held in a LIST and appended to, never assigned.**
+  Both moderation screens have two flows that mint one — deciding a request,
+  and creating outright — each behind its own re-entry guard, so neither sees
+  the other. It took no race at all: deciding a second request before noting
+  the first password replaced it, which is how a queue gets worked through. A
+  guard read at the top of a handler cannot fix that, because the write comes
+  after the await; an append cannot lose one whatever the interleaving.
 
 ## Signing in by email
 
