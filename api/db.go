@@ -60,6 +60,13 @@ func takeLock(ctx context.Context, c *pgxpool.Conn, key int) error {
 	// forty-five second cap on every lock it waits for, and an operator
 	// reading a timeout has nothing to trace it to. The cap is wanted for
 	// the one statement below and nothing else.
+	//
+	// It runs under the CALLER's context, so a context already cancelled
+	// leaves the setting on a connection the pool takes back — said in the
+	// log, never hidden. Both call sites are startup paths, where a cancel
+	// means the process is going down and the pool with it. Called from a
+	// request, this would need a context of its own, the way Scope.renew
+	// takes one.
 	defer func() {
 		if _, err := c.Exec(ctx, "RESET lock_timeout"); err != nil {
 			slog.Warn("lock_timeout not reset: the connection carries it back "+
