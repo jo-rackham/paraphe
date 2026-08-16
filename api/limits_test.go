@@ -376,6 +376,21 @@ func aggregateOver(table string) *regexp.Regexp {
 		`SELECT\s+(?:COUNT|MAX|MIN|SUM|AVG)\([^()]*\)\s+FROM\s+` + table + `\b`)
 }
 
+// embeddedIdent: the type name an anonymous struct field embeds — `Inner`,
+// `*Inner`, and the qualified forms, whose fields encoding/json promotes into
+// the outer type just the same.
+func embeddedIdent(e ast.Expr) (string, bool) {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return t.Name, true
+	case *ast.StarExpr:
+		return embeddedIdent(t.X)
+	case *ast.SelectorExpr:
+		return t.Sel.Name, true
+	}
+	return "", false
+}
+
 // readsTable: this statement names the table where rows come FROM. A comma
 // counts, because a second table hides behind one.
 func readsTable(sql, table string) bool {
@@ -654,8 +669,16 @@ func zeroByte(expr ast.Expr) bool {
 func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
 	files := apiPackage(t)
 
-	// Which request types carry a name at all.
+	// Which request types carry a name at all — EMBEDDED ONES INCLUDED.
+	//
+	// encoding/json promotes the fields of an embedded struct, so a type that
+	// embeds one carrying `json:"name"` decodes a name exactly like a type
+	// that declares it. Reading the direct fields alone, this collector missed
+	// every such type, and the handler that decoded it was invisible to a
+	// canary written to find precisely that. Resolved to a fixpoint, because
+	// an embedded type may itself embed one.
 	carriesName := map[string]bool{}
+	embeds := map[string][]string{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			spec, ok := n.(*ast.TypeSpec)
@@ -670,9 +693,29 @@ func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
 				if f.Tag != nil && strings.Contains(f.Tag.Value, `json:"name"`) {
 					carriesName[spec.Name.Name] = true
 				}
+				// an anonymous field: its own name is the type it embeds
+				if len(f.Names) == 0 {
+					if id, ok := embeddedIdent(f.Type); ok {
+						embeds[spec.Name.Name] = append(embeds[spec.Name.Name], id)
+					}
+				}
 			}
 			return true
 		})
+	}
+	for changed := true; changed; {
+		changed = false
+		for outer, inners := range embeds {
+			if carriesName[outer] {
+				continue
+			}
+			for _, inner := range inners {
+				if carriesName[inner] {
+					carriesName[outer] = true
+					changed = true
+				}
+			}
+		}
 	}
 	if len(carriesName) == 0 {
 		t.Fatal("no request type carries a name: this canary is looking at " +
