@@ -109,7 +109,6 @@ export default function Instance({ config }: { config: InstanceConfig }) {
           )}
           {ready && !me && view === "connexion" && (
             <AdministrationSignIn
-              config={config}
               onSignedIn={setMe}
               onBack={() => setView("accueil")}
             />
@@ -338,11 +337,9 @@ function Annuaire() {
 }
 
 function AdministrationSignIn({
-  config,
   onSignedIn,
   onBack,
 }: {
-  config: InstanceConfig;
   onSignedIn: (m: Me) => void;
   onBack: () => void;
 }) {
@@ -373,13 +370,6 @@ function AdministrationSignIn({
   return (
     <>
       <h1>Administration de l'instance</h1>
-      {config.no_account && (
-        <p className="alerte erreur">
-          <strong>Aucun compte n'existe encore.</strong> Démarrez l'application
-          avec PARAPHE_INSTANCE_ADMIN_EMAIL et PARAPHE_INSTANCE_ADMIN_PASSWORD
-          pour créer le premier accès.
-        </p>
-      )}
       <form className="carte etroite" onSubmit={submit}>
         <Alerte message={error ? { tone: "erreur", text: error } : null} />
         <p>

@@ -75,7 +75,6 @@ export interface ServerConfig {
   source_url: string;
   statuses: Status[];
   ranks: Rank[];
-  no_account: boolean;
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
 }
@@ -87,7 +86,6 @@ export interface InstanceConfig {
   source_url: string;
   // URL publique de la version navigateur (sans compte) — vide : pas de lien
   browser_version_url: string;
-  no_account: boolean;
   campaign_keys: string[];
 }
 

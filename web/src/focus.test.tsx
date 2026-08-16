@@ -34,7 +34,6 @@ const CONFIG: ServerConfig = {
   batch_size: 10,
   unfilled: [],
   source_url: "",
-  no_account: false,
   logo: null,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
   ranks: [{ key: "has_endorsed", label: "A parrainé" }],
@@ -45,7 +44,6 @@ const INSTANCE_CONFIG: InstanceConfig = {
   base_domain: "paraphe.test",
   source_url: "",
   browser_version_url: "",
-  no_account: false,
   campaign_keys: CAMPAIGN_KEYS,
 };
 

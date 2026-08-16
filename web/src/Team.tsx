@@ -423,13 +423,6 @@ function Connexion({
         <LogoCampagne logo={cfg.logo} className="grand" />
       </p>
       <h1>Connexion</h1>
-      {cfg.no_account && (
-        <p className="alerte erreur">
-          <strong>Aucun compte n'existe encore.</strong> La coordination doit
-          démarrer l'application avec PARAPHE_ADMIN_EMAIL et
-          PARAPHE_ADMIN_PASSWORD pour créer le premier accès.
-        </p>
-      )}
       <form className="carte etroite" onSubmit={submit}>
         <Alerte message={error ? { tone: "erreur", text: error } : null} />
         <p>
