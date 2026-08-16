@@ -137,6 +137,13 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
+		// assignments.team_id stays NULLABLE, and the null is not an
+		// accident: `UPDATE assignments SET volunteer=NULL, team_id=NULL`
+		// is how an operator puts a stuck card back in the shared pool, and
+		// TestNotesDoNotFollowReleasedCardToAnotherTeam is the proof that
+		// the notes stay behind when it happens. A NOT NULL here would
+		// forbid the one remedy there is. `notes.team_id` is the opposite
+		// case and is constrained where it is created.
 	}
 	for _, s := range statements {
 		if _, err := tx.Exec(ctx, s); err != nil {
