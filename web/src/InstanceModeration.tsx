@@ -10,6 +10,15 @@ import {
 } from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
+/** A campaign just opened, whose password is shown once and never again. */
+interface OpenedCampaign {
+  address: string;
+  coordination: string;
+  password: string;
+  invitation_sent?: boolean;
+  invitation_error?: string;
+}
+
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -18,16 +27,18 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // stayed live would only swallow the click.
   const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
-  // The coordination password is returned only ONCE: it does not go back
-  // to the database in the clear, and there is no way to retrieve it
-  // afterwards.
-  const [opened, setOpened] = useState<{
-    address: string;
-    coordination: string;
-    password: string;
-    invitation_sent?: boolean;
-    invitation_error?: string;
-  } | null>(null);
+  // The coordination password is returned only ONCE: it does not go back to
+  // the database in the clear, and there is no way to retrieve it afterwards.
+  //
+  // Hence a LIST, and hence appending to it. A single slot is a slot the
+  // next password overwrites, and two flows mint one: approving a request
+  // and creating a campaign outright, each with its own re-entry guard. It
+  // did not even need a race — approving a second request while the first
+  // password is still on screen wiped it, which is how a queue gets worked
+  // through. An append cannot lose one, and a guard tested at the top of a
+  // handler cannot say the same: by then the other write is already in
+  // flight.
+  const [opened, setOpened] = useState<OpenedCampaign[]>([]);
 
   const load = async () => {
     try {
@@ -73,13 +84,16 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           },
       );
       if (rep.password && rep.address && rep.coordination) {
-        setOpened({
-          address: rep.address,
-          coordination: rep.coordination,
-          password: rep.password,
-          invitation_sent: rep.invitation_sent,
-          invitation_error: rep.invitation_error,
-        });
+        setOpened((shown) => [
+          ...shown,
+          {
+            address: rep.address as string,
+            coordination: rep.coordination as string,
+            password: rep.password as string,
+            invitation_sent: rep.invitation_sent,
+            invitation_error: rep.invitation_error,
+          },
+        ]);
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
       }
@@ -100,19 +114,24 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // one display, whatever the door the campaign came through.
   const create = async (creation: Parameters<typeof API.createCampaign>[0]) => {
     const rep = await API.createCampaign(creation);
-    setOpened({
-      address: rep.address,
-      coordination: rep.coordination,
-      password: rep.password,
-      invitation_sent: rep.invitation_sent,
-      invitation_error: rep.invitation_error,
-    });
+    setOpened((shown) => [
+      ...shown,
+      {
+        address: rep.address,
+        coordination: rep.coordination,
+        password: rep.password,
+        invitation_sent: rep.invitation_sent,
+        invitation_error: rep.invitation_error,
+      },
+    ]);
     await load();
   };
 
   if (!queue) return <p role="status">Chargement…</p>;
   const pending = queue.requests.filter((d) => d.state === "pending");
   const decided = queue.requests.filter((d) => d.state !== "pending");
+  // the announcement speaks of the newest, and says how many wait behind it
+  const last = opened[opened.length - 1];
 
   return (
     <>
@@ -124,33 +143,38 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {opened
-          ? `La campagne ${opened.address} vient d'être ouverte. ` +
-            (opened.invitation_sent
-              ? `Une invitation est partie à ${opened.coordination}. `
+        {last
+          ? `La campagne ${last.address} vient d'être ouverte. ` +
+            (last.invitation_sent
+              ? `Une invitation est partie à ${last.coordination}. `
               : "") +
             // an invitation that did not leave changes what the
             // administrator has to do next, sighted or not
-            (opened.invitation_error ? `${opened.invitation_error} ` : "") +
-            "Le mot de passe de coordination est affiché à l'écran."
+            (last.invitation_error ? `${last.invitation_error} ` : "") +
+            "Le mot de passe de coordination est affiché à l'écran." +
+            // said only when there is one, and it is what tells a
+            // non-sighted administrator that nothing was lost behind it
+            (opened.length > 1
+              ? ` ${opened.length} mots de passe attendent d'être notés.`
+              : "")
           : ""}
       </span>
-      {opened && (
-        <div className="carte">
-          <h2>Campagne ouverte : {opened.address}</h2>
-          {opened.invitation_sent ? (
+      {opened.map((o) => (
+        <div className="carte" key={o.address}>
+          <h2>Campagne ouverte : {o.address}</h2>
+          {o.invitation_sent ? (
             <p>
-              Une invitation vient de partir à {opened.coordination} : le lien
+              Une invitation vient de partir à {o.coordination} : le lien
               qu'elle contient ouvre l'accès, sans que vous ayez à transmettre
               quoi que ce soit.
             </p>
           ) : (
             <p>
-              Transmettez ces accès à {opened.coordination}.
-              {opened.invitation_error && (
+              Transmettez ces accès à {o.coordination}.
+              {o.invitation_error && (
                 <>
                   {" "}
-                  <strong>{opened.invitation_error}</strong>
+                  <strong>{o.invitation_error}</strong>
                 </>
               )}
             </p>
@@ -160,20 +184,20 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             il n'est stocké nulle part en clair.
           </p>
           <p>
-            <code>{opened.password}</code>
+            <code>{o.password}</code>
           </p>
           <button
             type="button"
             onClick={() => {
               // this button unmounts with its card: hand focus back first
               focusContenu();
-              setOpened(null);
+              setOpened((shown) => shown.filter((x) => x !== o));
             }}
           >
             J'ai noté
           </button>
         </div>
-      )}
+      ))}
 
       {pending.length === 0 && (
         <p className="gris">Aucune demande en attente.</p>

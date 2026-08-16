@@ -371,7 +371,13 @@ export function GestionEquipe({
   onMessage: (m: Message) => void;
 }) {
   const [data, setData] = useState<TeamData | null>(null);
-  const [created, setCreated] = useState<NewAccess | null>(null);
+  // A LIST, and appended to. A single slot is a slot the next password
+  // overwrites, and two flows mint one here: opening an access directly, and
+  // accepting a team request — each with its own re-entry guard, so neither
+  // sees the other. It did not even need a race: opening a second access
+  // while the first password was still on screen wiped it. An append cannot
+  // lose one, and a guard read at the top of a handler cannot say the same.
+  const [created, setCreated] = useState<NewAccess[]>([]);
   const [draft, setDraft] = useState({
     email: "",
     name: "",
@@ -402,6 +408,8 @@ export function GestionEquipe({
 
   if (!data) return <p role="status">Chargement…</p>;
   const coordination = me.account.role === "coordination";
+  // the announcement speaks of the newest, and says how many wait behind it
+  const lastCreated = created[created.length - 1];
 
   const createAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -414,7 +422,7 @@ export function GestionEquipe({
         team_id:
           coordination && draft.team_id ? Number(draft.team_id) : undefined,
       });
-      setCreated(r);
+      setCreated((shown) => [...shown, r]);
       setDraft({ email: "", name: "", role: "volunteer", team_id: "" });
       await reload();
     } catch (err) {
@@ -443,35 +451,42 @@ export function GestionEquipe({
           interactive control — status implies aria-atomic, so any rerender
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
-        {created
-          ? `Un accès vient d'être créé pour ${created.name}. ` +
-            (created.invitation_sent
-              ? `Une invitation est partie à ${created.email}. `
+        {lastCreated
+          ? `Un accès vient d'être créé pour ${lastCreated.name}. ` +
+            (lastCreated.invitation_sent
+              ? `Une invitation est partie à ${lastCreated.email}. `
               : "") +
             // Said here too, and not only on the card: this announcement is
             // what somebody who cannot see the screen acts on, and an
             // invitation that did not leave changes what they must do next.
-            (created.invitation_error ? `${created.invitation_error} ` : "") +
+            (lastCreated.invitation_error
+              ? `${lastCreated.invitation_error} `
+              : "") +
             "Le mot de passe provisoire est affiché à l'écran, à " +
-            "transmettre de vive voix."
+            "transmettre de vive voix." +
+            // what tells someone who cannot see the screen that nothing was
+            // lost behind the newest card
+            (created.length > 1
+              ? ` ${created.length} mots de passe attendent d'être notés.`
+              : "")
           : ""}
       </span>
-      {created && (
-        <div className="carte alerte">
+      {created.map((c) => (
+        <div className="carte alerte" key={c.email}>
           <p>
             <strong>
-              Accès créé pour {created.name} ({created.email}).
+              Accès créé pour {c.name} ({c.email}).
             </strong>
           </p>
-          {created.invitation_sent && (
+          {c.invitation_sent && (
             <p>
               Une invitation vient de partir à cette adresse : le lien qu'elle
               contient ouvre l'accès sans mot de passe.
             </p>
           )}
-          {created.invitation_error && (
+          {c.invitation_error && (
             <p>
-              <strong>{created.invitation_error}</strong>
+              <strong>{c.invitation_error}</strong>
             </p>
           )}
           {/* The password stays on screen whatever the invitation did: a
@@ -481,20 +496,20 @@ export function GestionEquipe({
             Mot de passe provisoire — <strong>affiché une seule fois</strong>, à
             transmettre de vive voix :
           </p>
-          <p className="grand-tel">{created.password}</p>
+          <p className="grand-tel">{c.password}</p>
           <button
             type="button"
             className="lien"
             onClick={() => {
               // this button unmounts with its card: hand focus back first
               focusContenu();
-              setCreated(null);
+              setCreated((shown) => shown.filter((x) => x !== c));
             }}
           >
             j'ai noté
           </button>
         </div>
-      )}
+      ))}
 
       <div className="carte">
         <h2 style={{ marginTop: 0 }}>Ouvrir un accès</h2>
@@ -587,7 +602,9 @@ export function GestionEquipe({
                   ),
                 },
             );
-            setCreated(access);
+            // appended, never assigned: a moderator accepting a second
+            // request before noting the first password must not lose it
+            if (access) setCreated((shown) => [...shown, access]);
             // through the SHELL's region, which pre-exists this screen: an
             // acceptance leaves a password card that says what happened, a
             // refusal leaves nothing but one card fewer

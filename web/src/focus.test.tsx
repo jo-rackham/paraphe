@@ -393,6 +393,91 @@ describe("focus survives the control's own destruction", () => {
     ).toBe(1);
   });
 
+  // The coordination password is returned once and stored nowhere in the
+  // clear. It lived in a SINGLE slot, and two flows write it — approving a
+  // request, and creating a campaign outright, each behind its own re-entry
+  // guard. It did not even need a race: approving a second request while the
+  // first password was still on screen replaced it, which is exactly how a
+  // moderator works through a queue. Appending is what makes that impossible.
+  it("Moderation: a second decision does not wipe the first password", async () => {
+    vi.mocked(API.me).mockResolvedValueOnce({
+      account: {
+        email: "admin@exemple.fr",
+        name: "Administration",
+        role: "administration" as unknown as "coordination",
+        team_id: null,
+        active: true,
+        personal_note: "",
+        team_name: null,
+      },
+      departments: [],
+      may_manage: true,
+    });
+    const pending = (id: number, slug: string) => ({
+      id,
+      slug,
+      name: `Campagne ${slug}`,
+      requester_email: "qui@exemple.fr",
+      requester_name: "Qui",
+      message: "",
+      state: "pending" as const,
+      listed: true,
+      reason: "",
+      ts: "2026-01-01T00:00",
+      decided_at: "",
+      decided_by: "",
+    });
+    // a REAL server: a request that was decided comes back decided, so the
+    // first card leaves the queue and the second is the one still standing
+    const settled = new Set<number>();
+    vi.mocked(API.moderationQueue).mockImplementation(async () => ({
+      requests: [pending(1, "alpha"), pending(2, "beta")].map((r) =>
+        settled.has(r.id) ? { ...r, state: "accepted" as const } : r,
+      ),
+      organisations: [],
+      base_domain: "paraphe.test",
+    }));
+    vi.mocked(API.decideRequest).mockImplementation((async (id: number) => {
+      settled.add(id);
+      return {
+        id,
+        decision: "accepted",
+        address: id === 1 ? "alpha.paraphe.test" : "beta.paraphe.test",
+        coordination: "qui@exemple.fr",
+        password: id === 1 ? "MOT-DE-PASSE-ALPHA" : "MOT-DE-PASSE-BETA",
+      };
+    }) as unknown as typeof API.decideRequest);
+
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    await flush();
+
+    const open = () =>
+      [...container.querySelectorAll("button")].filter((b) =>
+        b.textContent?.includes("Ouvrir la campagne"),
+      );
+    expect(open().length, "two pending requests").toBe(2);
+
+    await click(open()[0]);
+    await flush();
+    expect(container.textContent).toContain("MOT-DE-PASSE-ALPHA");
+
+    // …and now the second, WITHOUT pressing « J'ai noté » on the first
+    await click(open()[0]);
+    await flush();
+
+    const shown = container.textContent ?? "";
+    expect(shown, "the second password is shown").toContain(
+      "MOT-DE-PASSE-BETA",
+    );
+    expect(
+      shown,
+      "the first password is shown once and nowhere else: it must survive",
+    ).toContain("MOT-DE-PASSE-ALPHA");
+  });
+
   it("Demande: a request accepted replaces the whole form — focus is rescued", async () => {
     vi.mocked(API.me).mockRejectedValueOnce(
       Object.assign(new Error("non connecté"), { code: 401 }),

@@ -449,4 +449,61 @@ describe("the coordination's moderation queue", () => {
     // and the control that died with the card did not take the focus with it
     expect(document.activeElement?.id).toBe("contenu");
   });
+
+  // The lead's password is shown once and stored nowhere in the clear. It
+  // lived in a SINGLE slot written by two flows — accepting a request, and
+  // opening an access directly — each behind its own re-entry guard, so
+  // neither saw the other. Accepting a second request before noting the
+  // first password replaced it, and that is simply how a queue is worked
+  // through. Appending is what makes losing one impossible.
+  it("accepting a second request does not wipe the first password", async () => {
+    const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
+    await openTeamTab("coordination", [PENDING, second]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    // a REAL server: a decided request comes back decided
+    const settled = new Set<number>();
+    vi.mocked(API.team).mockImplementation(async () => ({
+      accounts: [],
+      teams: [],
+      departments: ["01", "02", "03"],
+      requests: [PENDING, second].map((r) =>
+        settled.has(r.id) ? { ...r, state: "accepted" as const } : r,
+      ),
+    }));
+    vi.mocked(API.decideTeamRequest).mockImplementation((async (id: number) => {
+      settled.add(id);
+      return {
+        id,
+        decision: "accepted",
+        team: id,
+        name: id === 7 ? "Équipe du 01" : "Équipe du 02",
+        lead: id === 7 ? "premiere@exemple.fr" : "seconde@exemple.fr",
+        password: id === 7 ? "MOT-DE-PASSE-UN" : "MOT-DE-PASSE-DEUX",
+      };
+    }) as unknown as typeof API.decideTeamRequest);
+
+    await act(async () => {
+      button("Accepter").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await until(() => text().includes("MOT-DE-PASSE-UN"), "the first password");
+
+    // …and now the second, WITHOUT pressing « j'ai noté » on the first
+    await act(async () => {
+      button("Accepter").dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await until(
+      () => text().includes("MOT-DE-PASSE-DEUX"),
+      "the second password",
+    );
+
+    expect(
+      text(),
+      "the first password is shown once and nowhere else: it must survive",
+    ).toContain("MOT-DE-PASSE-UN");
+  });
 });
