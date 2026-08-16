@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -423,6 +424,60 @@ func TestAnUploadHoldsNoConnectionWhileTheStoreIsSilent(t *testing.T) {
 	}
 	if held := s.pool.Stat().AcquiredConns(); held != 0 {
 		t.Errorf("%d connection(s) still held after the answer", held)
+	}
+}
+
+// A deletion in flight when SIGTERM lands must be waited for, like a message
+// on its way to a relay. Started as a bare goroutine it is simply cut, and
+// the object it was removing stays in the bucket for ever with nothing
+// naming it — an orphan produced by a rollout, which is a thing that happens
+// on purpose and often.
+func TestADeletionInFlightIsDrainedAtShutdown(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 1, "01")
+	email := "coord@exemple.fr"
+	pw := createAccount(t, s, email, RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn(email, pw); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+
+	// A store that takes its time on a DELETE, and says it happened.
+	var deleted atomic.Bool
+	slow := httptest.NewServer(http.HandlerFunc(
+		func(_ http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				time.Sleep(300 * time.Millisecond)
+				deleted.Store(true)
+			}
+		}))
+	defer slow.Close()
+	endpoint, err := url.Parse(slow.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.media = &MediaStore{
+		endpoint: endpoint, bucket: "seau", region: "garage",
+		accessKey: "GKtest", secretKey: "secret",
+		publicURL: "https://media.exemple.fr",
+		client:    &http.Client{Timeout: mediaTimeout},
+	}
+
+	first := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 30, 30))}
+	second := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 31, 30))}
+	if code, rep := c.call(http.MethodPost, "/api/campaign/logo", first); code != http.StatusOK {
+		t.Fatalf("first upload: %d %v", code, rep)
+	}
+	// The second replaces the first, which is what schedules the deletion.
+	if code, rep := c.call(http.MethodPost, "/api/campaign/logo", second); code != http.StatusOK {
+		t.Fatalf("second upload: %d %v", code, rep)
+	}
+
+	// Shutdown, right away: the deletion has had no time to finish.
+	s.drainOutbound(3 * time.Second)
+	if !deleted.Load() {
+		t.Error("the shutdown drain did not wait for the deletion: a rollout " +
+			"landing on one leaves an object nothing names")
 	}
 }
 

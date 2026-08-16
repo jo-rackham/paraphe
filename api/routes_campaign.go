@@ -322,9 +322,12 @@ func (s *Server) forgetLogo(previous string) {
 	if s.media == nil || previous == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), mediaTimeout)
-		defer cancel()
+	// Through `detach` rather than a bare goroutine: it counts the work in
+	// s.outbound, which shutdown drains. Started on its own, a deletion in
+	// flight when SIGTERM lands is simply cut, and the object it was
+	// removing stays in the bucket for ever with nothing naming it. Same
+	// mechanism as a message leaving for the relay, for the same reason.
+	s.detach(mediaTimeout, func(ctx context.Context) {
 		if err := s.media.Delete(ctx, previous); err != nil {
 			// Said, not raised: the campaign's logo is already correct, and
 			// the only cost is an orphan the next `task backup-media`
@@ -332,7 +335,7 @@ func (s *Server) forgetLogo(previous string) {
 			slog.Warn("previous logo not removed from the store",
 				"key", previous, "error", err)
 		}
-	}()
+	})
 }
 
 // GET /api/campaign/public — the campaign, and nothing else.
