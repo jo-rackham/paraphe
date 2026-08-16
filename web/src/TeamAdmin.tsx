@@ -6,6 +6,7 @@ import {
   focusContenu,
   label,
   ROLES,
+  useSubmitGuard,
 } from "./common.tsx";
 import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
 
@@ -29,10 +30,11 @@ function ConfigurationCampagne({
   const [batchSize, setBatchSize] = useState(String(cfg.batch_size));
   const [listed, setListed] = useState(cfg.organisation?.listed ?? true);
   const [sending, setSending] = useState(false);
+  const [busy, done] = useSubmitGuard();
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    if (busy()) return; // a REF: state is a render behind
     setSending(true);
     try {
       const r = await API.updateCampaign(values, Number(batchSize), listed);
@@ -57,6 +59,7 @@ function ConfigurationCampagne({
     } catch (err) {
       onError(err);
     } finally {
+      done();
       setSending(false);
     }
   };

@@ -17,6 +17,7 @@ import {
   RenderGuard,
   SkipLink,
   ThemeToggle,
+  useSubmitGuard,
   useViewFocus,
 } from "./common.tsx";
 import { GestionEquipe } from "./TeamAdmin.tsx";
@@ -400,10 +401,11 @@ function Connexion({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [busy, done] = useSubmitGuard();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    if (busy()) return; // a REF: state is a render behind
     setError(null);
     setSending(true);
     try {
@@ -411,6 +413,7 @@ function Connexion({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      done();
       setSending(false);
     }
   };
