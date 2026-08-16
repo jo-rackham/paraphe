@@ -530,6 +530,66 @@ func TestATokenSpentStaysSpentEvenWhenTheRequestThenFails(t *testing.T) {
 	}
 }
 
+// …including when the caller is the one who breaks the request.
+//
+// Everything above is a failure the SERVER suffers. This is the one the
+// CALLER chooses: close the connection between the DELETE and the commit and
+// the request's context is cancelled, so the commit is cancelled with it and
+// PostgreSQL rolls the DELETE back. The link comes back live, on demand, for
+// whoever presented it — and it keeps until the account it was refused
+// against is switched on again. The commit is therefore detached from that
+// context, and only from that one: the request's own reads still answer to
+// the caller leaving.
+//
+// Driven through inScope rather than through the route, because the window
+// is two statements wide and this places the hang-up inside it exactly.
+func TestSpendingSurvivesACallerThatHangsUpMidRequest(t *testing.T) {
+	s, srv := testServer(t)
+	withMailer(t, s, "https://campagne.exemple.fr")
+	const email = "marie@exemple.fr"
+	createAccount(t, s, email, RoleVolunteer, nil)
+	askForLink(t, s, newClient(t, srv), email)
+
+	ctx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	var renewErr error
+	var deleted int64
+	s.inScope(func(w http.ResponseWriter, r *http.Request) {
+		q := scoped(r)
+		tag, err := s.tx(r).Exec(r.Context(),
+			"DELETE FROM login_tokens WHERE org_id=$1 AND email="+q.p(email),
+			q.args...)
+		if err != nil {
+			t.Fatalf("spending the token: %v", err)
+		}
+		deleted = tag.RowsAffected()
+		hangUp() // the caller closes the connection, here and not elsewhere
+		renewErr = s.renew(r)
+	})(httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodPost, "/api/session/link/redeem", nil).
+			WithContext(ctx))
+
+	if deleted != 1 {
+		t.Fatalf("the token was not there to spend (%d rows), so this test "+
+			"proves nothing about spending it", deleted)
+	}
+	if renewErr != nil {
+		t.Errorf("spending gave up because the caller left: %v", renewErr)
+	}
+	var left int
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"SELECT count(*) FROM login_tokens WHERE email=$1", email).
+			Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if left != 0 {
+		t.Errorf("hanging up handed the token back: it was presented, and it "+
+			"still opens a session for whoever kept a copy (%d row(s))", left)
+	}
+}
+
 // Redeeming takes NO second connection.
 //
 // The request already holds one, from inScope. Asking the pool for another

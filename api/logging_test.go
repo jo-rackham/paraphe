@@ -37,6 +37,38 @@ func TestARelayCannotPutAnAddressInTheLog(t *testing.T) {
 	}
 }
 
+// A relay that names the recipient WITHOUT its domain says as much: the
+// local part is the identifying half, the domain is the campaign's own and
+// names nobody. `recipient "marie.dupont": user unknown` used to go into the
+// log verbatim, because the pattern asked for the whole address.
+func TestARelayNamingOnlyTheLocalPartSaysNoMore(t *testing.T) {
+	s, _ := testServer(t)
+	const email = "marie.dupont@exemple.fr"
+	for _, answer := range []string{
+		`550 recipient "marie.dupont": user unknown`,
+		`550 5.1.1 MARIE.DUPONT: no such mailbox`,
+		"550 <marie.dupont@exemple.fr> unknown; retry as marie.dupont",
+	} {
+		got := s.withoutAddress(errors.New(answer), email)
+		if strings.Contains(strings.ToLower(got), "marie.dupont") {
+			t.Errorf("the recipient's name survived into the log line:"+
+				"\n\tfrom: %s\n\tgot:  %s", answer, got)
+		}
+		if !strings.Contains(got, s.accountPseudonym(email)) {
+			t.Errorf("nothing identifies the account any more: %s", got)
+		}
+	}
+
+	// …and the whole address still wins where both could match, so no
+	// orphaned `@domain` is left standing beside a pseudonym.
+	got := s.withoutAddress(
+		errors.New("550 <marie.dupont@exemple.fr> unknown"), email)
+	if strings.Contains(got, "@exemple.fr") {
+		t.Errorf("the local part was redacted out of the middle of the "+
+			"address, leaving its domain behind: %s", got)
+	}
+}
+
 // Lowercasing changes byte LENGTH for some characters — `Ⱦ` is two bytes and
 // `ⱦ` is three — so an offset found in a lowercased copy does not address
 // the same place in the original. Matching on the copy and slicing the

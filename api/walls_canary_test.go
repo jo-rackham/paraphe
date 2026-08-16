@@ -77,8 +77,15 @@ var (
 	// nothing can be concluded about the campaign — which is a finding, not
 	// a pass. Either the query becomes readable, or the site is declared in
 	// readsNoWalledTable.
+	//
+	// TABLE is a table position like the others, and it has to be listed
+	// here as well as in sqlVerb and tableRef: known to those two alone,
+	// `TABLE `+t is SQL whose walled table nothing can resolve — and an
+	// unresolved reference is no reference, which is the exact silence this
+	// rule exists to break. Whoever adds the next shorthand adds it to all
+	// three.
 	unreadableTable = regexp.MustCompile(
-		`\b(?:FROM|JOIN|INTO|USING)\s*(?:%|\$\?|,|;|$)` +
+		`\b(?:FROM|JOIN|INTO|USING|TABLE)\s*(?:%|\$\?|,|;|$)` +
 			// UPDATE is listed apart, and without the end-of-text case: the
 			// row locking this application allocates cards with ends its
 			// statement on `FOR UPDATE`, which is a locking clause and not a

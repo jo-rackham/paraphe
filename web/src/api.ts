@@ -185,15 +185,26 @@ export const redeemLink = (token: string): Promise<Me> =>
  * not replay a token that opens exactly one session. What ELSE the fragment
  * carried is put back: this application uses no other fragment parameter
  * today, and eating one silently is how the next one would be lost.
+ *
+ * Every path sets `pending`, the one that finds nothing included: leaving it
+ * as it was makes a second call hand back the token of the first.
  */
 export function takeLinkToken(): string | null {
+  pending = null;
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   if (!params.has("jeton")) return null;
   const token = params.get("jeton");
   params.delete("jeton");
   const url = new URL(window.location.href);
   url.hash = params.toString();
-  window.history.replaceState({}, "", url);
+  try {
+    window.history.replaceState({}, "", url);
+  } catch {
+    // A history that refuses does not take the page down with it — the same
+    // line the theme's storage holds. The token is handed over anyway: it is
+    // about to be spent, so the choice is between one spent token left in an
+    // address bar and a blank page with a LIVE one still in it.
+  }
   pending = token || null;
   return pending;
 }

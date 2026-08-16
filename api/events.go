@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 )
 
 // Security events — structured, and carrying pseudonyms only.
@@ -74,7 +75,22 @@ func (s *Server) withoutAddress(err error, email string) string {
 	// QuoteMeta: an address is a literal here, whatever punctuation it
 	// carries. The pattern is built from a stored address and cannot fail to
 	// compile, but a refusal to redact must never be a refusal to log.
-	pattern, compileErr := regexp.Compile("(?i)" + regexp.QuoteMeta(email))
+	//
+	// The LOCAL PART is redacted too, on its own and as a whole word: a good
+	// many relays name the recipient without its domain — `recipient
+	// "marie.dupont": user unknown` — and the domain is the half that
+	// identifies nobody. Listed second so that at the same position the whole
+	// address wins and no `@exemple.fr` is left dangling behind a pseudonym.
+	//
+	// It over-redacts when the local part is an ordinary word (`contact`,
+	// `info`): the sentence loses a word an operator might have wanted. That
+	// is the cheaper mistake — the other one puts a volunteer's name in a log
+	// that is kept.
+	alternatives := regexp.QuoteMeta(email)
+	if local, _, ok := strings.Cut(email, "@"); ok && len(local) >= 3 {
+		alternatives += `|\b` + regexp.QuoteMeta(local) + `\b`
+	}
+	pattern, compileErr := regexp.Compile("(?i)(?:" + alternatives + ")")
 	if compileErr != nil {
 		return "the relay refused, and its answer is withheld: it could not " +
 			"be cleared of the address it names"

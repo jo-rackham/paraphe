@@ -252,6 +252,14 @@ One instance can host several campaigns, one per subdomain.
   `postgresql-parser` brings 180 transitive modules against 4 direct ones).
   Seven adversarial rounds walked past it 46 times. It is the only wall:
   keeping it sharp is not optional.
+  **A table-position keyword belongs to THREE patterns, not one**: `sqlVerb`
+  (this text is a statement), `tableRef` (this is where its table is named)
+  and `unreadableTable` (its table is in that position and cannot be read).
+  PostgreSQL's `TABLE t` shorthand was taught to the first two and not the
+  third, and `TABLE `+t became a statement whose walled table nothing could
+  resolve — which the canary reads as a statement touching no walled table,
+  for all five of them at once. Whoever adds the next shorthand adds it to
+  all three.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -304,7 +312,12 @@ works when the relay is down, and still bootstraps the instance.
   built from the header would send — to a real volunteer, over the campaign's
   own name — a link to a server of the caller's choosing. Multi-campaign, the
   slug is prefixed to the configured apex and the setting must name the base
-  domain; the three mail settings hold together or the start fails.
+  domain; the three mail settings hold together or the start fails — **and
+  the chart refuses them half-filled at RENDER time**, where the person who
+  made the mistake is looking, rather than as a CrashLoopBackOff behind an
+  ArgoCD stuck on « Progressing ». CI renders the mail block too: it is off
+  by default, so no other case exercises those twenty-eight lines, and
+  `helm lint` parses a branch without executing it.
 - **Stored as a plain SHA-256, deliberately.** The token is 256 bits of
   `crypto/rand`: there is nothing to search, so a memory-hard hash buys
   nothing and would put a 32 MiB derivation behind `hashGate` on a PUBLIC
@@ -348,6 +361,13 @@ works when the relay is down, and still bootstraps the instance.
   Taking a SECOND pool connection made the spend independent and DEADLOCKED
   the pool: the request already holds one, so eight simultaneous redemptions
   against a pool of four hung until they timed out. Renewing costs neither.
+  **And that commit does NOT run under the request's context.** Cancelling it
+  is the one failure the CALLER controls: hang up between the DELETE and the
+  commit and PostgreSQL rolls the DELETE back, so the link just presented is
+  live again — a replay obtained on demand, then kept for the day the account
+  it was refused against is switched on. `context.WithoutCancel` plus a bound
+  of its own; `s.commit` keeps the request's context, because an ordinary
+  write that the caller abandons has promised nothing.
 - **One live link per address AND PURPOSE is the DATABASE's promise**, not
   the DELETE's: a unique index on `(org_id, email, purpose)` plus
   `ON CONFLICT … DO UPDATE`. Under READ COMMITTED the DELETE cannot see a row
@@ -362,6 +382,13 @@ works when the relay is down, and still bootstraps the instance.
   offset found in the copy addresses somewhere else in the original: it left
   half an address in the log, and past the end of the string it PANICKED, in
   a detached goroutine, which takes the process with it.
+  **The LOCAL PART is redacted on its own too**, as a whole word: plenty of
+  relays name the recipient without its domain, and the domain is the half
+  that identifies nobody. It over-redacts when the local part is an ordinary
+  word (`contact`, `info`) — the cheaper mistake. **Assumed limit**: a relay
+  that answers with an ALIAS-EXPANDED recipient names an address this code
+  was never given, and no pseudonymisation keyed on the address sent can
+  catch it.
 - **The interface takes the token out of the URL at BOOT** (`main.tsx`),
   hands it over EXACTLY ONCE (`consumeLinkToken`), and DROPS it when the
   visit lands on a screen that cannot use it. Kept until a screen that could

@@ -225,6 +225,16 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`DELETE FROM T USING %S`,
 		`UPDATE %S SET X=1`,
 		`SELECT EMAIL FROM`, // the text ends where the table should be
+		// PostgreSQL's `TABLE t` shorthand is a table position like FROM,
+		// and it reached sqlVerb and tableRef before it reached this rule:
+		// recognised as SQL, its table unresolvable, matching nothing — the
+		// silence this whole rule exists to break, on all five walled tables
+		// at once.
+		`TABLE %S`,
+		`TABLE $?`,
+		`TABLE ,`,
+		`TABLE`,
+		`WITH X AS (TABLE $?) SELECT * FROM X`,
 	} {
 		if !unreadableTable.MatchString(sql) {
 			t.Errorf("the canary cannot say which table this touches, and "+
@@ -242,6 +252,17 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`SELECT A.X FROM ACCOUNTS A JOIN TEAMS T USING $SUB0`,
 		`SELECT EMAIL FROM ACCOUNTS WHERE ORG_ID=$1`,
 		`SELECT X FROM TEAMS G, ACCOUNTS C WHERE G.ORG_ID=$1 AND C.ORG_ID=$1`,
+		// TABLE followed by a name IS readable, and the DDL spellings that
+		// merely contain the word are not table positions at all. Listing
+		// TABLE among the unreadable positions must not turn the schema this
+		// application creates at startup into a finding.
+		`TABLE ACCOUNTS`,
+		`CREATE TABLE IF NOT EXISTS LOGIN_TOKENS $SUB0`,
+		`ALTER TABLE ONLY PUBLIC.ACCOUNTS ADD COLUMN X INT`,
+		`DROP TABLE IF EXISTS ACCOUNTS`,
+		`REINDEX TABLE ACCOUNTS`,
+		`GRANT SELECT ON TABLE ACCOUNTS TO SOMEONE`,
+		`ALTER DEFAULT PRIVILEGES IN SCHEMA PUBLIC GRANT SELECT ON TABLES TO PUBLIC`,
 	} {
 		if loc := unreadableTable.FindStringIndex(sql); loc != nil {
 			t.Errorf("ordinary SQL refused, on %q:\n\t%s",

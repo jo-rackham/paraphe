@@ -314,6 +314,31 @@ describe("landing on a sign-in link", () => {
     expect(window.location.hash).toBe("#onglet=equipe");
   });
 
+  // A call that finds nothing must also LEAVE nothing: read once and kept,
+  // the token of a first call is what a later screen would be handed.
+  it("forgets the previous token when the next look finds none", () => {
+    window.history.replaceState({}, "", "/connexion#jeton=abc123");
+    API.takeLinkToken();
+    expect(API.takeLinkToken()).toBeNull();
+    expect(API.consumeLinkToken()).toBeNull();
+  });
+
+  // A history that refuses is what a sandboxed embed does. Letting it throw
+  // stops main.tsx before createRoot — a blank page, with the link still
+  // LIVE in the address bar that renders it.
+  it("hands the token over even when the address bar refuses to be rewritten", () => {
+    window.history.replaceState({}, "", "/connexion#jeton=abc123");
+    const real = window.history.replaceState;
+    window.history.replaceState = () => {
+      throw new DOMException("blocked", "SecurityError");
+    };
+    try {
+      expect(API.takeLinkToken()).toBe("abc123");
+    } finally {
+      window.history.replaceState = real;
+    }
+  });
+
   it("opens the session the link carries", async () => {
     window.history.replaceState({}, "", "/connexion#jeton=abc123");
     API.takeLinkToken(); // what main.tsx does, at boot

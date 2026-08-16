@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -118,12 +119,23 @@ func (p *Scope) close(ctx context.Context) {
 // for a connection that none of them will release — measured, eight
 // concurrent redemptions against a pool of four hung until they timed out.
 // This costs nothing: the connection is already ours.
+//
+// The commit does NOT run under the request's context. Cancelling it is the
+// one failure the caller controls: closing the connection between the DELETE
+// and the commit cancels the commit, PostgreSQL rolls the DELETE back, and
+// the link just presented is live again — a replay obtained on demand, and
+// then kept for the day the account it was refused against is reactivated.
+// Detached from the cancellation, bounded on its own so a connection that
+// died for real cannot pin the transaction.
 func (s *Server) renew(r *http.Request) error {
 	p := scopeOf(r)
-	if err := p.Tx.Commit(r.Context()); err != nil {
+	ctx, cancel := context.WithTimeout(
+		context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err := p.Tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing before continuing: %w", err)
 	}
-	tx, err := p.conn.Begin(r.Context())
+	tx, err := p.conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reopening a transaction: %w", err)
 	}
