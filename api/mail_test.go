@@ -216,6 +216,11 @@ func TestTheRelayURLIsCheckedBeforeAnythingStarts(t *testing.T) {
 		{"a path after the port", "smtp://relais.exemple.fr:587/envoi", "", from},
 		{"a sender that is not an address", "smtp://relais.exemple.fr", "", "Campagne"},
 		{"a password with no user to carry it", "smtp://relais.exemple.fr", "secret", from},
+		// …and the other way round, which was accepted in silence: the mailer
+		// authenticated with an empty password, the relay answered 535 to
+		// every message, and that refusal only ever reached a detached
+		// goroutine's log while volunteers waited on an inbox.
+		{"a user with no password", "smtp://envoi@relais.exemple.fr:587", "", from},
 	} {
 		if _, err := newSMTPMailer(c.url, c.password, c.from, fixedClock()); err == nil {
 			t.Errorf("%s was accepted (%q)", c.name, c.url)

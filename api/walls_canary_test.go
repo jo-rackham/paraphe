@@ -34,6 +34,13 @@ func walledTablesUpper() []string {
 	return out
 }
 
+// tableName: one reference as it is WRITTEN in a table list — an optional
+// ONLY, an optional schema, a quoted or bare name, an optional alias. Used
+// to walk a comma-separated FROM list one reference at a time.
+const tableName = `(?:ONLY\s+)?(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*)` +
+	`(?:\s*\.\s*(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*))?` +
+	`(?:\s+(?:AS\s+)?[A-Z][A-Z0-9_]*)?`
+
 var (
 	sqlLineComment = regexp.MustCompile(`--[^\n]*`)
 	// The OPENING tag of a PostgreSQL dollar-quoted string. `$1` is not one:
@@ -84,13 +91,27 @@ var (
 	// unresolved reference is no reference, which is the exact silence this
 	// rule exists to break. Whoever adds the next shorthand adds it to all
 	// three.
+	//
+	// The same asymmetry, one position further along: tableRef has always
+	// accepted a COMMA as a table position — `FROM teams g,accounts c` hid
+	// the second table entirely until it did — and this rule only ever looked
+	// at the first. So `FROM accounts a, `+t named a walled table in a place
+	// the canary reads for literals and never checks for markers, and
+	// PostgreSQL cross-joined every campaign's rows into the answer.
+	//
+	// The list is walked table by table rather than with a wildcard, because
+	// a wildcard would swallow `ORDER BY x, %s` — a dynamic COLUMN, which is
+	// nobody's table. Only a comma reached through comma-separated table
+	// references counts.
 	unreadableTable = regexp.MustCompile(
 		`\b(?:FROM|JOIN|INTO|USING|TABLE)\s*(?:%|\$\?|,|;|$)` +
 			// UPDATE is listed apart, and without the end-of-text case: the
 			// row locking this application allocates cards with ends its
 			// statement on `FOR UPDATE`, which is a locking clause and not a
 			// table position. Only an operand it could not read counts.
-			`|\bUPDATE\s*(?:%|\$\?|,)`)
+			`|\bUPDATE\s*(?:%|\$\?|,)` +
+			`|\b(?:FROM|USING)\s+` + tableName +
+			`(?:\s*,\s*` + tableName + `)*\s*,\s*(?:%|\$\?|,|;|$)`)
 	// What makes a resolved string a statement rather than a value. Session
 	// commands count: `SET lock_timeout` reads no table, but it IS the
 	// statement of its call.

@@ -69,6 +69,39 @@ func TestARelayNamingOnlyTheLocalPartSaysNoMore(t *testing.T) {
 	}
 }
 
+// Go's `\b` is ASCII-only — `\w` is `[0-9A-Za-z_]` — so `\bhervé\b` has no
+// boundary to find after the `é` and never matches. In a French campaign
+// that is not an edge case, it is most of the volunteers: the accented name
+// the redaction exists for went into the log verbatim, while the ASCII one
+// beside it was scrubbed.
+func TestAnAccentedNameIsRedactedLikeAnyOther(t *testing.T) {
+	s, _ := testServer(t)
+	for _, c := range []struct{ email, answer, leaks string }{
+		{"hervé@exemple.fr", `550 5.1.1 recipient "hervé": user unknown`, "hervé"},
+		{"chloé@exemple.fr", "550 recipient chloé: no such mailbox", "chloé"},
+		{"élise@exemple.fr", "550 <élise> unknown", "élise"},
+		{"françois@exemple.fr", "550 françois, mailbox full", "françois"},
+		// twice in one answer, and the second must go too: consuming the
+		// character that bounds the first is how the second stays
+		{"hervé@exemple.fr", "550 hervé rejected; hervé rejected twice", "hervé"},
+	} {
+		got := s.withoutAddress(errors.New(c.answer), c.email)
+		if strings.Contains(strings.ToLower(got), c.leaks) {
+			t.Errorf("the recipient's name survived into the log line:"+
+				"\n\tfrom: %s\n\tgot:  %s", c.answer, got)
+		}
+	}
+
+	// A whole word, still: a local part is not redacted out of the middle of
+	// a longer one, or `connect@` would turn `connection reset` into nonsense
+	// and take the operator's only clue with it.
+	got := s.withoutAddress(
+		errors.New("550 the connection was reset"), "connect@exemple.fr")
+	if !strings.Contains(got, "connection was reset") {
+		t.Errorf("an ordinary word was eaten from inside another: %s", got)
+	}
+}
+
 // Lowercasing changes byte LENGTH for some characters — `Ⱦ` is two bytes and
 // `ⱦ` is three — so an offset found in a lowercased copy does not address
 // the same place in the original. Matching on the copy and slicing the

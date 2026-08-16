@@ -259,7 +259,13 @@ One instance can host several campaigns, one per subdomain.
   third, and `TABLE `+t became a statement whose walled table nothing could
   resolve — which the canary reads as a statement touching no walled table,
   for all five of them at once. Whoever adds the next shorthand adds it to
-  all three.
+  all three. The same asymmetry one position further along cost a second
+  critical: `tableRef` has always read a COMMA as a table position, and
+  `unreadableTable` only ever looked at the first, so `FROM accounts a, `+t
+  named a walled table where the canary reads literals and never checks for
+  markers. It walks the list reference by reference — a wildcard between
+  `FROM` and the comma would swallow `ORDER BY x, %s`, which is nobody's
+  table, and a false positive here sends the next author around the wall.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -338,6 +344,11 @@ works when the relay is down, and still bootstraps the instance.
   with a fifteen-minute life. A relay that does not offer it is refused;
   `smtps://` and the loopback are the two ways past that refusal, and the
   loopback is the same exception `net/smtp` makes for credentials.
+  **The URL's user and `PARAPHE_SMTP_PASSWORD` hold together both ways**: a
+  password with no user is refused, and so is a user with no password, which
+  used to authenticate with an empty one — the relay then answered 535 to
+  every message, and that refusal reached an operator as a line in a detached
+  goroutine's log while volunteers waited on an inbox.
 - **Assumed**: whoever knows an address can burn its pending link (minting
   deletes the previous row), bounded by three per quarter of an hour. The
   password path is untouched by it, and the alternative — several live tokens
@@ -367,7 +378,14 @@ works when the relay is down, and still bootstraps the instance.
   live again — a replay obtained on demand, then kept for the day the account
   it was refused against is switched on. `context.WithoutCancel` plus a bound
   of its own; `s.commit` keeps the request's context, because an ordinary
-  write that the caller abandons has promised nothing.
+  write that the caller abandons has promised nothing. **And a commit that
+  fails anyway is answered by spending the token AGAIN**, on a connection of
+  its own (`spendAlone`), the request's being handed back first so the count
+  is never two. A cluster rolling, a node evicted, a stall past the bound —
+  each of them aborts the transaction carrying the DELETE and hands the
+  presented link back, live for its whole remaining life. Best effort by
+  construction: against a database that is simply gone nothing can be
+  promised, and nothing is.
 - **One live link per address AND PURPOSE is the DATABASE's promise**, not
   the DELETE's: a unique index on `(org_id, email, purpose)` plus
   `ON CONFLICT … DO UPDATE`. Under READ COMMITTED the DELETE cannot see a row
@@ -385,10 +403,16 @@ works when the relay is down, and still bootstraps the instance.
   **The LOCAL PART is redacted on its own too**, as a whole word: plenty of
   relays name the recipient without its domain, and the domain is the half
   that identifies nobody. It over-redacts when the local part is an ordinary
-  word (`contact`, `info`) — the cheaper mistake. **Assumed limit**: a relay
-  that answers with an ALIAS-EXPANDED recipient names an address this code
-  was never given, and no pseudonymisation keyed on the address sent can
-  catch it.
+  word (`contact`, `info`) — the cheaper mistake — and stays a whole word
+  because `connect@` would otherwise turn `connection reset` into nonsense.
+  **That boundary is decided on RUNES, not by `\b`**: Go's is ASCII-only
+  (`\w` is `[0-9A-Za-z_]`), so `\bhervé\b` has no boundary to find after the
+  `é` and never matches. In a French campaign that is not an edge case, it
+  is most of the volunteers — the accented name went into the log verbatim
+  while the ASCII one beside it was scrubbed. **Assumed limit**: a relay
+  answering with an ALIAS-EXPANDED recipient names an address this code was
+  never given, and no pseudonymisation keyed on the address sent can catch
+  it.
 - **The interface takes the token out of the URL at BOOT** (`main.tsx`),
   hands it over EXACTLY ONCE (`consumeLinkToken`), and DROPS it when the
   visit lands on a screen that cannot use it. Kept until a screen that could

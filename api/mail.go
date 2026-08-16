@@ -208,6 +208,18 @@ func newSMTPMailer(rawURL, password, from string, now func() time.Time) (*smtpMa
 			"it travels with it")
 	}
 	if user := u.User.Username(); user != "" {
+		// The two settings hold together in BOTH directions. A user with no
+		// password authenticates with an empty one: the relay answers 535 to
+		// every message, and that refusal reaches an operator as a line in a
+		// detached goroutine's log while volunteers keep asking for links
+		// that will never arrive. Refused at startup instead.
+		if password == "" {
+			return nil, fmt.Errorf("PARAPHE_SMTP_URL names the user %q and "+
+				"PARAPHE_SMTP_PASSWORD is empty: the relay would refuse every "+
+				"message, and nobody would learn it from the screen. Give the "+
+				"password, or drop the user from the URL if the relay asks "+
+				"for none", user)
+		}
 		// PLAIN and nothing else. Go's PlainAuth refuses to hand credentials
 		// to a connection that is not encrypted (localhost excepted), which
 		// is the behaviour to want: a relay that offers no TLS gets no

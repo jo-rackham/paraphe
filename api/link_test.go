@@ -590,6 +590,74 @@ func TestSpendingSurvivesACallerThatHangsUpMidRequest(t *testing.T) {
 	}
 }
 
+// …and when the DATABASE is the one that breaks the request.
+//
+// The caller's cancellation is one way the commit fails; a connection the
+// server drops is another, and it is not rarer — a rolling restart of the
+// cluster, a node eviction, a WAL stall past the bound. The transaction
+// aborts either way, the DELETE goes back with it, and the link that was
+// just presented is live again for its whole remaining life: fifteen minutes
+// for a sign-in, SEVEN DAYS for an invitation.
+func TestSpendingSurvivesACommitTheDatabaseRefuses(t *testing.T) {
+	s, srv := testServer(t)
+	withMailer(t, s, "https://campagne.exemple.fr")
+	const email = "marie@exemple.fr"
+	createAccount(t, s, email, RoleVolunteer, nil)
+	c := newClient(t, srv)
+	token := askForLink(t, s, c, email)
+
+	// A commit that fails ONCE, which is what a dropped connection or a
+	// restarting cluster is. `nextval` is not rolled back with the
+	// transaction it aborts, so the retry meets a database that works again —
+	// a trigger refusing for ever would model an outage, where nothing can be
+	// promised and nothing is.
+	execAsMaintenance(t, s, "DROP SEQUENCE IF EXISTS refusals")
+	execAsMaintenance(t, s, "CREATE SEQUENCE refusals")
+	execAsMaintenance(t, s, `CREATE OR REPLACE FUNCTION refuse_once()
+		RETURNS trigger AS $$
+		BEGIN
+			IF nextval('refusals') = 1 THEN
+				RAISE EXCEPTION 'the commit is refused, once';
+			END IF;
+			RETURN NULL;
+		END; $$ LANGUAGE plpgsql`)
+	execAsMaintenance(t, s, `CREATE CONSTRAINT TRIGGER refuse_the_commit
+		AFTER DELETE ON login_tokens DEFERRABLE INITIALLY DEFERRED
+		FOR EACH ROW EXECUTE FUNCTION refuse_once()`)
+	defer func() {
+		execAsMaintenance(t, s,
+			"DROP TRIGGER refuse_the_commit ON login_tokens")
+		execAsMaintenance(t, s, "DROP SEQUENCE refusals")
+	}()
+
+	var renewErr error
+	s.inScope(func(w http.ResponseWriter, r *http.Request) {
+		_, _, renewErr = s.redeemLink(r, token)
+	})(httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodPost, "/api/session/link/redeem", nil))
+
+	if renewErr == nil {
+		t.Fatal("the commit went through: this test no longer exercises the " +
+			"window it was written for")
+	}
+	var left int
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"SELECT count(*) FROM login_tokens WHERE email=$1", email).
+			Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if left != 0 {
+		t.Errorf("a commit the database refused handed the link back: it was "+
+			"presented, and it still opens a session for whoever kept a copy "+
+			"(%d row(s))", left)
+	}
+	if code, _ := redeem(t, newClient(t, srv), token); code != http.StatusUnauthorized {
+		t.Errorf("the link opened a session after the failed attempt: %d", code)
+	}
+}
+
 // Redeeming takes NO second connection.
 //
 // The request already holds one, from inScope. Asking the pool for another

@@ -432,7 +432,12 @@ jobs:
             --set mail.from=contact@exemple.fr \
             --set mail.publicUrl=https://paraphe.exemple.fr \
             --set secrets.smtpPassword=motdepasse
-          grep -q "PARAPHE_PUBLIC_URL" /tmp/courriel.yaml
+          # All four, named one by one. Asserting on a couple of them leaves
+          # the others free to disappear — the same gap the loop below exists
+          # to close, one level down.
+          for reglage in PARAPHE_SMTP_URL PARAPHE_MAIL_FROM PARAPHE_PUBLIC_URL; do
+            grep -q "name: $reglage" /tmp/courriel.yaml
+          done
           # The relay's password comes from the Secret, never from the value
           # inline: a URL travels into logs and into a `describe pod`.
           grep -q "key: PARAPHE_SMTP_PASSWORD" /tmp/courriel.yaml

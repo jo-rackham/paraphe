@@ -235,6 +235,15 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`TABLE ,`,
 		`TABLE`,
 		`WITH X AS (TABLE $?) SELECT * FROM X`,
+		// The SECOND position of a comma list is a table position too —
+		// tableRef reads it for literals, and this rule did not check it for
+		// markers. `FROM accounts a, `+t cross-joins every campaign.
+		`SELECT X FROM ACCOUNTS A, %S N WHERE A.ORG_ID=$1`,
+		`SELECT X FROM ACCOUNTS , %S`,
+		`SELECT X FROM ACCOUNTS A, $? N`,
+		`SELECT X FROM ACCOUNTS A,`,
+		`DELETE FROM T USING ACCOUNTS A, %S`,
+		`SELECT X FROM PUBLIC.ACCOUNTS AS A, TEAMS G, %S`,
 	} {
 		if !unreadableTable.MatchString(sql) {
 			t.Errorf("the canary cannot say which table this touches, and "+
@@ -263,6 +272,16 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`REINDEX TABLE ACCOUNTS`,
 		`GRANT SELECT ON TABLE ACCOUNTS TO SOMEONE`,
 		`ALTER DEFAULT PRIVILEGES IN SCHEMA PUBLIC GRANT SELECT ON TABLES TO PUBLIC`,
+		// A comma that is NOT in a table list. The rule walks the FROM list
+		// one reference at a time for exactly this reason: a wildcard between
+		// FROM and the comma would swallow every dynamic column in the query
+		// and refuse ordinary SQL — which sends the next author around the
+		// canary, and costs what a hole costs.
+		`SELECT ID, %S FROM T WHERE ORG_ID=$1`,
+		`SELECT X FROM ACCOUNTS ORDER BY NAME, %S`,
+		`SELECT X FROM ACCOUNTS A GROUP BY A.NAME, %S`,
+		`SELECT X FROM ACCOUNTS WHERE ORG_ID=$1 ORDER BY A, B, %S LIMIT %S`,
+		`SELECT COALESCE(A, %S) FROM ACCOUNTS WHERE ORG_ID=$1`,
 	} {
 		if loc := unreadableTable.FindStringIndex(sql); loc != nil {
 			t.Errorf("ordinary SQL refused, on %q:\n\t%s",

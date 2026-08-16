@@ -146,9 +146,50 @@ func (s *Server) redeemLink(r *http.Request, token string) (string, string, erro
 	// the token unspent and this function returns no address: spent-and-
 	// committed or untouched, never one told as the other.
 	if err := s.renew(r); err != nil {
+		// …and untouched is not good enough, because a commit fails for
+		// reasons of its own — a cluster rolling, a node evicted, a stall past
+		// the bound — and none of them is a reason to hand back a link that
+		// has just been presented. The transaction carrying the DELETE aborted,
+		// so the row is there again, live for its whole remaining life: seven
+		// days, for an invitation.
+		//
+		// The request's connection goes back FIRST, so this never holds two at
+		// once: that shape deadlocked the pool. Nothing is read after this
+		// point — the route answers 500 whatever happens here — and the second
+		// attempt is best effort by construction: against a database that is
+		// simply gone, nothing can be promised, and nothing is.
+		org := scopeOrg(r)
+		s.release(r)
+		if again := s.spendAlone(r.Context(), org, token); again != nil {
+			slog.Error("a sign-in link was presented and could not be spent: "+
+				"it stays live until it expires", "error", again)
+		}
 		return "", "", fmt.Errorf("spending a sign-in link: %w", err)
 	}
 	return email, purpose, nil
+}
+
+// spendAlone deletes a token on a connection that owes nothing to the
+// request — used when the request's own commit did not land.
+//
+// Detached from the request's context for the same reason the commit is: the
+// caller who hung up is one of the ways to get here, and their cancellation
+// must not decide whether the link they presented survives.
+func (s *Server) spendAlone(ctx context.Context, org int, token string) error {
+	ctx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquiring a connection to spend it: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx,
+		"DELETE FROM login_tokens WHERE org_id=$1 AND token_hash=$2",
+		org, hashLinkToken(token)); err != nil {
+		return fmt.Errorf("spending it on its own connection: %w", err)
+	}
+	return nil
 }
 
 // linkURL: the address that goes into the email.

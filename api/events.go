@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Security events — structured, and carrying pseudonyms only.
@@ -75,27 +77,86 @@ func (s *Server) withoutAddress(err error, email string) string {
 	// QuoteMeta: an address is a literal here, whatever punctuation it
 	// carries. The pattern is built from a stored address and cannot fail to
 	// compile, but a refusal to redact must never be a refusal to log.
-	//
-	// The LOCAL PART is redacted too, on its own and as a whole word: a good
-	// many relays name the recipient without its domain — `recipient
-	// "marie.dupont": user unknown` — and the domain is the half that
-	// identifies nobody. Listed second so that at the same position the whole
-	// address wins and no `@exemple.fr` is left dangling behind a pseudonym.
+	pseudonym := s.accountPseudonym(email)
+	whole, compileErr := regexp.Compile("(?i)" + regexp.QuoteMeta(email))
+	if compileErr != nil {
+		return withheld
+	}
+	// The whole address FIRST, so that where both could match no `@exemple.fr`
+	// is left dangling behind a pseudonym.
+	text := whole.ReplaceAllLiteralString(err.Error(), pseudonym)
+
+	// Then the LOCAL PART on its own: a good many relays name the recipient
+	// without its domain — `recipient "marie.dupont": user unknown` — and the
+	// domain is the half that identifies nobody.
 	//
 	// It over-redacts when the local part is an ordinary word (`contact`,
 	// `info`): the sentence loses a word an operator might have wanted. That
 	// is the cheaper mistake — the other one puts a volunteer's name in a log
-	// that is kept.
-	alternatives := regexp.QuoteMeta(email)
-	if local, _, ok := strings.Cut(email, "@"); ok && len(local) >= 3 {
-		alternatives += `|\b` + regexp.QuoteMeta(local) + `\b`
+	// that is kept. Which is also why it must stay a WHOLE word: a local part
+	// of `connect` would otherwise turn `connection reset` into nonsense.
+	local, _, ok := strings.Cut(email, "@")
+	if !ok || len(local) < 3 {
+		return text
 	}
-	pattern, compileErr := regexp.Compile("(?i)(?:" + alternatives + ")")
+	bare, compileErr := regexp.Compile("(?i)" + regexp.QuoteMeta(local))
 	if compileErr != nil {
-		return "the relay refused, and its answer is withheld: it could not " +
-			"be cleared of the address it names"
+		return withheld
 	}
-	return pattern.ReplaceAllLiteralString(err.Error(), s.accountPseudonym(email))
+	return replaceIsolated(text, bare, pseudonym)
+}
+
+const withheld = "the relay refused, and its answer is withheld: it could " +
+	"not be cleared of the address it names"
+
+// replaceIsolated replaces every match that stands as a WHOLE word.
+//
+// Written by hand because `\b` cannot express it: Go's is ASCII-only — `\w`
+// is `[0-9A-Za-z_]` — so `\bhervé\b` has no boundary to find after the `é`
+// and never matches. In a French campaign that is most of the volunteers,
+// and the fragment the redaction exists for went into the log verbatim.
+//
+// Offsets come from the SAME string they index, which is the other half of
+// this function's history: found in a lowercased copy, they addressed
+// somewhere else entirely, because lowering changes byte length.
+func replaceIsolated(text string, pattern *regexp.Regexp, with string) string {
+	var out strings.Builder
+	last := 0
+	for _, loc := range pattern.FindAllStringIndex(text, -1) {
+		if !isolated(text, loc[0], loc[1]) {
+			continue
+		}
+		out.WriteString(text[last:loc[0]])
+		out.WriteString(with)
+		last = loc[1]
+	}
+	if last == 0 {
+		return text
+	}
+	out.WriteString(text[last:])
+	return out.String()
+}
+
+// isolated: neither side of [start,end) is a word rune. Letters and digits
+// of EVERY alphabet count, which is the whole point.
+func isolated(text string, start, end int) bool {
+	if start > 0 {
+		before, _ := utf8.DecodeLastRuneInString(text[:start])
+		if wordRune(before) {
+			return false
+		}
+	}
+	if end < len(text) {
+		after, _ := utf8.DecodeRuneInString(text[end:])
+		if wordRune(after) {
+			return false
+		}
+	}
+	return true
+}
+
+func wordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // logPseudonym derives the day-scoped pseudonym of one subject.
