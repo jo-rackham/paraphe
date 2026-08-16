@@ -142,6 +142,16 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 			"Cette adresse email est trop longue (254 caractères maximum).")
 		return
 	}
+	// The name is bounded like every other name this application stores — a
+	// team's, a campaign's, a requester's. This route was the one that was
+	// not, and it is the one that WRITES A PERSON: 128 KiB of body per
+	// request against a ceiling of 120 writes a minute puts megabytes into an
+	// unindexed column, and no other ceiling stands between.
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom ne doit pas dépasser 200 caractères.")
+		return
+	}
 
 	role, team := d.Role, d.TeamID
 	if me.Coordination() {

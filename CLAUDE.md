@@ -266,6 +266,20 @@ One instance can host several campaigns, one per subdomain.
   markers. It walks the list reference by reference — a wildcard between
   `FROM` and the comma would swallow `ORDER BY x, %s`, which is nobody's
   table, and a false positive here sends the next author around the wall.
+  A THIRD round produced the same shape again, so the rule now covers every
+  place a table stands in: after a keyword, after a verb no predicate can
+  bound (`"TRUNCATE "+t` and `"GRANT SELECT ON "+t` read as statements
+  touching nothing at all), and anywhere in a FROM list — that last one
+  written in Go, because the list ENDS at a clause keyword and RE2 cannot say
+  "up to the first of these words". `destructiveVerbs` is declared ONCE and
+  both rules are built from it, with
+  `TestEveryDestructiveVerbHasAnUnreadableForm` walking the list and
+  demanding both forms of each. **A marker is something format strings are
+  full of, where a table NAME is not**: the destructive rule therefore
+  anchors its verb at the start of a statement and requires SQL after the
+  object, or `lock %d unavailable after %s` is refused as a LOCK statement.
+  `readsNoWalledTable` is still EMPTY, and keeping it so is the measure of
+  whether these rules judge statements or prose.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -383,9 +397,13 @@ works when the relay is down, and still bootstraps the instance.
   its own (`spendAlone`), the request's being handed back first so the count
   is never two. A cluster rolling, a node evicted, a stall past the bound —
   each of them aborts the transaction carrying the DELETE and hands the
-  presented link back, live for its whole remaining life. Best effort by
-  construction: against a database that is simply gone nothing can be
-  promised, and nothing is.
+  presented link back, live for its whole remaining life. Best effort, and
+  the limit is stated rather than implied: **both attempts are bounded at
+  five seconds, so a database that stalls longer than that — not only one
+  that is gone — leaves the link live and says so in the log**. A longer
+  bound would pin a pooled connection on a request that has already failed;
+  no bound would pin it for ever. The failed spend is logged, never
+  answered.
 - **One live link per address AND PURPOSE is the DATABASE's promise**, not
   the DELETE's: a unique index on `(org_id, email, purpose)` plus
   `ON CONFLICT … DO UPDATE`. Under READ COMMITTED the DELETE cannot see a row

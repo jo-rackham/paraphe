@@ -41,6 +41,37 @@ const tableName = `(?:ONLY\s+)?(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*)` +
 	`(?:\s*\.\s*(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*))?` +
 	`(?:\s+(?:AS\s+)?[A-Z][A-Z0-9_]*)?`
 
+// marker: what stands where a table name should, when the canary could not
+// read one — a format verb, an expression it gave up on, a separator whose
+// name vanished, or the end of the text. Named once so the rules that look
+// for a table position all look for the SAME thing.
+const marker = `(?:%|\$\?|,|;|$)`
+
+// sqlContinues: what may follow the OBJECT of a destructive statement. A
+// closed list, because the alternative is prose — `lock %d unavailable after
+// %s` is not a LOCK statement, and nothing else tells the two apart once the
+// table name has been replaced by a marker. Missing an exotic continuation
+// costs coverage of that one spelling; destructiveRef still catches it
+// whenever the table is named.
+// markerObject: the same marker, but consuming the WHOLE format verb —
+// `%S`, `%D`, `%[2]S`. The rules that only ask whether a marker is THERE can
+// stop at the `%`; the one that also asks what FOLLOWS the object cannot, or
+// it reads the verb's own letter as the continuation.
+const markerObject = `(?:%\[?\d*\]?[A-Z]?|\$\?|,|;|$)`
+
+const sqlContinues = `\s*(?:$|;|\(|\b(?:IN|TO|FROM|USING|WITH|CASCADE` +
+	`|RESTRICT|ADD|DROP|RENAME|SET|RESET|OWNER|ENABLE|DISABLE|ALTER` +
+	`|VALIDATE|ATTACH|DETACH|INHERIT|NO|REPLICA|CLUSTER|OPTIONS)\b)`
+
+// destructiveVerbs: the commands no predicate can bound, written ONCE.
+//
+// destructiveRef looks for them with the table NAMED, destructiveUnreadable
+// with the table replaced by a marker, and the two must know the same list —
+// a verb one of them knows and the other does not is precisely the shape
+// that produced a critical in three rounds running. Both are built from this
+// string, and TestEveryDestructiveVerbHasAnUnreadableForm walks it.
+const destructiveVerbs = `TRUNCATE|LOCK|DROP|ALTER|COPY|REINDEX|CLUSTER`
+
 var (
 	sqlLineComment = regexp.MustCompile(`--[^\n]*`)
 	// The OPENING tag of a PostgreSQL dollar-quoted string. `$1` is not one:
@@ -104,14 +135,54 @@ var (
 	// nobody's table. Only a comma reached through comma-separated table
 	// references counts.
 	unreadableTable = regexp.MustCompile(
-		`\b(?:FROM|JOIN|INTO|USING|TABLE)\s*(?:%|\$\?|,|;|$)` +
+		`\b(?:FROM|JOIN|INTO|USING)\s*` + marker +
+			// TABLE takes the modifiers PostgreSQL allows between the keyword
+			// and the name: `TABLE ONLY t` is the shorthand on one partition.
+			`|\bTABLE\s*(?:ONLY\s+)?` + marker +
 			// UPDATE is listed apart, and without the end-of-text case: the
 			// row locking this application allocates cards with ends its
 			// statement on `FOR UPDATE`, which is a locking clause and not a
 			// table position. Only an operand it could not read counts.
 			`|\bUPDATE\s*(?:%|\$\?|,)` +
 			`|\b(?:FROM|USING)\s+` + tableName +
-			`(?:\s*,\s*` + tableName + `)*\s*,\s*(?:%|\$\?|,|;|$)`)
+			`(?:\s*,\s*` + tableName + `)*\s*,\s*(?:ONLY\s+)?` + marker)
+	// The destructive verbs, with an operand that cannot be read.
+	//
+	// destructiveRef catches every one of these when the table is NAMED,
+	// because no predicate can bound them: TRUNCATE empties whatever any
+	// WHERE says, GRANT hands the table to every role in the cluster. Writing
+	// the name as a format verb is the SAME statement with the name taken
+	// out, and nothing looked there: `TRUNCATE `+t read as a statement
+	// touching no walled table, and so did `GRANT SELECT ON `+t.
+	//
+	// It mirrors destructiveRef's three shapes deliberately, and
+	// TestEveryDestructiveVerbHasAnUnreadableForm holds the two together —
+	// the gap between what one rule knows and what its neighbour knows has
+	// produced a critical in three rounds running.
+	destructiveUnreadable = regexp.MustCompile(
+		// The verb OPENS the statement, and what follows the object is SQL.
+		// Both anchors are paid for: `sqlVerb` lets error messages through on
+		// purpose — a query hidden in a helper is still a query — and a marker
+		// is a thing format strings are full of, where a table NAME is not. So
+		// `taking lock %d: %w` and `lock %d unavailable after %s: …` read as
+		// `LOCK <something>` and were refused, which is a false positive, and
+		// in a guard that BLOCKS that costs what a hole costs.
+		`(?:^|;)\s*(?:` + destructiveVerbs + `)\s+` +
+			`(?:TABLE\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(?:ONLY\s+)?` +
+			markerObject + sqlContinues +
+			`|(?:^|;)\s*(?:CREATE|DROP|ALTER)\s+` +
+			`(?:POLICY|TRIGGER|RULE|INDEX|CONSTRAINT)\b` +
+			`[^;]*?\bON\s+(?:ONLY\s+)?(?:%|\$\?)` +
+			`|(?:^|;)\s*(?:GRANT|REVOKE)\b[^;]*?\bON\s+(?:TABLE\s+)?` +
+			`(?:ALL\s+TABLES\s+IN\s+SCHEMA\s+)?(?:ONLY\s+)?(?:%|\$\?)`)
+	// Where a FROM or USING list ENDS, so a comma inside one can be told from
+	// a comma in an ORDER BY. RE2 cannot say "up to the first of these
+	// words", which is why fromListMarker is Go rather than a pattern.
+	fromList  = regexp.MustCompile(`\b(?:FROM|USING)\s+`)
+	clauseEnd = regexp.MustCompile(
+		`\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|OFFSET|RETURNING|SET|VALUES` +
+			`|UNION|INTERSECT|EXCEPT|WINDOW|FETCH|FOR)\b`)
+	commaMarker = regexp.MustCompile(`,\s*(?:ONLY\s+)?(?:%|\$\?|,|;|$)`)
 	// What makes a resolved string a statement rather than a value. Session
 	// commands count: `SET lock_timeout` reads no table, but it IS the
 	// statement of its call.
@@ -403,6 +474,54 @@ func tableRef(table string) *regexp.Regexp {
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
+// unreadablePosition: a table position in this statement whose operand the
+// canary could not read as a name, and the text of it.
+//
+// Three rules, because a table stands in three kinds of place: after a
+// keyword that expects one, after a verb no predicate can bound, and in the
+// comma list of a FROM. The third is Go rather than a pattern because that
+// list ENDS at a clause keyword — `FROM t ORDER BY a, %s` names a dynamic
+// COLUMN, which is nobody's table — and RE2 cannot say "up to the first of
+// these words".
+func unreadablePosition(sql string) (string, bool) {
+	for _, rule := range []*regexp.Regexp{unreadableTable, destructiveUnreadable} {
+		if loc := rule.FindStringIndex(sql); loc != nil {
+			return strings.TrimSpace(sql[loc[0]:loc[1]]), true
+		}
+	}
+	// Per LEVEL, where parentheses have already become $SUBn: a subquery in
+	// the first position hid the comma behind it, and a function call in the
+	// list would otherwise offer its own comma as a table position.
+	for _, one := range strings.Split(sql, ";") {
+		for _, level := range levels(one) {
+			if seen, found := fromListMarker(level); found {
+				return seen, true
+			}
+		}
+	}
+	return "", false
+}
+
+// fromListMarker: a marker in a comma position of a FROM or USING list.
+//
+// The list runs from the keyword to the first clause keyword. Everything
+// between is table references, however they are written — a plain name, an
+// alias, an explicit JOIN with its condition, a subquery already reduced to
+// $SUBn — so a comma there is a table position and a marker after it is a
+// table nobody can read.
+func fromListMarker(level string) (string, bool) {
+	for _, start := range fromList.FindAllStringIndex(level, -1) {
+		list := level[start[1]:]
+		if end := clauseEnd.FindStringIndex(list); end != nil {
+			list = list[:end[0]]
+		}
+		if loc := commaMarker.FindStringIndex(list); loc != nil {
+			return strings.TrimSpace(list[loc[0]:loc[1]]), true
+		}
+	}
+	return "", false
+}
+
 // destructiveRef: the commands no predicate can bound. TRUNCATE empties a
 // table whatever any WHERE says; LOCK visits no row; DROP and ALTER are DDL,
 // and `ALTER TABLE … DISABLE ROW LEVEL SECURITY` is how the wall comes down
@@ -413,7 +532,7 @@ func destructiveRef(table string) *regexp.Regexp {
 	const qualified = `(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?`
 	return regexp.MustCompile(
 		// the table right after the verb…
-		`\b(TRUNCATE|LOCK|DROP|ALTER|COPY|REINDEX|CLUSTER)\s+(?:TABLE\s+)?` +
+		`\b(` + destructiveVerbs + `)\s+(?:TABLE\s+)?` +
 			`(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?` + qualified + table + `"?\b` +
 			// …or behind an object that governs it. `DROP POLICY p ON
 			// accounts` takes the wall down for good, `CREATE POLICY p ON
@@ -1041,7 +1160,7 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 		// a name. Refused rather than passed over: an unresolved reference
 		// used to mean the statement carried no walled table, which is how
 		// three of the four criticals of the eighth round read as compliant.
-		if loc := unreadableTable.FindStringIndex(st.SQL); loc != nil {
+		if seen, found := unreadablePosition(st.SQL); found {
 			if _, declared := readsNoWalledTable[print]; declared {
 				used[print] = true
 			} else {
@@ -1051,7 +1170,7 @@ func TestEveryQueryOnAWalledTableNamesTheCampaign(t *testing.T) {
 					"cannot be told whether the campaign is named. Write the "+
 					"table where it can be read, or — if it touches no walled "+
 					"table — declare %q in readsNoWalledTable:\n\t%s",
-					where, strings.TrimSpace(st.SQL[loc[0]:loc[1]]), print, st.SQL)
+					where, seen, print, st.SQL)
 				continue
 			}
 		}

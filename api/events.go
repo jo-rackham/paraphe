@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Security events — structured, and carrying pseudonyms only.
@@ -74,17 +76,30 @@ func (s *Server) withoutAddress(err error, email string) string {
 	if email == "" {
 		return err.Error()
 	}
+	// Both sides brought to ONE spelling first. `é` is one rune (U+00E9) or
+	// two (`e` + a combining acute), the two spell the same address without
+	// sharing a byte, and the stored one need not agree with the one a relay
+	// quotes back. Compared byte for byte, neither pass matched and the whole
+	// address went into the log, domain included. The project already knows
+	// the shape: normaliseForTemplateCheck exists because a `é` pasted from a
+	// PDF arrives decomposed.
+	//
+	// The pseudonym is derived from the address AS STORED, so that the same
+	// account reads the same in every line, whichever form reached this.
+	pseudonym := s.accountPseudonym(email)
+	text := norm.NFC.String(err.Error())
+	email = norm.NFC.String(email)
+
 	// QuoteMeta: an address is a literal here, whatever punctuation it
 	// carries. The pattern is built from a stored address and cannot fail to
 	// compile, but a refusal to redact must never be a refusal to log.
-	pseudonym := s.accountPseudonym(email)
 	whole, compileErr := regexp.Compile("(?i)" + regexp.QuoteMeta(email))
 	if compileErr != nil {
 		return withheld
 	}
 	// The whole address FIRST, so that where both could match no `@exemple.fr`
 	// is left dangling behind a pseudonym.
-	text := whole.ReplaceAllLiteralString(err.Error(), pseudonym)
+	text = whole.ReplaceAllLiteralString(text, pseudonym)
 
 	// Then the LOCAL PART on its own: a good many relays name the recipient
 	// without its domain — `recipient "marie.dupont": user unknown` — and the

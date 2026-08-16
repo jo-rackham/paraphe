@@ -155,9 +155,12 @@ func (s *Server) redeemLink(r *http.Request, token string) (string, string, erro
 		//
 		// The request's connection goes back FIRST, so this never holds two at
 		// once: that shape deadlocked the pool. Nothing is read after this
-		// point — the route answers 500 whatever happens here — and the second
-		// attempt is best effort by construction: against a database that is
-		// simply gone, nothing can be promised, and nothing is.
+		// point — the route answers 500 whatever happens here.
+		//
+		// Best effort, and the limit is worth naming: each attempt is bounded
+		// at five seconds, so a database that STALLS longer than that leaves
+		// the link live just as a database that is gone does. A longer bound
+		// would pin a pooled connection on a request that has already failed.
 		org := scopeOrg(r)
 		s.release(r)
 		if again := s.spendAlone(r.Context(), org, token); again != nil {

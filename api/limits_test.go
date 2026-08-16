@@ -519,6 +519,110 @@ func zeroByte(expr ast.Expr) bool {
 // on the sender's own screen. The refusal lives at the two points every
 // input crosses — never in a handler, where the first attempt covered one
 // write path out of ten.
+// A route that decodes a `name` bounds it.
+//
+// Four routes write a name into a TEXT column — a team's, a campaign's, a
+// hosting requester's, a person's — and three of them checked
+// maxNameRunes. The fourth was routeCreateAccount, the one that writes a
+// PERSON: a 128 KiB body against a ceiling of 120 writes a minute put
+// megabytes into an unindexed column, and nothing else stood in the way.
+//
+// Read from the SOURCE, because the fifth route is the one this matters
+// for. A handler that decodes a struct carrying `json:"name"` must name the
+// ceiling in the same function — where a reader of that handler sees it.
+func TestEveryRouteThatDecodesANameBoundsIt(t *testing.T) {
+	files := apiPackage(t)
+
+	// Which request types carry a name at all.
+	carriesName := map[string]bool{}
+	for _, file := range files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			spec, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			st, ok := spec.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			for _, f := range st.Fields.List {
+				if f.Tag != nil && strings.Contains(f.Tag.Value, `json:"name"`) {
+					carriesName[spec.Name.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	if len(carriesName) == 0 {
+		t.Fatal("no request type carries a name: this canary is looking at " +
+			"the wrong thing and would pass whatever the handlers did")
+	}
+
+	checked := 0
+	for name, file := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			// Does this function DECODE one of those types? Declaring a
+			// variable of the type is not enough: ReadOrg and readAccount
+			// declare one and fill it from the database, where the length is
+			// whatever was stored — bounded on the way IN, which is here.
+			declares, reads := false, false
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "readBody" {
+						reads = true
+					}
+				}
+				decl, ok := n.(*ast.DeclStmt)
+				if !ok {
+					return true
+				}
+				gen, ok := decl.Decl.(*ast.GenDecl)
+				if !ok {
+					return true
+				}
+				for _, sp := range gen.Specs {
+					vs, ok := sp.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					if id, ok := vs.Type.(*ast.Ident); ok && carriesName[id.Name] {
+						declares = true
+					}
+				}
+				return true
+			})
+			if !declares || !reads {
+				continue
+			}
+			checked++
+			bounded := false
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "maxNameRunes" {
+					bounded = true
+				}
+				return true
+			})
+			if !bounded {
+				t.Errorf("%s:%s decodes a name and never names maxNameRunes: "+
+					"the body ceiling is 128 KiB and this column is text, so "+
+					"the only bound left is how fast the rate limiter lets the "+
+					"caller repeat", name, fn.Name.Name)
+			}
+		}
+	}
+	if checked < 3 {
+		t.Errorf("only %d handler(s) matched: the canary stopped finding the "+
+			"routes it exists for", checked)
+	}
+}
+
 func TestUnstorableTextIsRefusedAtTheEntryPoints(t *testing.T) {
 	files := apiPackage(t)
 	router, auth := files["router.go"], files["auth.go"]

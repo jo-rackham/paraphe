@@ -148,6 +148,67 @@ func unwalled() { run("SELECT email" + scopedFilter("anything")) }
 	}
 }
 
+// The verbs no predicate can bound, with the table NAMED and with the table
+// replaced by a marker, must both be findings.
+//
+// Three rounds running produced a critical of the same shape: a table
+// position one rule knew and its neighbour did not. `TABLE t` reached
+// sqlVerb and tableRef and not unreadableTable; a comma reached tableRef and
+// not unreadableTable; and destructiveRef knew seven verbs of which
+// unreadableTable knew none — so `"TRUNCATE "+t` and `"GRANT SELECT ON "+t`
+// read as statements touching no walled table at all.
+//
+// Both patterns are built from destructiveVerbs, and this walks that list:
+// adding a verb to the guard without teaching it its unreadable form goes
+// red here, rather than three months later in a round nobody ran.
+func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
+	for _, verb := range strings.Split(destructiveVerbs, "|") {
+		named := verb + " ACCOUNTS"
+		if !destructiveRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("destructiveRef does not know %q, so nothing refuses "+
+				"it with the table named:\n\t%s", verb, named)
+		}
+		// …and the same statement with the name taken out
+		for _, unreadable := range []string{verb + " %S", verb + " $?"} {
+			if _, found := unreadablePosition(unreadable); !found {
+				t.Errorf("%q names a table nobody can read and no rule says "+
+					"so — the statement reads as touching no walled table:"+
+					"\n\t%s", verb, unreadable)
+			}
+		}
+	}
+	// The privilege and object-governing shapes, which name their table after
+	// an ON rather than after the verb.
+	for _, unreadable := range []string{
+		`GRANT SELECT ON %S TO PUBLIC`,
+		`REVOKE ALL ON $? FROM PARAPHE`,
+		`CREATE POLICY P ON %S USING $SUB0`,
+		`DROP POLICY P ON $?`,
+		`CREATE TRIGGER T AFTER DELETE ON %S FOR EACH ROW EXECUTE F$SUB0`,
+	} {
+		if _, found := unreadablePosition(unreadable); !found {
+			t.Errorf("the table this governs cannot be read and no rule says "+
+				"so:\n\t%s", unreadable)
+		}
+	}
+	// And what must NOT be a finding: a message is not a statement. `sqlVerb`
+	// lets error text through on purpose — a query hidden in a helper is
+	// still a query — and a marker is something format strings are full of,
+	// where a table NAME is not. These two are real messages from db.go, and
+	// refusing them is a false positive, which in a guard that BLOCKS costs
+	// what a hole costs.
+	for _, message := range []string{
+		`LOCK %D UNAVAILABLE AFTER %S: ANOTHER INSTANCE HOLDS IT`,
+		`TAKING LOCK %D: %W`,
+		`COPY OF THE LIST REFUSED AFTER %D ROWS`,
+	} {
+		if seen, found := unreadablePosition(message); found {
+			t.Errorf("an error message was refused as a statement, on %q:"+
+				"\n\t%s", seen, message)
+		}
+	}
+}
+
 // A rule that never runs guards nothing, and it passes its own unit test
 // while doing it. The main test drops any statement `sqlVerb` does not
 // recognise, BEFORE consulting the destructive rules — so the three verbs

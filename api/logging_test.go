@@ -102,6 +102,37 @@ func TestAnAccentedNameIsRedactedLikeAnyOther(t *testing.T) {
 	}
 }
 
+// The same name written the other way round in Unicode.
+//
+// `é` is one rune (U+00E9) or two (`e` + U+0301), and the two spell the same
+// address without sharing a byte. The stored one and the one a relay quotes
+// back need not agree — this project already knows the shape, which is why
+// the template check normalises before comparing: a `é` pasted from a PDF
+// arrives decomposed. Byte against byte, neither pass matched and the WHOLE
+// address went into the log, domain included.
+func TestTheTwoWaysOfSpellingAnAccentAreTheSameAddress(t *testing.T) {
+	s, _ := testServer(t)
+	const composed = "hervé@exemple.fr"    // é as one rune
+	const decomposed = "hervé@exemple.fr" // e + combining acute
+	if composed == decomposed {
+		t.Fatal("these are the same bytes, so this test proves nothing")
+	}
+	for _, c := range []struct{ stored, quoted string }{
+		{composed, decomposed},
+		{decomposed, composed},
+		{composed, composed},
+		{decomposed, decomposed},
+	} {
+		answer := "550 5.1.1 <" + c.quoted + ">: user unknown"
+		got := s.withoutAddress(errors.New(answer), c.stored)
+		if strings.Contains(got, "@exemple.fr") {
+			t.Errorf("the address survived because it was spelled the other "+
+				"way:\n\tstored: %q\n\tquoted: %q\n\tgot:    %s",
+				c.stored, c.quoted, got)
+		}
+	}
+}
+
 // Lowercasing changes byte LENGTH for some characters — `Ⱦ` is two bytes and
 // `ⱦ` is three — so an offset found in a lowercased copy does not address
 // the same place in the original. Matching on the copy and slicing the
@@ -118,6 +149,14 @@ func TestARelayAnswerInAnyAlphabetIsSafeToRedact(t *testing.T) {
 		{"550 rejected", ""},
 		{"İ 550 <a@b.c>", "a@b.c"},
 		{strings.Repeat("Ⱦ<a@b.c> ", 50), "a@b.c"},
+		// Bytes that are not UTF-8 at all, on both sides. A relay answers
+		// whatever it answers, and this runs in a detached goroutine where a
+		// panic takes the process with it — normalising and slicing must both
+		// survive a truncated sequence and a bare continuation byte.
+		{"550 \xff\xfe <a@b.c> unknown", "a@b.c"},
+		{"550 \xc3 <a@b.c>", "a@b.c"},
+		{"550 <a@b.c> \xe2\x82", "a@b.c"},
+		{"550 rejected", "\xffbad@b.c"},
 	} {
 		got := s.withoutAddress(errors.New(c.answer), c.email)
 		if c.email != "" && strings.Contains(strings.ToLower(got), c.email) {
