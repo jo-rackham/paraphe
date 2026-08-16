@@ -106,15 +106,32 @@ tasks:
 
   restore:
     desc: 'Restaure la base depuis un dump — ex : task restore -- backup-2026-08-15.sql'
+    # Le dump est vérifié AVANT que quoi que ce soit soit détruit. Écrite
+    # dans l'autre ordre, cette tâche transformait une faute de frappe dans
+    # le nom du fichier en perte totale : DROP DATABASE passait, psql
+    # échouait sur un fichier absent, et `start` ne tournait jamais — base
+    # vide, API éteinte, sur la seule donnée irremplaçable du projet.
+    preconditions:
+      - sh: test -n '{{.CLI_ARGS}}'
+        msg: 'Quel dump ? Ex : task restore -- backup-2026-08-15.sql'
+      - sh: test -s '{{.CLI_ARGS}}'
+        msg: '{{.CLI_ARGS}} est introuvable ou vide.'
+      - sh: grep -qm1 'PostgreSQL database dump' '{{.CLI_ARGS}}'
+        msg: "{{.CLI_ARGS}} ne ressemble pas à un dump pg_dump."
     cmds:
       # L'API est arrêtée pendant la restauration : elle rejoue son schéma au
       # démarrage et importerait la liste par-dessus une base à moitié écrite.
       - docker compose stop paraphe
-      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'DROP DATABASE IF EXISTS paraphe'
+      # La base actuelle est mise de côté, pas supprimée : une restauration
+      # ratée doit laisser l'opérateur dans un état pas pire qu'avant.
+      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'DROP DATABASE IF EXISTS paraphe_avant_restauration'
+      - docker compose exec -T postgres psql -U paraphe -d postgres -c 'ALTER DATABASE paraphe RENAME TO paraphe_avant_restauration'
       - docker compose exec -T postgres psql -U paraphe -d postgres -c 'CREATE DATABASE paraphe'
-      - docker compose exec -T postgres psql -U paraphe -d paraphe < {{.CLI_ARGS}}
+      # ON_ERROR_STOP : sans lui psql rend 0 sur un fichier plein d'erreurs,
+      # et la tâche annonçait « restauré » sur une base à moitié écrite.
+      - docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U paraphe -d paraphe < {{.CLI_ARGS}}
       - docker compose start paraphe
-      - echo "restauré depuis {{.CLI_ARGS}}"
+      - echo "restauré depuis {{.CLI_ARGS}} — l'ancienne base est gardée sous paraphe_avant_restauration, à supprimer quand la restauration est vérifiée"
 
   gh:
     desc: 'gh avec des identifiants isolés au dépôt — ex: task gh -- repo view'

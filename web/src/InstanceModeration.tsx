@@ -320,18 +320,26 @@ function Creation({
       </p>
       <p>
         <label>
-          Email de la coordination
           <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+            type="checkbox"
+            checked={listed}
+            onChange={(e) => setListed(e.target.checked)}
+          />{" "}
+          Référencer la campagne dans l'annuaire public
         </label>
+      </p>
+      {/* the heading carries what these two fields are, so they can be
+          named like every other account field in the app: a « Nom » right
+          under « Nom de la campagne » only reads as a person's name once
+          something says a person is being created */}
+      <h3 className="groupe">Le compte de coordination</h3>
+      <p className="gris">
+        Il est créé avec la campagne : c'est lui qui se connectera, et son mot
+        de passe ne s'affiche qu'une fois.
       </p>
       <p>
         <label>
-          Nom de la coordination
+          Nom
           <input
             type="text"
             required
@@ -342,12 +350,13 @@ function Creation({
       </p>
       <p>
         <label>
+          Adresse email
           <input
-            type="checkbox"
-            checked={listed}
-            onChange={(e) => setListed(e.target.checked)}
-          />{" "}
-          Référencer la campagne dans l'annuaire public
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </label>
       </p>
       <button type="submit" aria-disabled={sending || undefined}>

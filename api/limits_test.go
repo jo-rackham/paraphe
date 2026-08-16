@@ -182,12 +182,44 @@ func stringValues(files map[string]*ast.File) map[string]string {
 	// how a hole gets declared compliant. Unresolvable, the call site
 	// becomes unreadable, and an unreadable site is a finding —
 	// TestNoQueryIsInvisibleToTheCanary says so and names it.
-	for _, file := range files {
+	//
+	// `init()` is not the only thing that runs before the first request: a
+	// package-level `var x = func() … { … }()` initialiser runs BEFORE init,
+	// and `main` runs after it. All three reach production; a reassignment in
+	// any of them is what the driver executes.
+	startupBodies := func(file *ast.File) []ast.Node {
+		var bodies []ast.Node
 		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Name.Name != "init" {
-				continue
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil && (d.Name.Name == "init" || d.Name.Name == "main") {
+					bodies = append(bodies, d)
+				}
+			case *ast.GenDecl:
+				if d.Tok != token.VAR {
+					continue
+				}
+				// the body of any function literal in a var initialiser
+				for _, spec := range d.Specs {
+					value, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, v := range value.Values {
+						ast.Inspect(v, func(n ast.Node) bool {
+							if lit, ok := n.(*ast.FuncLit); ok {
+								bodies = append(bodies, lit)
+							}
+							return true
+						})
+					}
+				}
 			}
+		}
+		return bodies
+	}
+	for _, file := range files {
+		for _, fn := range startupBodies(file) {
 			ast.Inspect(fn, func(n ast.Node) bool {
 				a, ok := n.(*ast.AssignStmt)
 				if !ok || a.Tok == token.DEFINE {

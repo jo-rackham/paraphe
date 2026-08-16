@@ -538,6 +538,111 @@ func viaFreeFunction(ctx context.Context, tx pgx.Tx) { textColumn(ctx, tx, "SELE
 	}
 }
 
+// R12. `[]query{{…}}` and `map[string]query{…}` ELIDE the element type on the
+// inner literal — its Type is nil — so a guard reading only `query{…}` saw
+// neither, and a builder made that way inherits nothing from scoped(r).
+func TestAQueryBuiltInACollectionIsStillABuilder(t *testing.T) {
+	const src = `package main
+
+func viaSlice() []query   { return []query{{}} }
+func viaMap() map[string]query { return map[string]query{"a": {}} }
+func viaArray() [1]query  { return [1]query{{}} }
+func plain() *query       { return &query{} }
+func notAQuery() []string { return []string{"x"} }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "collections.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if buildsAQuery(n) {
+				seen[fn.Name.Name] = true
+			}
+			return true
+		})
+	}
+	for _, name := range []string{"viaSlice", "viaMap", "viaArray", "plain"} {
+		if !seen[name] {
+			t.Errorf("%s builds a query the constructor guard cannot see: $1 "+
+				"becomes whatever the caller binds first", name)
+		}
+	}
+	if seen["notAQuery"] {
+		t.Error("a []string reads as a query builder: the guard would refuse " +
+			"code that binds nothing")
+	}
+}
+
+// R12. `init()` is not the only thing that runs before the first request. A
+// package-level `var _ = func() bool { … }()` initialiser runs BEFORE init,
+// and reassigns just as effectively — the canary read the declaration and
+// the driver ran the other string.
+func TestAStartupInitialiserCanNotDecideEither(t *testing.T) {
+	const src = `package main
+
+var poisoned = "SELECT email FROM accounts WHERE org_id=$1"
+
+// runs at package initialisation, before init()
+var _ = func() bool { poisoned = "SELECT email FROM accounts"; return true }()
+
+func handler() { run(poisoned) }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "startup.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	if got, present := stringValues(map[string]*ast.File{
+		"startup.go": file,
+	})["poisoned"]; present {
+		t.Errorf("the canary reads %q for a binding a package initialiser "+
+			"reassigns at startup: the declaration is not what runs", got)
+	}
+}
+
+// R12. The bound on `+=` has to be per STATEMENT. Per NAME, the second append
+// on one variable was dropped; with no bound at all, a `+=` whose `:=` is not
+// replayed every pass — `var sql string`, `sql, err := build()`, a parameter,
+// a struct field — accumulated once per pass, and the canary refused a
+// legitimate query on text nobody wrote.
+func TestAnAppendWithoutADeclarationIsNotTripled(t *testing.T) {
+	const src = `package main
+
+func handler() {
+	var sql string
+	sql += "SELECT id FROM notes WHERE org_id=$1"
+	run(sql)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "novar.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "handler" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("the fixture has no handler")
+	}
+	got := localScope(map[string]string{}, fn)["sql"]
+	if n := strings.Count(strings.ToUpper(got), "SELECT"); n != 1 {
+		t.Errorf("the canary reads the statement %d times over: it judges a "+
+			"query nobody wrote, and refuses a legitimate one\n\tread: %q",
+			n, got)
+	}
+}
+
 // R11. The counterpart of the dead-code shape, and its opposite conclusion.
 // A package SQL binding reassigned in `init()` IS what the driver runs: init
 // executes at startup, before the first request. stringValues read the

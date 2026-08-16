@@ -181,7 +181,15 @@ func (s *Server) router() chi.Router {
 		// front door of the instance, and nothing behind it identifies the
 		// caller — the same ceiling as /api/config, which it was already
 		// documented as sharing.
-		r.With(guard(s.limitIP(limitAnonIP)), guard(s.instanceOnly)).
+		// instanceOnly FIRST. The other way round, a request to this apex-only
+		// route on any campaign subdomain answered 404 and still spent a
+		// token — and the bucket is keyed by source address, shared with
+		// /api/config. One `<img src="https://une-campagne.paraphe.org/api/campaigns">`
+		// on a third-party page therefore drained a visitor's own apex
+		// ceiling, one hit for one, cross-origin and free. Refusing the host
+		// costs nothing: openScope answers an unknown one without taking a
+		// pool connection.
+		r.With(guard(s.instanceOnly), guard(s.limitIP(limitAnonIP))).
 			Get("/campaigns", s.routeCampaignDirectory)
 	})
 

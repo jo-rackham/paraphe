@@ -4,7 +4,13 @@
 // provide exactly the columns the API expects, everything is green here and
 // the published image dies at startup.
 
-import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -167,6 +173,100 @@ describe("the deployment files", () => {
     ).toBeGreaterThan(10);
   });
 
+  // A linter reads its configuration by walking UP from its working
+  // directory, and a container stops that walk at the mount point. Mounting
+  // api/ alone therefore ran golangci-lint with its DEFAULT rules while the
+  // repository declares its own: the clone was green, the CI red, and the
+  // release refused to publish over six findings .golangci.yml excludes on
+  // purpose. Whatever is mounted has to contain the configuration.
+  // The same defect twice in one workflow: golangci-lint mounted api/ alone
+  // and missed .golangci.yml at the root; hadolint was PIPED the Dockerfile
+  // with nothing mounted and missed .hadolint.yaml entirely, so it ran at
+  // its default threshold and failed the build on the one `info` that file
+  // exists to accept. A containerised linter sees exactly what is mounted —
+  // so every one of them must have the repository under it.
+  it("give every containerised linter the repository to read", () => {
+    const ci = readFileSync(
+      join(ROOT, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    // the tools whose behaviour a file in this repository configures
+    const configured: Record<string, string> = {
+      "golangci-lint": ".golangci.yml",
+      hadolint: ".hadolint.yaml",
+      actionlint: ".github",
+    };
+    const blind: string[] = [];
+    let checked = 0;
+    for (const line of ci.split("\n")) {
+      if (!line.includes("docker run")) continue;
+      // the invocation may be wrapped over several lines; take the whole
+      // command by joining continuations
+      const start = ci.indexOf(line);
+      const command = ci
+        .slice(start)
+        .split("\n")
+        .reduce<string[]>((acc, l) => {
+          if (acc.length === 0 || acc[acc.length - 1].endsWith("\\")) {
+            acc.push(l.trim());
+          }
+          return acc;
+        }, [])
+        .join(" ")
+        .replace(/\\ /g, " ");
+      const tool = Object.keys(configured).find((t) => command.includes(t));
+      if (!tool) continue;
+      checked++;
+      if (!/-v\s+"\$PWD:/.test(command)) {
+        blind.push(`${tool}: ${configured[tool]} is not mounted`);
+      }
+      // piping the subject in leaves the tool with no directory to search
+      if (/<\s*\S+/.test(command)) {
+        blind.push(`${tool}: fed by stdin, so it reads no configuration`);
+      }
+    }
+    expect(
+      blind,
+      "these linters run on rules the repository does not declare",
+    ).toEqual([]);
+    expect(
+      checked,
+      "no containerised linter found: the check read nothing",
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("lint with the configuration the repository declares", () => {
+    const ci = readFileSync(
+      join(ROOT, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    const step = /- name: Go\n((?:.*\n)*?)(?=\n\s*(?:#|- name:))/.exec(ci);
+    expect(
+      step,
+      "the Go lint step is no longer where this test reads it",
+    ).toBeTruthy();
+    const text = step![1];
+    expect(text, "the step no longer runs golangci-lint").toContain(
+      "golangci-lint run",
+    );
+    // `working-directory: api` narrows $PWD to a directory that does not hold
+    // .golangci.yml, which is what broke it
+    expect(
+      text,
+      "the step narrows its directory below the one holding .golangci.yml",
+    ).not.toMatch(/working-directory:\s*api/);
+    const mount = /-v\s+"\$PWD:([^"]+)"/.exec(text);
+    expect(mount, "the step mounts nothing this test can read").toBeTruthy();
+    const workdir = /-w\s+(\S+)/.exec(text);
+    expect(workdir, "the step declares no working directory").toBeTruthy();
+    expect(
+      workdir![1].startsWith(mount![1]),
+      `the container works in ${workdir![1]}, outside the mount ${mount![1]}`,
+    ).toBe(true);
+    // and the configuration really is at the root, where the mount puts it
+    expect(existsSync(join(ROOT, ".golangci.yml"))).toBe(true);
+  });
+
   // kubelet injects one legacy Docker-links variable per Service port into
   // every container. The Service is named `paraphe`, so they arrive as
   // PARAPHE_PORT=tcp://<ip>:80 — the name the application reads as its own
@@ -180,7 +280,14 @@ describe("the deployment files", () => {
     for (const name of readdirSync(templates).filter((f) =>
       f.endsWith(".yaml"),
     )) {
-      const text = readFileSync(join(templates, name), "utf8");
+      // Comments are STRIPPED first. A search for the setting's text found
+      // it in `# TODO: enableServiceLinks: false`, so deleting the field and
+      // leaving a comment behind kept the guard green — the repository's own
+      // rule, paid twice already: mutate by DELETION, never by commenting.
+      const text = readFileSync(join(templates, name), "utf8").replace(
+        /^[^\S\n]*#.*$/gm,
+        "",
+      );
       // a pod template of OUR making: `spec.template.spec`. CNPG's Cluster
       // draws its own pods and takes no such field.
       for (const doc of text.split(/^---$/m)) {
@@ -210,11 +317,23 @@ describe("the deployment files", () => {
       join(ROOT, "chart", "paraphe", "Chart.yaml"),
       "utf8",
     );
+    // Comments stripped: a single legal comment line between `preStop:` and
+    // `sleep:` broke the adjacency, the gate returned, and the whole check
+    // was skipped in silence — a guard that examines nothing is worse than
+    // none, because it reads as green.
     const deployment = readFileSync(
       join(ROOT, "chart", "paraphe", "templates", "deployment.yaml"),
       "utf8",
-    );
-    if (!/preStop:\s*\n\s*sleep:/.test(deployment)) return; // no sleep, no floor
+    ).replace(/^[^\S\n]*#.*$/gm, "");
+    // …and the absence of the field is asserted, never assumed: `return`
+    // here used to mean "nothing to check", which is what a reformatting
+    // turned into "nothing was checked".
+    const hasSleep = /preStop:\s*(?:\n\s*)+sleep:/.test(deployment);
+    expect(
+      hasSleep,
+      "the Deployment no longer drains through preStop.sleep: drop the " +
+        "kubeVersion floor with it, knowingly, or put the field back",
+    ).toBe(true);
     const floor = /^kubeVersion:\s*">=(\d+)\.(\d+)\./m.exec(chart);
     expect(floor, "the chart declares no kubeVersion floor").toBeTruthy();
     const [major, minor] = [Number(floor![1]), Number(floor![2])];

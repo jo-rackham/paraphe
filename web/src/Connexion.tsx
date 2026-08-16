@@ -1,6 +1,6 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import * as API from "./api.ts";
-import { Alerte } from "./common.tsx";
+import { Alerte, useSubmitGuard } from "./common.tsx";
 import type { Me, Message } from "./types.ts";
 
 // The sign-in form, shared by the campaign screen and the instance
@@ -46,14 +46,13 @@ export function FormulaireConnexion({
   // instant somebody asked for a link, which reads as the form having
   // misunderstood what they clicked.
   const [busy, setBusy] = useState<"signin" | "link" | null>(null);
-  // The guard is a REF, and the state is only what the screen shows. Two
+  // The guard is a REF and the state is only what the screen shows: two
   // clicks in the same tick run two handlers built by the same render, and
-  // both read the state as it was BEFORE either of them: a double-click sent
-  // two requests, which spends two of the three links an address is allowed
-  // in a quarter of an hour — and the first one arrives dead, because
-  // minting the second deleted it. Browser.tsx guards its own writes the
-  // same way, for the same reason.
-  const inFlight = useRef(false);
+  // both read the state as it was BEFORE either of them. On this form that
+  // spends two of the three links an address is allowed in a quarter of an
+  // hour — and the first arrives dead, because minting the second deleted
+  // it. The helper is the project's; this is one more caller.
+  const [alreadyGoing, done] = useSubmitGuard();
 
   const report = (err: unknown) =>
     setMessage({
@@ -63,8 +62,7 @@ export function FormulaireConnexion({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (inFlight.current) return; // aria-disabled greys it but keeps it live
-    inFlight.current = true;
+    if (alreadyGoing()) return; // aria-disabled greys it but keeps it live
     setMessage(null);
     onAttempt?.();
     setBusy("signin");
@@ -73,13 +71,13 @@ export function FormulaireConnexion({
     } catch (err) {
       report(err);
     } finally {
-      inFlight.current = false;
+      done();
       setBusy(null);
     }
   };
 
   const askForLink = async () => {
-    if (inFlight.current) return;
+    if (alreadyGoing()) return;
     // FIRST, before any branch can return: pressing the button IS the new
     // attempt, whether or not it gets as far as the server. Called after
     // the empty-address check, it left the screen's own alert standing
@@ -91,13 +89,18 @@ export function FormulaireConnexion({
     if (address === "") {
       // The link button is not a submit, so the browser validates nothing:
       // said here rather than sent as an empty address the server refuses.
+      //
+      // `done()` before returning: the guard ACQUIRES when it is asked, so a
+      // branch that leaves without releasing it leaves the form refusing
+      // every click after this one — a screen that answers nothing, for
+      // somebody who has just been told to type their address.
+      done();
       setMessage({
         tone: "erreur",
         text: "Indiquez votre adresse email pour recevoir un lien.",
       });
       return;
     }
-    inFlight.current = true;
     setMessage(null);
     setBusy("link");
     try {
@@ -109,7 +112,7 @@ export function FormulaireConnexion({
     } catch (err) {
       report(err);
     } finally {
-      inFlight.current = false;
+      done();
       setBusy(null);
     }
   };

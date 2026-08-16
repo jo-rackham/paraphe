@@ -132,10 +132,9 @@ test.describe
       await page
         .getByLabel("Nom de la campagne")
         .fill("Campagne ouverte en direct");
-      await page
-        .getByLabel("Email de la coordination")
-        .fill("coord@directe.test");
-      await page.getByLabel("Nom de la coordination").fill("Coordination");
+      // the coordination account's own two fields, under their group heading
+      await page.getByLabel("Nom", { exact: true }).fill("Coordination");
+      await page.getByLabel("Adresse email").fill("coord@directe.test");
       await page.getByRole("button", { name: "Créer la campagne" }).click();
 
       // same one-time password card as an approval, whatever the door

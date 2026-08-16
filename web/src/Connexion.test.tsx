@@ -151,6 +151,16 @@ describe("signing in by email", () => {
     expect(API.requestLink).not.toHaveBeenCalled();
     expect(text()).toContain("Indiquez votre adresse email");
     expect(cleared).toBe(true);
+
+    // and the form still works afterwards: the guard is ACQUIRED by the
+    // check that opens the handler, so a branch returning without releasing
+    // it would leave every later click refused — a screen answering nothing
+    // to somebody who has just been told to type their address.
+    vi.mocked(API.requestLink).mockResolvedValue({ message: "envoyé" });
+    await typeInto(emailField(), "marie@exemple.fr");
+    await click("Recevoir un lien");
+    await flush();
+    expect(API.requestLink).toHaveBeenCalledWith("marie@exemple.fr");
   });
 
   // `disabled` on the button holding the focus drops that focus to <body>,

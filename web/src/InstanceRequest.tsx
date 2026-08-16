@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as API from "./api.ts";
-import { Alerte, rescueFocusAfterCommit } from "./common.tsx";
+import { Alerte, rescueFocusAfterCommit, useSubmitGuard } from "./common.tsx";
 import type { InstanceConfig } from "./types.ts";
 
 export function Demande({ config }: { config: InstanceConfig }) {
@@ -13,6 +13,8 @@ export function Demande({ config }: { config: InstanceConfig }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
+  // before the early return: a hook runs on every render or on none
+  const [busy, done] = useSubmitGuard();
 
   if (sent) {
     return (
@@ -25,7 +27,10 @@ export function Demande({ config }: { config: InstanceConfig }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    // a REF, not `sending`: aria-disabled keeps the button clickable, and
+    // two submits in one tick both read the state of the render they were
+    // created in — two rows in the moderation queue for one intent
+    if (busy()) return;
     setError(null);
     setSending(true);
     try {
@@ -45,6 +50,7 @@ export function Demande({ config }: { config: InstanceConfig }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      done();
       setSending(false);
     }
   };
