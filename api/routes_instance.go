@@ -174,6 +174,15 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 		slug, name, string(campaign), email, requester,
 		strings.TrimSpace(d.Message), RequestPending,
 		shortTimestamp(), d.Listed == nil || *d.Listed).Scan(&id); err != nil {
+		// The loser of the race against the partial unique index: the check
+		// above read « none pending » a moment before the other insert
+		// committed. Same answer as that check gives, not a 500.
+		if isUniqueViolation(err) {
+			errorJSON(w, http.StatusConflict,
+				"Une demande porte déjà sur l'adresse %s.%s et attend une réponse.",
+				slug, BaseDomain())
+			return
+		}
 		s.failure(w, err)
 		return
 	}

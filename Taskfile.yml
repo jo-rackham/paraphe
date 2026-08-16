@@ -111,17 +111,24 @@ tasks:
     # le nom du fichier en perte totale : DROP DATABASE passait, psql
     # échouait sur un fichier absent, et `start` ne tournait jamais — base
     # vide, API éteinte, sur la seule donnée irremplaçable du projet.
+    # `{{.CLI_ARGS}}` arrive DÉJÀ échappé par Task : l'entourer de guillemets
+    # en produisait d'imbriqués, et un dump dont le nom porte une espace était
+    # refusé comme « introuvable ».
     preconditions:
-      - sh: test -n '{{.CLI_ARGS}}'
+      - sh: test -n {{.CLI_ARGS}}
         msg: 'Quel dump ? Ex : task restore -- backup-2026-08-15.sql'
-      - sh: test -s '{{.CLI_ARGS}}'
+      - sh: test -s {{.CLI_ARGS}}
         msg: '{{.CLI_ARGS}} est introuvable ou vide.'
-      - sh: grep -qm1 'PostgreSQL database dump' '{{.CLI_ARGS}}'
+      - sh: grep -qm1 'PostgreSQL database dump' {{.CLI_ARGS}}
         msg: "{{.CLI_ARGS}} ne ressemble pas à un dump pg_dump."
     cmds:
+      # `api`, le nom du service — il n'y a jamais eu de service `paraphe`, et
+      # la tâche s'arrêtait donc sur sa PREMIÈRE commande. Ses refus, eux,
+      # tournent avant les commandes : les tester ne testait pas la tâche.
+      #
       # L'API est arrêtée pendant la restauration : elle rejoue son schéma au
       # démarrage et importerait la liste par-dessus une base à moitié écrite.
-      - docker compose stop paraphe
+      - docker compose stop api
       # La base actuelle est mise de côté, pas supprimée : une restauration
       # ratée doit laisser l'opérateur dans un état pas pire qu'avant.
       - docker compose exec -T postgres psql -U paraphe -d postgres -c 'DROP DATABASE IF EXISTS paraphe_avant_restauration'
@@ -129,8 +136,18 @@ tasks:
       - docker compose exec -T postgres psql -U paraphe -d postgres -c 'CREATE DATABASE paraphe'
       # ON_ERROR_STOP : sans lui psql rend 0 sur un fichier plein d'erreurs,
       # et la tâche annonçait « restauré » sur une base à moitié écrite.
+      #
+      # `defer` : si le chargement échoue, Task s'arrête ici et l'API resterait
+      # ÉTEINTE, sans un mot sur la façon de revenir en arrière. L'opérateur
+      # est au milieu d'un incident ; la sortie doit lui dire quoi taper.
+      - defer: '{{if .FAILED}}echo "ÉCHEC — la base d''avant est intacte sous paraphe_avant_restauration. Pour revenir : docker compose exec -T postgres psql -U paraphe -d postgres -c ''DROP DATABASE paraphe'' && docker compose exec -T postgres psql -U paraphe -d postgres -c ''ALTER DATABASE paraphe_avant_restauration RENAME TO paraphe'' && docker compose start api"{{end}}'
       - docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U paraphe -d paraphe < {{.CLI_ARGS}}
-      - docker compose start paraphe
+      # Le dump vient-il de CETTE application ? L'en-tête que la précondition
+      # lit est celui de tout pg_dump : un dump d'une base sans rapport se
+      # chargeait sans erreur, l'API redémarrait, la sonde répondait « ok » et
+      # tout le travail de l'équipe avait disparu.
+      - docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U paraphe -d paraphe -c 'SELECT 1 FROM accounts LIMIT 0; SELECT 1 FROM assignments LIMIT 0; SELECT 1 FROM notes LIMIT 0; SELECT 1 FROM orgs LIMIT 0'
+      - docker compose start api
       - echo "restauré depuis {{.CLI_ARGS}} — l'ancienne base est gardée sous paraphe_avant_restauration, à supprimer quand la restauration est vérifiée"
 
   gh:
