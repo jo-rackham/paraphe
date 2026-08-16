@@ -414,6 +414,41 @@ func TestAnSVGEmbeddingItsOwnRasterIsAccepted(t *testing.T) {
 	}
 }
 
+// CSS reaches outside a document exactly as an href does, and the rule that
+// says a logo refers only to itself was written for one and not the other:
+// `<image href="https://…">` was refused while `@import` and a `url()` in a
+// style were not. Opened directly, such a file rings a server with the
+// reader's address and the hour.
+func TestAnSVGWhoseCSSReachesOutsideIsRefused(t *testing.T) {
+	const head = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`
+	for _, svg := range []string{
+		head + `<style>@import url("https://ailleurs.test/x.css");</style></svg>`,
+		head + `<style><![CDATA[@import "https://ailleurs.test/x.css";]]></style></svg>`,
+		head + `<style>rect{background:url('https://ailleurs.test/p.png')}</style></svg>`,
+		head + `<rect style="background:url('https://ailleurs.test/p.png')"/></svg>`,
+	} {
+		if why := refuseSVG([]byte(svg)); why == "" {
+			t.Errorf("this SVG fetches from outside and was accepted:\n\t%s", svg)
+		}
+	}
+	// …and what a drawing tool actually writes stays accepted. Refusing the
+	// <style> element outright would refuse nearly every real export:
+	// Illustrator and Inkscape put the classes there.
+	for _, svg := range []string{
+		head + `<style>.st0{fill:#1b3a2b;stroke:none}</style>` +
+			`<rect class="st0" width="10" height="10"/></svg>`,
+		head + `<rect style="fill:#1b3a2b;stroke-width:2"/></svg>`,
+		head + `<defs><linearGradient id="g"/></defs>` +
+			`<rect style="fill:url(#g)"/></svg>`,
+		head + `<style>rect{fill:url(data:image/png;base64,iVBOR)}</style>` +
+			`<rect width="10" height="10"/></svg>`,
+	} {
+		if why := refuseSVG([]byte(svg)); why != "" {
+			t.Errorf("an ordinary export was refused (%s):\n\t%s", why, svg)
+		}
+	}
+}
+
 // The refusals are read by whoever is uploading, so they have to say what to
 // do next rather than name a rule.
 func TestARefusalTellsTheUploaderWhatToDo(t *testing.T) {

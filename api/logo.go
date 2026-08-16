@@ -203,7 +203,7 @@ var svgForbidden = map[string]bool{
 // acceptable.
 func refuseSVG(raw []byte) string {
 	d := xml.NewDecoder(bytes.NewReader(raw))
-	root := false
+	root, inStyle := false, false
 	for {
 		token, err := d.Token()
 		if errors.Is(err, io.EOF) {
@@ -264,6 +264,17 @@ func refuseSVG(raw []byte) string {
 			if why := refuseSVGAttributes(name, t.Attr); why != "" {
 				return why
 			}
+			inStyle = name == "style"
+		case xml.EndElement:
+			inStyle = false
+		case xml.CharData:
+			// The text of a <style> element is CSS, and CSS fetches: the
+			// rule below reads it exactly as it reads a style ATTRIBUTE.
+			if inStyle {
+				if why := refuseExternalCSS("<style>", string(t)); why != "" {
+					return why
+				}
+			}
 		}
 	}
 	if !root {
@@ -286,6 +297,41 @@ var rxURLNoise = regexp.MustCompile(`[\x00-\x20]`)
 // ends. `svg+xml` is absent deliberately — an SVG inside an SVG is a
 // document this validator never read.
 var inlineRaster = regexp.MustCompile(`^data:image/(png|jpeg|jpg|gif|webp)[;,]`)
+
+// The two ways CSS reaches outside a document. `@import` fetches a
+// stylesheet; `url(…)` fetches whatever it names.
+var (
+	rxCSSImport = regexp.MustCompile(`(?i)@import`)
+	rxCSSURL    = regexp.MustCompile(`(?i)url\(\s*['"]?([^'")]*)`)
+)
+
+// refuseExternalCSS: the same promise the href rule makes — a logo refers
+// only to itself — read in the one place it was not. `<image href="https://…">`
+// was refused while `<style>@import url("https://…")</style>` and
+// `style="background:url(…)"` were not, so a logo could still ring a server
+// when the file is opened directly, with the reader's address and the hour.
+//
+// The <style> ELEMENT is not forbidden outright: Illustrator and Inkscape
+// write one on almost every export (`.st0{fill:#000}`), and refusing it would
+// refuse the files campaigns actually have. What is refused is the reference,
+// and inline rasters stay allowed exactly as they are for an href.
+func refuseExternalCSS(where, css string) string {
+	if rxCSSImport.MatchString(css) {
+		return fmt.Sprintf("SVG refusé : %s importe une feuille de style "+
+			"extérieure. Un logo doit être autonome — réexportez-le avec ses "+
+			"styles à l'intérieur.", where)
+	}
+	for _, m := range rxCSSURL.FindAllStringSubmatch(css, -1) {
+		target := rxURLNoise.ReplaceAllString(strings.ToLower(m[1]), "")
+		if target == "" || strings.HasPrefix(target, "#") ||
+			inlineRaster.MatchString(target) {
+			continue
+		}
+		return fmt.Sprintf("SVG refusé : %s référence une ressource "+
+			"extérieure (%q). Un logo doit être autonome.", where, m[1])
+	}
+	return ""
+}
 
 func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 	for _, a := range attrs {
@@ -318,6 +364,14 @@ func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 			!inlineRaster.MatchString(value) {
 			return fmt.Sprintf("SVG refusé : <%s> référence une ressource "+
 				"extérieure (%q). Un logo doit être autonome.", element, a.Value)
+		}
+		// …and the same reference written as CSS, which reaches just as far
+		if name == "style" {
+			if why := refuseExternalCSS(
+				fmt.Sprintf("l'attribut style de <%s>", element),
+				a.Value); why != "" {
+				return why
+			}
 		}
 	}
 	return ""
