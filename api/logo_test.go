@@ -212,8 +212,33 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 			`<rect width="10" height="10"/></a></svg>`,
 		"a link whose scheme carries a tab": "<svg xmlns=\"http://www.w3.org/2000/svg\">" +
 			"<a href=\"java\tscript:alert(1)\"><rect width=\"10\" height=\"10\"/></a></svg>",
+		// The payloads below are percent-encoded, and that is not cosmetic:
+		// a raw `<` inside an attribute value is a SYNTAX error, so the
+		// version of this case that spelled `<script>` in clear was refused
+		// as unreadable XML and proved nothing about the rule it names. The
+		// mutation stayed green and said so.
 		"an HTML data: link": `<svg xmlns="http://www.w3.org/2000/svg">` +
-			`<a href="data:text/html,<script>alert(1)</script>">` +
+			`<a href="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">` +
+			`<rect width="10" height="10"/></a></svg>`,
+
+		// The inline-raster allowance is a MIME token, not a prefix. Read as
+		// a prefix, these three walk through it: the first because the noise
+		// strip deletes the space before the check reads the value, the
+		// second because nothing said the token ends, and the third because
+		// an SVG is an image — and an image this validator never opened.
+		"an HTML data: link wearing an image MIME": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<a href="data:image /html,%3Cscript%3Ealert(1)%3C/script%3E">` +
+			`<rect width="10" height="10"/></a></svg>`,
+		"an image MIME with something after it": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<a href="data:image/x/html,%3Cscript%3Ealert(1)%3C/script%3E">` +
+			`<rect width="10" height="10"/></a></svg>`,
+		"an inline SVG carrying a script": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<a href="data:image/svg+xml,%3Csvg%20xmlns=&apos;http://www.w3.org/2000/svg&apos;` +
+			`%3E%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E">` +
+			`<rect width="10" height="10"/></a></svg>`,
+		// Deprecated, and parsed as `animate` by the engines that kept it.
+		"an animateColor rewriting href": `<svg xmlns="http://www.w3.org/2000/svg"><a>` +
+			`<animateColor attributeName="href" to="https://ailleurs.example/"/>` +
 			`<rect width="10" height="10"/></a></svg>`,
 	}
 	for name, body := range cases {
@@ -228,6 +253,44 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 		if why == "" {
 			t.Errorf("%s: refused without saying why", name)
 		}
+	}
+}
+
+// What every drawing tool writes on its first line. Refusing the whole
+// class of processing instructions refused the XML declaration with it, so
+// nearly nothing a campaign exports could be uploaded — and the sentence
+// asked them to remove a line their editor does not show them.
+func TestTheXMLDeclarationEveryEditorWritesIsAccepted(t *testing.T) {
+	for name, head := range map[string]string{
+		"the plain declaration":   `<?xml version="1.0"?>`,
+		"with an encoding":        `<?xml version="1.0" encoding="UTF-8"?>`,
+		"standalone, as Inkscape": `<?xml version="1.0" encoding="UTF-8" standalone="no"?>`,
+		"spelled in another case": `<?XML version="1.0"?>`,
+		"followed by a comment":   `<?xml version="1.0"?><!-- Generator: Illustrator -->`,
+	} {
+		svg := head + `<svg xmlns="http://www.w3.org/2000/svg" width="10" ` +
+			`height="10"><rect width="10" height="10"/></svg>`
+		logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(svg)))
+		if logo == nil {
+			t.Errorf("%s: refused (%d) — %s", name, code, why)
+		}
+	}
+}
+
+// The scheme check reads a URL, and prose is not one. An attribute that
+// spells the word in a sentence is a legend; a value that STARTS with it is
+// a link.
+func TestAnAttributeMaySpellJavascriptInProse(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">` +
+		`<rect width="10" height="10" data-note="voir javascript: plus bas"/>` +
+		`<title>JavaScript: the logo</title></svg>`
+	if logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(svg))); logo == nil {
+		t.Errorf("an attribute mentioning the word was refused (%d): %s", code, why)
+	}
+	hostile := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">` +
+		`<rect width="10" height="10" fill="javascript:alert(1)"/></svg>`
+	if logo, _, _ := readLogo("c", dataURI("image/svg+xml", []byte(hostile))); logo != nil {
+		t.Error("a value BEGINNING with the scheme was accepted")
 	}
 }
 

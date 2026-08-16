@@ -568,12 +568,18 @@ export function ChampLogo({
 }: {
   /** the current logo: a URL in team mode, a data URI in browser mode */
   logo: string;
-  onChoisi: (dataURI: string) => void;
-  onRetire: () => void;
+  onChoisi: (dataURI: string) => void | Promise<void>;
+  onRetire: () => void | Promise<void>;
   onErreur: (message: string) => void;
   occupe?: boolean;
 }) {
   const champ = useRef<HTMLInputElement>(null);
+  // `occupe` is what the SCREEN shows; this is what guards. Two clicks in
+  // the same tick run two handlers built by the same render, and both read
+  // the prop as it was before either of them — the project has paid for
+  // that shape twice already. The guard is held until the caller's own
+  // work settles, which is why both callbacks may return a promise.
+  const [busy, done] = useSubmitGuard();
   return (
     <div>
       <p>
@@ -597,10 +603,25 @@ export function ChampLogo({
               );
               return;
             }
+            // `accept` filters the PICKER, and a picker can be told to show
+            // everything. Refused here rather than stored: in browser mode
+            // nothing else reads these bytes, so a text file chosen by
+            // mistake became a logo that vanished at the next reload with
+            // nothing said.
+            if (!LOGO_TYPES.split(",").includes(file.type)) {
+              onErreur(
+                `Ce fichier est de type « ${file.type || "inconnu"} ». ` +
+                  "Choisissez un PNG, un JPEG, un WebP ou un SVG.",
+              );
+              return;
+            }
+            if (busy()) return;
             try {
-              onChoisi(await lireFichier(file));
+              await onChoisi(await lireFichier(file));
             } catch (err) {
               onErreur(err instanceof Error ? err.message : String(err));
+            } finally {
+              done();
             }
           }}
         />
@@ -617,12 +638,16 @@ export function ChampLogo({
             type="button"
             className="lien"
             aria-disabled={occupe || undefined}
-            onClick={() => {
-              if (occupe) return;
+            onClick={async () => {
+              if (busy()) return;
               // this button and the preview beside it are about to unmount:
               // hand focus to the field that replaces them, never to <body>
               champ.current?.focus();
-              onRetire();
+              try {
+                await onRetire();
+              } finally {
+                done();
+              }
             }}
           >
             Retirer le logo

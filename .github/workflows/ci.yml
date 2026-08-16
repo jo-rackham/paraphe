@@ -465,6 +465,50 @@ jobs:
               exit 1
             fi
           done
+          # The object store is off by default too, so its StatefulSet, its
+          # bootstrap Job and its half of the Secret rendered in NO case here
+          # — three files nothing above this line has ever parsed with their
+          # values set.
+          rendre stockage --set media.enabled=true --set garage.enabled=true \
+            --set media.publicUrl=https://media.exemple.fr \
+            --set secrets.mediaAccessKey=GKcicicicicicicicicicici \
+            --set secrets.mediaSecretKey=cccccccccccccccccccccccccccccccc \
+            --set secrets.garageRpcSecret=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+            --set secrets.garageAdminToken=jeton-ci
+          for reglage in PARAPHE_MEDIA_ENDPOINT PARAPHE_MEDIA_PUBLIC_URL \
+            PARAPHE_MEDIA_BUCKET PARAPHE_MEDIA_REGION; do
+            grep -q "name: $reglage" /tmp/stockage.yaml
+          done
+          grep -q "key: PARAPHE_MEDIA_ACCESS_KEY" /tmp/stockage.yaml
+          grep -q "kind: StatefulSet" /tmp/stockage.yaml
+          grep -q "kind: Job" /tmp/stockage.yaml
+          if grep -q "PARAPHE_MEDIA" /tmp/defaut.yaml; then
+            echo "::error::media settings on a chart that configures no store"
+            exit 1
+          fi
+          # TOGETHER, and that is the case this pair exists for: the two
+          # blocks live side by side in the Secret, and a resolution that
+          # nested one inside the other rendered a chart where the relay's
+          # password only exists when the object store does. Both renders
+          # above pass with that defect; only this one fails.
+          rendre stockage-et-courriel --set media.enabled=true \
+            --set garage.enabled=true \
+            --set media.publicUrl=https://media.exemple.fr \
+            --set secrets.mediaAccessKey=GKcicicicicicicicicicici \
+            --set secrets.mediaSecretKey=cccccccccccccccccccccccccccccccc \
+            --set secrets.garageRpcSecret=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+            --set secrets.garageAdminToken=jeton-ci \
+            --set mail.url=smtp://envoi@relais.exemple.fr:587 \
+            --set mail.from=contact@exemple.fr \
+            --set mail.publicUrl=https://paraphe.exemple.fr \
+            --set secrets.smtpPassword=motdepasse
+          for cle in PARAPHE_MEDIA_ACCESS_KEY PARAPHE_MEDIA_SECRET_KEY \
+            PARAPHE_SMTP_PASSWORD; do
+            grep -q "$cle" /tmp/stockage-et-courriel.yaml
+          done
+          # And the mail password with the store OFF, which is the half the
+          # nesting silently dropped.
+          grep -q "PARAPHE_SMTP_PASSWORD" /tmp/courriel.yaml
           grep -q "kind: Deployment" /tmp/defaut.yaml
           # ONE application container, and no volume: nothing is written to
           # disk, and a mount reappearing means something is again. Judged

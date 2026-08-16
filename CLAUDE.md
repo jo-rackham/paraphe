@@ -603,6 +603,36 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   unreadable `PARAPHE_WEB_DIR`. None of them is the normal state of a
   developer's instance and of most tests: the routes then answer 501 saying
   so, and the header shows the hexagon.
+- **A wedged store must not take the pod out of its Service.** Both logo
+  routes hold their pool connection across a round trip to the object store
+  — `inCampaign` takes it before the handler runs — so an unbounded burst
+  against a store that answers nothing takes every connection the instance
+  has, and `/health/db`, which needs one, fails with them. Measured on a
+  paused Garage at the pgx default of four connections: six uploads, six
+  readiness probes out of six lost, which is a pod dropped from its Service
+  because a picture would not upload. `mediaAdmission` bounds it to TWO in
+  flight and REFUSES past that (503) rather than queueing — the opposite of
+  `signInAdmission`, and for its very reason: that gate sits BEFORE
+  `inScope`, where waiting holds nothing, and this one sits after. Two and
+  not one, because the race
+  `TestARemovedLogoCannotDestroyTheOneThatReplacedIt` runs needs two writers
+  to meet; that test now fails if either is refused, so narrowing the gate
+  cannot quietly empty it. Same measurement after: six probes out of six at
+  200. The deferred deletion is bounded on its own (one per instance): it
+  answers nobody and holds both a connection and the row lock.
+- **The XML DECLARATION is not a processing instruction to refuse.**
+  `<?xml version="1.0" encoding="UTF-8"?>` is the first line Inkscape,
+  Illustrator and Sketch write, so refusing every `xml.ProcInst` refused
+  nearly every file a campaign would actually upload — and told them to
+  re-export without a line no export dialog mentions. `xml-stylesheet` is
+  refused; a target of `xml` is not. In a tool that BLOCKS, a false positive
+  costs as much as a hole and is harder to see.
+- **`data:image/` is a MIME token, not a prefix.** The C0 strip that makes
+  `java<TAB>script:` readable also turns `data:image /html,…` into a value
+  that starts with `data:image/`, and `data:image/x/html,…` starts with it
+  outright. The allowance names the raster types and requires the token to
+  END (`[;,]`); `svg+xml` is absent, an SVG inside an SVG being a document
+  the validator never opened.
 - **The S3 client is hand-written** (`api/media.go`), SigV4 over two calls.
   The usual client brings fourteen transitive modules into a project with
   six direct ones, almost all for multipart paths a 64 KiB object never

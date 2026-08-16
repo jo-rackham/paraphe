@@ -161,17 +161,19 @@ func refuseRaster(format string, raw []byte) string {
 }
 
 // Elements that carry or can carry execution. `foreignObject` embeds
-// arbitrary HTML, the next three embed a whole document, and the SMIL four
+// arbitrary HTML, the next three embed a whole document, and the SMIL five
 // REWRITE an attribute after the document has loaded — `<animate
 // attributeName="href" to="…">` sets a link's target to something the
 // validator never saw, which is how a `javascript:` URL got past an
 // attribute check that only reads what is written in the file. A logo does
-// not animate.
+// not animate. `animateColor` is deprecated and engines parse it as
+// `animate`, so it belongs to the same list rather than to the version of
+// the specification that named it.
 var svgForbidden = map[string]bool{
 	"script": true, "foreignobject": true, "iframe": true,
 	"embed": true, "object": true, "handler": true,
 	"animate": true, "animatetransform": true, "animatemotion": true,
-	"set": true,
+	"set": true, "animatecolor": true,
 }
 
 // refuseSVG walks the document and refuses the shapes that make an SVG more
@@ -190,6 +192,16 @@ func refuseSVG(raw []byte) string {
 		}
 		switch t := token.(type) {
 		case xml.ProcInst:
+			// The XML DECLARATION is not one of those, and the exception is
+			// not a corner: `<?xml version="1.0" encoding="UTF-8"?>` is the
+			// first line Inkscape, Illustrator and Sketch write, so refusing
+			// every ProcInst refused nearly every file a campaign would
+			// actually upload — and told them to re-export without a line no
+			// export dialog mentions. It names an encoding and fetches
+			// nothing.
+			if strings.EqualFold(t.Target, "xml") {
+				continue
+			}
 			// `<?xml-stylesheet type="text/xsl" href="data:text/xsl;base64,…"?>`
 			// is not decoration: opened as a document, the browser fetches
 			// that stylesheet and applies it, and an XSLT may emit HTML with
@@ -197,9 +209,6 @@ func refuseSVG(raw []byte) string {
 			// `text/html` on the media origin with the script running. The
 			// switch handled StartElement and Directive and let every
 			// processing instruction through.
-			//
-			// `<?xml …?>` itself is a ProcInst too, and refusing it costs
-			// nothing: an SVG needs no declaration to render.
 			return fmt.Sprintf("SVG refusé : il contient une instruction de "+
 				"traitement <?%s?>, qui peut charger une feuille de style "+
 				"exécutable. Réexportez l'image sans.", t.Target)
@@ -241,6 +250,15 @@ func refuseSVG(raw []byte) string {
 // control goes, which is what the URL specification says to do.
 var rxURLNoise = regexp.MustCompile(`[\x00-\x20]`)
 
+// The rasters a drawing tool embeds when it is told to. A PREFIX of
+// `data:image/` is not enough to say "this is one": the noise strip above
+// removes the space out of `data:image /html,<script>…` and hands the check
+// a value that starts with it, and `data:image/x/html,…` starts with it
+// outright. The MIME token is named, and it ends where a data URI says it
+// ends. `svg+xml` is absent deliberately — an SVG inside an SVG is a
+// document this validator never read.
+var inlineRaster = regexp.MustCompile(`^data:image/(png|jpeg|jpg|gif|webp)[;,]`)
+
 func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 	for _, a := range attrs {
 		name := strings.ToLower(a.Name.Local)
@@ -250,7 +268,10 @@ func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 				"gestionnaire d'événement. Réexportez l'image sans "+
 				"interactivité.", a.Name.Local, element)
 		}
-		if strings.Contains(value, "javascript:") {
+		// A scheme is what a value BEGINS with. Read as a substring, this
+		// refused a `data-note` that merely spelled the word — and prose is
+		// where "javascript:" appears without anything following it.
+		if strings.HasPrefix(value, "javascript:") {
 			return fmt.Sprintf("SVG refusé : l'attribut %q sur <%s> pointe "+
 				"vers du javascript.", a.Name.Local, element)
 		}
@@ -266,7 +287,7 @@ func refuseSVGAttributes(element string, attrs []xml.Attr) string {
 		// what the rest of this function exists to refuse.
 		if name == "href" && value != "" &&
 			!strings.HasPrefix(value, "#") &&
-			!strings.HasPrefix(value, "data:image/") {
+			!inlineRaster.MatchString(value) {
 			return fmt.Sprintf("SVG refusé : <%s> référence une ressource "+
 				"extérieure (%q). Un logo doit être autonome.", element, a.Value)
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -286,11 +287,30 @@ func (s *Server) lockLogo(w http.ResponseWriter, r *http.Request) (string, bool)
 // rounds out of 15 against a store on the same machine, and the window only
 // widens with the distance to it. A check without the lock narrows that
 // window; it does not close it, because the writer commits after the read.
+// forgetting: the deferred deletions, one at a time per instance.
+var forgetting = make(chan struct{}, 1)
+
 func (s *Server) forgetLogo(org int, previous, kept string) {
 	if s.media == nil || previous == "" || previous == kept {
 		return
 	}
 	go func() {
+		// One at a time per instance. This work answers nobody, and it
+		// holds a pool connection AND the campaign's row lock across a
+		// store round trip: unbounded, a burst of uploads against a wedged
+		// store spawns one of these per upload, each eating a connection
+		// the pod needs to answer its readiness probe. Waited for — under a
+		// healthy store this is milliseconds — then given up, because an
+		// orphan costs kilobytes and a held connection costs the pod. The
+		// wait itself holds nothing.
+		select {
+		case forgetting <- struct{}{}:
+			defer func() { <-forgetting }()
+		case <-time.After(mediaTimeout):
+			slog.Warn("previous logo left in place: another deletion is "+
+				"still running", "key", previous)
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), mediaTimeout)
 		defer cancel()
 		tx, err := s.pool.Begin(ctx)

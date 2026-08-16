@@ -36,7 +36,7 @@ const sha256Empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b785
 // mediaTimeout bounds a call to the store. The application answers a
 // volunteer while it waits, so this is what stands between a wedged object
 // store and a request hanging until the client gives up.
-const mediaTimeout = 15 * time.Second
+const mediaTimeout = 5 * time.Second
 
 // MediaStore: nil when nothing is configured, which is the normal state of a
 // developer's instance and of the test suite. Every caller therefore asks

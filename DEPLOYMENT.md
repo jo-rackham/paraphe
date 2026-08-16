@@ -127,9 +127,12 @@ the others.
   a logo, no longer the only data. The logos live in the object store
   (`task backup-media`), and losing one costs a campaign the thirty seconds
   it takes to upload it again: worth copying, not worth an incident. What
-  PostgreSQL keeps is the POINTER — which object should exist, its type and
-  its digest — so a bucket restored from an older copy is detectable rather
-  than silent. In Docker:
+  PostgreSQL keeps is the POINTER — which object should exist and its type,
+  the key ending in a digest of the content — so a bucket restored from an
+  older copy is detectable rather than silent. Putting the copy back is
+  `task restore-media DOSSIER=media-2026-08-15`, which ADDS and never
+  deletes: the keys carry a digest, so a copy from yesterday cannot
+  overwrite a logo uploaded since. In Docker:
   `docker compose exec postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql`
   In Kubernetes, enable `postgres.cnpg.backup.*`: the chart then sets up WAL
   archiving **and** a daily `ScheduledBackup`. Both are needed — WAL archiving
@@ -184,6 +187,13 @@ the header keeps the hexagon and the screen says so.
 - **On a cloud**, run no storage at all: `garage.enabled=false` and
   `media.endpoint` pointing at the provider's object store (OVH, Scaleway,
   R2). The application only ever speaks S3.
+- **The key name `paraphe` belongs to the bootstrap**, in a Garage the chart
+  manages. Rotating `secrets.mediaAccessKey` leaves the previous key able to
+  write, so the Job revokes the ones it recognises — and it recognises them
+  by that name. Give your own keys (a backup job, a migration script) any
+  other name and they are left alone; call one `paraphe` and the next
+  `helm upgrade` revokes it, with no way back since Garage never reissues an
+  identifier.
 
 ## Several campaigns on one instance
 

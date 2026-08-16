@@ -76,6 +76,25 @@ peer() {
   curl -fsS -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" "$1$2"
 }
 
+# `api … | jq …` reports JQ's exit code and discards the API's: a 5xx, a
+# restarted peer or an expired token leaves the caller holding an empty
+# string, and `set -e` does not cross a pipe. Empty then reads as an answer
+# — the bucket "was neither created nor found", the existing key "has a
+# DIFFERENT secret" — and an operator chases the wrong thing during an
+# incident. Every read that FEEDS A DECISION goes through this: the body is
+# captured first, so a failure stops where it happened, with the status and
+# the body the api() function already prints.
+#
+# The waiting loops deliberately do NOT use it — there, a node not yet
+# answering is the normal state, not a failure.
+api_json() {
+  method=$1
+  path=$2
+  shift 2
+  body=$(api "$method" "$path") || return 1
+  echo "$body" | jq "$@"
+}
+
 # --- the introductions -----------------------------------------------------
 # Each node knows only itself until told otherwise. Garage's own discovery
 # would do this through a CustomResourceDefinition and cluster-scoped
@@ -162,7 +181,7 @@ if [ -n "$unassigned" ]; then
   api POST /v2/UpdateClusterLayout -d "$roles" >/dev/null
   # The version to apply is the staged one, read back rather than guessed:
   # a cluster that has been laid out before is not at version 1.
-  next=$(api GET /v2/GetClusterLayout | jq '.version + 1')
+  next=$(api_json GET /v2/GetClusterLayout '.version + 1')
   api POST /v2/ApplyClusterLayout -d "{\"version\": $next}" >/dev/null
   echo "layout applied, version $next"
 fi
@@ -196,7 +215,7 @@ if ! bucket=$(api POST /v2/CreateBucket \
     exit 1
   }
 fi
-bucket=$(api GET "/v2/GetBucketInfo?globalAlias=$MEDIA_BUCKET" | jq -r '.id')
+bucket=$(api_json GET "/v2/GetBucketInfo?globalAlias=$MEDIA_BUCKET" -r '.id')
 if [ -z "$bucket" ] || [ "$bucket" = "null" ]; then
   echo "bucket $MEDIA_BUCKET was neither created nor found" >&2
   exit 1
@@ -217,8 +236,8 @@ if ! api POST /v2/ImportKey -d "$(jq -nc \
   # either. Left as `|| true`, rotating `mediaSecretKey` alone was a perfect
   # silence: the Job went green, `helm upgrade` returned 0, every pod stayed
   # ready, and the application answered 403 on every single upload.
-  current=$(api GET "/v2/GetKeyInfo?id=$MEDIA_ACCESS_KEY&showSecretKey=true" \
-    | jq -r '.secretAccessKey // ""')
+  current=$(api_json GET "/v2/GetKeyInfo?id=$MEDIA_ACCESS_KEY&showSecretKey=true" \
+    -r '.secretAccessKey // ""')
   if [ "$current" != "$MEDIA_SECRET_KEY" ]; then
     echo "the key $MEDIA_ACCESS_KEY already exists in the store with a" \
       "DIFFERENT secret, and Garage cannot change the secret of an existing" \

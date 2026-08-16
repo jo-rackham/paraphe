@@ -124,11 +124,37 @@ tasks:
           -v "$PWD/$dest:/sortie" \
           -e RCLONE_CONFIG_S3_TYPE=s3 \
           -e RCLONE_CONFIG_S3_PROVIDER=Other \
+          -e RCLONE_CONFIG_S3_REGION="${PARAPHE_MEDIA_REGION:-garage}" \
           -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
           -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="${PARAPHE_MEDIA_ACCESS_KEY:-}" \
           -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="${PARAPHE_MEDIA_SECRET_KEY:-}" \
           rclone/rclone:1.71 copy "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}" /sortie
         echo "logos copiés dans $dest/"
+
+  restore-media:
+    desc: Restaure les logos depuis une copie (DOSSIER=media-2026-08-16)
+    # Le pendant de backup-media, et il manquait : une sauvegarde qu'on ne
+    # sait pas remettre n'est pas une sauvegarde, c'est un dossier.
+    #
+    # `copy` et non `sync` : sync SUPPRIME dans le seau tout ce que la copie
+    # n'a pas, donc restaurer une copie d'hier effacerait les logos
+    # téléversés depuis. Les clés portent un condensé du contenu, elles ne
+    # se télescopent pas — ajouter suffit.
+    cmds:
+      - |
+        set -eu
+        : "${DOSSIER:?donnez le dossier à restaurer, par exemple DOSSIER=media-2026-08-16}"
+        test -d "$DOSSIER" || { echo "$DOSSIER n'existe pas" >&2; exit 1; }
+        docker run --rm --network paraphe_default \
+          -v "$PWD/$DOSSIER:/source:ro" \
+          -e RCLONE_CONFIG_S3_TYPE=s3 \
+          -e RCLONE_CONFIG_S3_PROVIDER=Other \
+          -e RCLONE_CONFIG_S3_REGION="${PARAPHE_MEDIA_REGION:-garage}" \
+          -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
+          -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="${PARAPHE_MEDIA_ACCESS_KEY:-}" \
+          -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="${PARAPHE_MEDIA_SECRET_KEY:-}" \
+          rclone/rclone:1.71 copy /source "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}"
+        echo "logos restaurés depuis $DOSSIER/"
 
   restore:
     desc: 'Restaure la base depuis un dump — ex : task restore -- backup-2026-08-15.sql'

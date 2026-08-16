@@ -166,6 +166,44 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+// The guard on the way OUT of IndexedDB, which nothing tested: both
+// mutations that removed it — one per read site — left the whole suite
+// green. A database written by an older build, by another tab, or by a
+// tampered backup is not this code's doing, and this mode is published on
+// GitHub Pages where no Content-Security-Policy catches what it renders.
+describe("a logo already in the database", () => {
+  // through renderWithOffer: the offer is fetched by the SAME mount effect,
+  // strictly after the logo is read, so the banner landing is the proof
+  // that the read has happened — an assertion made before it would pass on
+  // an empty page whatever the guard does
+  const stored = async (value: unknown) => {
+    await DB.writeSetting("logo", value as string);
+    await renderWithOffer();
+    return [...container.querySelectorAll("img")].map((i) =>
+      i.getAttribute("src"),
+    );
+  };
+
+  it("is shown when it is an inline image", async () => {
+    expect(await stored("data:image/png;base64,iVBORw0KGgo=")).toContain(
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+  });
+
+  it("is dropped when it is a remote address, on the way out", async () => {
+    for (const hostile of [
+      "https://tracker.attaquant.example/pixel.gif?qui=victime",
+      "//ailleurs.example/x.png",
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+    ]) {
+      await DB.eraseAll();
+      await DB.replaceMayors([MAYOR]);
+      expect(await stored(hostile), hostile).not.toContain(hostile);
+    }
+  });
+});
+
 describe("the offer banner, rendered", () => {
   it("appears on an untouched campaign, and the warning stays with it", async () => {
     await renderWithOffer();
