@@ -142,6 +142,15 @@ func (s *Server) openScope(w http.ResponseWriter, r *http.Request) (*Scope, bool
 		slug, instance = scope.Slug, scope.Instance
 	}
 
+	// The body is drained into memory BEFORE a pooled connection is taken. On
+	// the sign-in route jsonOnly does this ahead of inScope, but every other
+	// write route reaches inScope first: without this, a client dribbling its
+	// body held a connection idle-in-transaction for ReadTimeout, and enough
+	// such sockets exhausted the pool for every campaign on the instance.
+	if !bufferBody(w, r) {
+		return nil, false
+	}
+
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
 		s.failure(w, err)

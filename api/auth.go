@@ -281,6 +281,34 @@ const (
 	maxEmailRunes    = 254  // the RFC ceiling
 )
 
+// bufferBody drains the request body into memory, bounded, and replaces it
+// with the buffered copy. openScope calls it BEFORE acquiring a pooled
+// connection, so a client sending its body slowly cannot hold a connection
+// open while it dribbles.
+//
+// Idempotent and cheap on the paths that already buffered: a body jsonOnly
+// read is re-read from memory here, and a request with no body returns at once.
+// The 413 mirrors jsonOnly's, so a caller learns to shorten what it sent
+// whichever guard buffers first.
+func bufferBody(w http.ResponseWriter, r *http.Request) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			errorJSON(w, http.StatusRequestEntityTooLarge,
+				"Le contenu envoyé dépasse %d Ko.", maxBodySize/1024)
+			return false
+		}
+		errorJSON(w, http.StatusBadRequest, "Corps de requête illisible : %v", err)
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	return true
+}
+
 func readBody(w http.ResponseWriter, r *http.Request, target any) bool {
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize))
 	d.DisallowUnknownFields()
