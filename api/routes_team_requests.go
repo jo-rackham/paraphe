@@ -83,10 +83,11 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
-	// The coordination READS these three before it decides on them — and the
-	// address does more than get read: it BECOMES the primary key of the lead
-	// account on acceptance. A carriage return in it opens a team whose lead
-	// can never type their own login, and no keyboard reproduces it.
+	// The coordination READS these three before it decides on them, and the
+	// address is read like the rest: `storableEmail` above asks whether the
+	// application can still WRITE to it — control characters in a header —
+	// and this asks whether what the moderator reads is what is stored. A
+	// bidi override and a byte-order mark pass the first and fail the second.
 	if !legible(name) || !legible(requester) || !legible(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de l'équipe, votre nom et votre adresse email ne doivent "+
