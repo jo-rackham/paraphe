@@ -121,6 +121,12 @@ func (f *flakyStore) forget(ctx context.Context, key string) error {
 	}
 	return f.inner.forget(ctx, key)
 }
+func (f *flakyStore) refund(ctx context.Context, key string) error {
+	if f.down {
+		return errors.New("connection refused")
+	}
+	return f.inner.refund(ctx, key)
+}
 
 // A Valkey outage must not take sign-in down with it, and must not turn the
 // ceilings off either: the process store keeps counting, and the ceilings

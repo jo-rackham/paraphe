@@ -523,18 +523,20 @@ works when the relay is down, and still bootstraps the instance.
   The verifier never READS `alg`, it compares the header byte for byte, which
   is what rules out `alg:none`, HS/RS confusion and `kid`/`jku` injection. The repository's example
   values are refused at startup — they are public.
-- **KNOWN LIMIT, measured and left standing**: signing in CLEARS the
-  account-keyed counters, and that clearing is observable. Fill the ceiling
-  for an address you know, poll it, and the moment it reopens is the moment
-  somebody signed in as that address — so it names one, which the constant
-  sentence and the decoy hash exist to refuse.
-  Dropping the clearing is not the fix: the ceiling counts SUCCESSES too, so
-  ten legitimate sign-ins in a quarter of an hour would lock an account out
-  of its own password — tried, and the end-to-end journeys found it within a
-  minute. Closing both wants the ceiling to count FAILURES only, or to refuse
-  in the same words as a wrong password; either is a change to the limiter's
-  shape and a decision to take, not to improvise in a review round.
-  `TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn` walks it and says so.
+- **A successful sign-in REFUNDS its attempt; it does not clear the
+  counter.** Three shapes, and the first two are each wrong in one
+  direction. CLEARING is observable: the per-address ceiling is one an
+  anonymous caller fills for an address of their choosing, so burning it and
+  polling it turns its reopening into "somebody just signed in as that
+  address" — measured at ten attempts left against one, which is the decoy
+  hash undone from the other side. NOT clearing locks an account out of its
+  own password after ten legitimate sign-ins, because the ceiling counts
+  successes too; the end-to-end journeys found that in under a minute.
+  Refunding does both: counted on arrival like every event — which is what
+  still bounds a flood whose handlers never finish — and given back once the
+  attempt proved legitimate, so the bucket ends where it stood. Only the
+  door that was USED is refunded: crediting the other gives back an event
+  nobody spent, which is the observable difference all over again.
 - **Rate limits, declared once in `api/limiter.go`**: sign-in per source
   AND per submitted address (counted whether the account exists or not — a
   429 must reveal nothing the decoy hash withholds), public hosting form,

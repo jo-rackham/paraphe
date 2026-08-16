@@ -214,9 +214,13 @@ var (
 	// wall; wrapped in a CTE it became a statement whose walled table
 	// tableRef could not see either. Both halves are fixed, and both are
 	// pinned below.
+	// RESET is here for the same reason SET is, and it arrived with SET's
+	// other half: a session setting put back is a statement like the one that
+	// set it, and a call carrying it must be readable rather than invisible.
 	sqlVerb = regexp.MustCompile(
-		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP` +
-			`|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO|TABLE)\b`)
+		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|RESET|COPY|LOCK|CREATE|ALTER` +
+			`|DROP|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO` +
+			`|TABLE)\b`)
 )
 
 // normaliseSQL: what the canary reads. Comments and string literals are

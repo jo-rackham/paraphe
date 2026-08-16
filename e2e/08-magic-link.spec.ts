@@ -36,11 +36,17 @@ async function emptyInbox() {
 }
 
 /** Waits for a message to reach the sink: the send is detached from the
- *  request that asked for it, on purpose. */
+ *  request that asked for it, on purpose.
+ *
+ *  The LAST match, not the first. A send is detached, so one from an earlier
+ *  journey can land after the inbox was emptied and before this one leaves —
+ *  and its token is still live for fifteen minutes, so redeeming it would
+ *  succeed and the journey would pass without the send it is testing ever
+ *  having happened. */
 async function waitForMail(to: string): Promise<Received> {
   const deadline = Date.now() + 15_000;
   for (;;) {
-    const found = (await inbox()).find((m) => m.recipients.includes(to));
+    const found = (await inbox()).findLast((m) => m.recipients.includes(to));
     if (found) return found;
     if (Date.now() > deadline) {
       throw new Error(`no message reached ${to}`);

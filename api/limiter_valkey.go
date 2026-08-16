@@ -255,6 +255,29 @@ func (v *valkeyStore) forget(ctx context.Context, key string) error {
 	return nil
 }
 
+// refund: one event back, and only if the window is still open. DECR on a
+// key that has expired would CREATE it at -1 with no expiry, so the guard is
+// not decoration — it is what keeps a counter from outliving every window
+// and reading as a credit for ever.
+func (v *valkeyStore) refund(ctx context.Context, key string) error {
+	cli, err := v.client()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
+	defer cancel()
+	// Atomic against a neighbour counting at the same instant: the read and
+	// the decrement are one step, and the TTL is left exactly as it was.
+	const give = `if redis.call('EXISTS', KEYS[1]) == 1 and
+		tonumber(redis.call('GET', KEYS[1])) > 0 then
+		return redis.call('DECR', KEYS[1]) end return 0`
+	if err := cli.Do(ctx,
+		cli.B().Eval().Script(give).Numkeys(1).Key(key).Build()).Error(); err != nil {
+		return fmt.Errorf("refunding a Valkey counter: %w", err)
+	}
+	return nil
+}
+
 func (v *valkeyStore) close() {
 	v.mu.Lock()
 	defer v.mu.Unlock()

@@ -494,7 +494,8 @@ func (s *Server) routeRedeemLink(w http.ResponseWriter, r *http.Request) {
 	// is for: the row is gone by now, so this line is the only place an
 	// operator can see whether a campaign's invitations are being taken up
 	// or whether people are recovering forgotten passwords.
-	s.openSession(w, r, c, departments, "signin_link_succeeded",
+	s.openSession(w, r, c, departments, limitMagicLinkAccount,
+		"signin_link_succeeded",
 		"link", purpose)
 }
 
