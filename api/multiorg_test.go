@@ -734,3 +734,24 @@ func campaignOf(t *testing.T, s *Server, org int) map[string]string {
 	}
 	return campaign
 }
+
+// A PING is not readiness. Restored from an empty database, a pod answered
+// 200 on /health/db with not one table in place: the probe was green,
+// Kubernetes sent traffic, and every screen was broken. The schema is built
+// at startup, so a table missing means the build did not happen — and the
+// pod must say it cannot serve rather than be handed requests.
+func TestReadinessRefusesADatabaseWithNoSchema(t *testing.T) {
+	s, srv := testServer(t)
+	c := newClient(t, srv)
+	if code, _ := c.call(http.MethodGet, "/health/db", nil); code != http.StatusOK {
+		t.Fatalf("/health/db on a healthy database: %d", code)
+	}
+	// the shape a restore leaves behind: the connection is fine, the schema
+	// is not there
+	execAsMaintenance(t, s, "DROP TABLE orgs CASCADE")
+	code, _ := c.call(http.MethodGet, "/health/db", nil)
+	if code != http.StatusServiceUnavailable {
+		t.Errorf("/health/db answered %d over a database with no schema: the "+
+			"probe is green and the pod cannot serve a single screen", code)
+	}
+}
