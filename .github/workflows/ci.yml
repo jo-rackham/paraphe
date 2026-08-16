@@ -237,6 +237,14 @@ jobs:
     # right on its own side.
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # Local fixtures, in the clear on purpose and the same ones the
+      # Taskfile poses for `task garage`: Garage wants exactly 32 bytes, and
+      # these reach no machine but this runner's.
+      PARAPHE_GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
+      PARAPHE_GARAGE_ADMIN_TOKEN: "2222222222222222222222222222222222222222222222222222222222222222"
+      PARAPHE_MEDIA_ACCESS_KEY: GKparaphelocal0000000000
+      PARAPHE_MEDIA_SECRET_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
     services:
       postgres:
         image: postgres:17-alpine
@@ -258,11 +266,32 @@ jobs:
 
       - run: pnpm exec playwright install --with-deps chromium
 
+      - name: Stockage objet
+        # The logo journeys are the only place a BROWSER answers whether the
+        # Content-Security-Policy lets the store's origin through. With no
+        # store they skip, out loud in a line nobody reads, and that check
+        # stops running. The two commands `task garage` runs, over the same
+        # init script the chart's Job runs — a third bootstrap would be a
+        # third thing to hold in step. A failure here surfaces one step
+        # later, where the API refuses to start against an unreachable
+        # store and names it.
+        run: |
+          docker compose up -d --wait garage
+          docker compose up garage-init
+
       - name: Parcours complets
         run: pnpm exec playwright test --config e2e/playwright.config.ts
         env:
           # the suite creates its own throwaway database from this account
           PARAPHE_TEST_DATABASE_URL: postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe
+          PARAPHE_TEST_MEDIA_ENDPOINT: http://127.0.0.1:3900
+          PARAPHE_TEST_MEDIA_BUCKET: paraphe-media
+          PARAPHE_TEST_MEDIA_ACCESS_KEY: ${{ env.PARAPHE_MEDIA_ACCESS_KEY }}
+          PARAPHE_TEST_MEDIA_SECRET_KEY: ${{ env.PARAPHE_MEDIA_SECRET_KEY }}
+          # a *.localhost name: the browser resolves it to the loopback
+          # itself, and it is a DIFFERENT origin from the application's,
+          # which is the whole point of the check
+          PARAPHE_TEST_MEDIA_PUBLIC_URL: http://paraphe-media.media.localhost:3902
 
       - name: Traces des échecs
         if: failure()

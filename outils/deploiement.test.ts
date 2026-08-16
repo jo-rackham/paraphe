@@ -235,6 +235,48 @@ describe("the deployment files", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
+  // A journey that skips is a journey that has stopped running, and it says
+  // so in a line nobody reads. The three logo journeys are the only place a
+  // BROWSER answers whether the Content-Security-Policy lets the store's
+  // origin through — the reason that spec exists rather than a unit test —
+  // and they skip when the harness was given no object store. CI gave them
+  // none, so they had never run there once: an img-src that drops the logo
+  // reaches production over a green suite, and the browser reports it on a
+  // console nobody is watching.
+  //
+  // Read from the harness rather than listed: a setting added to e2e/ with
+  // no matching line in the job is the same silent skip, one spec later.
+  it("give the journeys every setting their harness reads", () => {
+    const ci = readFileSync(
+      join(ROOT, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    const read = new Set<string>();
+    for (const name of readdirSync(join(ROOT, "e2e"))) {
+      if (!name.endsWith(".ts")) continue;
+      const text = readFileSync(join(ROOT, "e2e", name), "utf8");
+      for (const m of text.matchAll(
+        /process\.env\.(PARAPHE_TEST_[A-Z0-9_]+)/g,
+      )) {
+        read.add(m[1]);
+      }
+    }
+    expect(
+      read.size,
+      "no setting found in e2e/: the check read nothing",
+    ).toBeGreaterThanOrEqual(5);
+    // the job, up to the next one at the same indentation
+    const job = /^ {2}e2e:\n((?:.*\n)*?)(?=^ {2}\S)/m.exec(ci);
+    expect(job, "no e2e job found in ci.yml").not.toBeNull();
+    const missing = [...read]
+      .filter((name) => !new RegExp(`^\\s*${name}:`, "m").test(job?.[1] ?? ""))
+      .sort();
+    expect(
+      missing,
+      "the CI journeys skip whatever these configure, and say so to nobody",
+    ).toEqual([]);
+  });
+
   it("lint with the configuration the repository declares", () => {
     const ci = readFileSync(
       join(ROOT, ".github", "workflows", "ci.yml"),
