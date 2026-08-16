@@ -323,6 +323,32 @@ describe("landing on a sign-in link", () => {
     expect(API.consumeLinkToken()).toBeNull();
   });
 
+  // A visit that takes minutes to decide what it is has stopped being the
+  // same visit. The loading screen is not a screen that CANNOT use the token
+  // — it is one that does not know yet — so it was not on the list of
+  // screens that drop it, and a page hanging there held a live token for as
+  // long as it hung: somebody walks away, somebody else sits down, the
+  // campaign answers at last, and the session opens for the second person.
+  it("forgets a token the visit held on to for minutes", () => {
+    window.history.replaceState({}, "", "/connexion#jeton=abc123");
+    const clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(1_000_000);
+    API.takeLinkToken();
+    clock.mockReturnValue(1_000_000 + 3 * 60 * 1000);
+    expect(API.consumeLinkToken()).toBeNull();
+    clock.mockRestore();
+  });
+
+  it("hands it over on a visit that merely took a while", () => {
+    window.history.replaceState({}, "", "/connexion#jeton=abc123");
+    const clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(2_000_000);
+    API.takeLinkToken();
+    clock.mockReturnValue(2_000_000 + 20 * 1000);
+    expect(API.consumeLinkToken()).toBe("abc123");
+    clock.mockRestore();
+  });
+
   // A history that refuses is what a sandboxed embed does. Letting it throw
   // stops main.tsx before createRoot — a blank page, with the link still
   // LIVE in the address bar that renders it.

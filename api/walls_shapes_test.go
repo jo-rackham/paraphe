@@ -223,18 +223,26 @@ func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
 // it.
 func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 	modifiers := []string{"", "ONLY "}
+	// The dotted prefixes a name may carry. The fifth round of this class was
+	// exactly this axis: the grid walked keyword × modifier, both rules
+	// agreed, and both were blind — `FROM public.`+t named a walled table
+	// nothing looked at, and a three-part LITERAL name escaped even the rule
+	// that reads names. A grid missing an axis certifies an agreement.
+	schemas := []string{"", "PUBLIC.", `"PUBLIC".`, "PARAPHE.PUBLIC."}
 	for _, keyword := range strings.Split(tablePositions, "|") {
 		for _, modifier := range modifiers {
-			named := "SELECT X " + keyword + " " + modifier + "ACCOUNTS"
-			if !tableRef("ACCOUNTS").MatchString(named) {
-				t.Errorf("tableRef does not read a table after %q%s, so a "+
-					"walled table written there is invisible to every rule "+
-					"built on it:\n\t%s", keyword, " "+modifier, named)
-			}
-			unreadable := "SELECT X " + keyword + " " + modifier + "%S"
-			if _, found := unreadablePosition(unreadable, true); !found {
-				t.Errorf("a marker after %q%s is a table nobody can read and "+
-					"no rule says so:\n\t%s", keyword, " "+modifier, unreadable)
+			for _, schema := range schemas {
+				named := "SELECT X " + keyword + " " + modifier + schema + "ACCOUNTS"
+				if !tableRef("ACCOUNTS").MatchString(named) {
+					t.Errorf("tableRef does not read a table after %q, so a "+
+						"walled table written there is invisible to every rule "+
+						"built on it:\n\t%s", keyword, named)
+				}
+				unreadable := "SELECT X " + keyword + " " + modifier + schema + "%S"
+				if _, found := unreadablePosition(unreadable, true); !found {
+					t.Errorf("a marker after %q is a table nobody can read and "+
+						"no rule says so:\n\t%s", keyword, unreadable)
+				}
 			}
 		}
 	}
@@ -264,6 +272,62 @@ func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 			t.Errorf("a marker after a comma %sis a table nobody can read "+
 				"and no rule says so:\n\t%s", modifier, unreadable)
 		}
+	}
+}
+
+// A text seen at two call sites is recorded by the STRICTEST of them.
+//
+// The destructive rule judges only statements something RUNS — telling
+// `"TRUNCATE "+t` from `lock %d in progress` by their words cannot be done,
+// and whether anything executes them can. The recording deduplicates by
+// text, and it kept the FIRST call visited: one line logging the statement
+// before the line that runs it — `fmt.Errorf("about to run: %s", sql)` — and
+// the rule never ran on a TRUNCATE PostgreSQL then ran.
+//
+// On a fixture rather than on the package, because the shape has to be
+// written down to be tested and it must not ship.
+func TestATextThatIsLoggedAndThenRunCountsAsRun(t *testing.T) {
+	const src = `package main
+
+func logsThenRuns(ctx C, tx T, table string) {
+	sql := "TRUNCATE " + table
+	_ = errorf("about to run: %s", sql)
+	tx.Exec(ctx, sql)
+}
+
+func runsThenLogs(ctx C, tx T, table string) {
+	sql := "TRUNCATE " + table
+	tx.Exec(ctx, sql)
+	_ = errorf("just ran: %s", sql)
+}
+
+func onlyLogs(table string) {
+	_ = errorf("would run: %s", "TRUNCATE "+table)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	executed := map[string]bool{}
+	for _, st := range statementsIn(map[string]*ast.File{"fixture.go": file}) {
+		if strings.Contains(st.SQL, "TRUNCATE") {
+			executed[st.Func] = executed[st.Func] || st.Executed
+		}
+	}
+	for _, fn := range []string{"logsThenRuns", "runsThenLogs"} {
+		if !executed[fn] {
+			t.Errorf("%s runs the statement and it was recorded as not run: "+
+				"the rule that judges executed statements never sees it", fn)
+		}
+	}
+	// …and the other direction, or the gate would be no gate: a text nothing
+	// runs stays unexecuted, which is what keeps five ordinary error messages
+	// from being refused as SQL.
+	if executed["onlyLogs"] {
+		t.Error("a text that is only ever logged was recorded as run: the " +
+			"gate is open, and prose goes back to being refused as SQL")
 	}
 }
 

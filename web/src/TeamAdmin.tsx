@@ -148,6 +148,12 @@ export function GestionEquipe({
     name: "",
     departments: [],
   });
+  // A REF, and it guards the route that OPENS AN ACCESS. Two clicks in the
+  // same tick run two handlers built by the same render: two accounts, two
+  // invitations, and `setCreated` keeps the last — so the first volunteer's
+  // password, shown once and never stored, is gone from the screen that was
+  // the only place it existed.
+  const [openingAccess, accessOpened] = useSubmitGuard();
 
   const reload = useCallback(async () => {
     try {
@@ -165,6 +171,7 @@ export function GestionEquipe({
 
   const createAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (openingAccess()) return;
     try {
       const r = await API.createAccount({
         email: draft.email,
@@ -178,6 +185,8 @@ export function GestionEquipe({
       await reload();
     } catch (err) {
       onError(err);
+    } finally {
+      accessOpened();
     }
   };
 

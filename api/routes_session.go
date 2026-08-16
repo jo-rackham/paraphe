@@ -201,6 +201,22 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
 	// its next window clean, so a shared team box that fumbles a few times
 	// and then succeeds is not carrying failures towards the ceiling. BOTH
 	// classes, whichever door was used — the two count the same subject.
+	//
+	// KNOWN LIMIT, measured and left standing on purpose: this clearing is
+	// observable. The account-keyed ceiling is one an anonymous caller can
+	// fill for an address of their choosing just by submitting it, so burning
+	// it and then polling it turns its reopening into "somebody just signed
+	// in as this address" — which names one, and the constant sentence and
+	// the decoy hash exist to refuse exactly that.
+	// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn walks it.
+	//
+	// Removing the clearing closes the oracle and opens something worse: the
+	// ceiling counts every attempt, SUCCESSES INCLUDED, so ten legitimate
+	// sign-ins in a quarter of an hour would lock the account out of its own
+	// password. The end-to-end journeys found that within a minute. Closing
+	// both needs the ceiling to count failures only, or to refuse in the same
+	// words as a wrong password — a change to the shape of the limiter, not
+	// to this line, and one to decide rather than improvise.
 	if subject, ok := s.signInSubjectFor(r, c.Email); ok {
 		s.limiter.forget(r.Context(), limitSignInAccount, subject)
 		s.limiter.forget(r.Context(), limitMagicLinkAccount, subject)

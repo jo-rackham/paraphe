@@ -6,12 +6,14 @@ import {
   ORG_STATES,
   REQUEST_STATES,
   rescueFocusAfterCommit,
+  useSubmitGuard,
 } from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
   // The coordination password is returned only ONCE: it does not go back
   // to the database in the clear, and there is no way to retrieve it
@@ -40,7 +42,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   }, []);
 
   const decide = async (d: QueuedRequest, decision: "accepted" | "refused") => {
-    if (busy !== null) return; // aria-disabled keeps the pair focusable
+    // A REF, because `busy` is a render behind: two clicks in the same tick
+    // run two handlers built by the same render, both read it as null, and
+    // both approve. Two campaigns open, two coordination passwords returned,
+    // and `setOpened` keeps the LAST — so the first coordinator's password,
+    // shown once and stored nowhere, is gone from the only screen it existed
+    // on. `aria-disabled` is what the pair shows; this is what guards it.
+    if (deciding()) return;
     setBusy(d.id);
     try {
       const rep = await API.decideRequest(d.id, decision, reasons[d.id] ?? "");
@@ -59,6 +67,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     } catch (e) {
       onMessage({ tone: "erreur", text: (e as Error).message });
     } finally {
+      decisionMade();
       setBusy(null);
       // the decided card unmounts with the very button that decided it
       rescueFocusAfterCommit();
@@ -266,10 +275,14 @@ function Creation({
   const [coordination, setCoordination] = useState("");
   const [listed, setListed] = useState(true);
   const [sending, setSending] = useState(false);
+  const [creating, created] = useSubmitGuard();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    // A REF: `sending` is a render behind, and this form OPENS A CAMPAIGN.
+    // Two presses in one tick create two, and the password card keeps the
+    // last of them.
+    if (creating()) return;
     setSending(true);
     try {
       await onCreate({
@@ -286,6 +299,7 @@ function Creation({
     } catch (err) {
       onMessage({ tone: "erreur", text: (err as Error).message });
     } finally {
+      created();
       setSending(false);
     }
   };

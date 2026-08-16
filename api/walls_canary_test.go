@@ -61,6 +61,17 @@ const tablePositions = `FROM|JOIN|INTO|USING|TABLE`
 
 const tableModifier = `(?:ONLY\s+)?`
 
+// schemaQualifier: the dotted prefixes a name may carry. PostgreSQL accepts
+// `schema.table` and `database.schema.table` — the second is legal as long
+// as the database is the current one, which it always is.
+//
+// Declared once and placed at EVERY position, with tableModifier, because
+// the fifth round of the same class was this: tableRef carried a copy that
+// allowed ONE part, destructiveRef carried another, and unreadableTable
+// carried none. `FROM public.`+t named a walled table nothing looked at, and
+// a three-part LITERAL name was invisible even to the rule that reads names.
+const schemaQualifier = `(?:(?:"[A-Z_][A-Z0-9_]*"|[A-Z_][A-Z0-9_]*)\s*\.\s*){0,2}`
+
 // markerObject: the same marker, consuming the WHOLE format verb — `%S`,
 // `%D`, `%[2]S`. The destructive rule names its object rather than merely
 // noticing one, so it cannot stop at the `%`.
@@ -138,15 +149,15 @@ var (
 	// nobody's table. Only a comma reached through comma-separated table
 	// references counts.
 	unreadableTable = regexp.MustCompile(
-		`\b(?:FROM|JOIN|INTO|USING)\s*` + tableModifier + marker +
+		`\b(?:FROM|JOIN|INTO|USING)\s*` + tableModifier + schemaQualifier + marker +
 			// TABLE takes the modifiers PostgreSQL allows between the keyword
 			// and the name: `TABLE ONLY t` is the shorthand on one partition.
-			`|\bTABLE\s*` + tableModifier + marker +
+			`|\bTABLE\s*` + tableModifier + schemaQualifier + marker +
 			// UPDATE is listed apart, and without the end-of-text case: the
 			// row locking this application allocates cards with ends its
 			// statement on `FOR UPDATE`, which is a locking clause and not a
 			// table position. Only an operand it could not read counts.
-			`|\bUPDATE\s*` + tableModifier + `(?:%|\$\?|,)` +
+			`|\bUPDATE\s*` + tableModifier + schemaQualifier + `(?:%|\$\?|,)` +
 			`|\b(?:FROM|USING)\s+` + tableName +
 			`(?:\s*,\s*` + tableName + `)*\s*,\s*` + tableModifier + marker)
 	// The destructive verbs, with an operand that cannot be read.
@@ -171,13 +182,14 @@ var (
 		// `LOCK <something>` and were refused, which is a false positive, and
 		// in a guard that BLOCKS that costs what a hole costs.
 		`(?:^|;)\s*(?:` + destructiveVerbs + `)\s+` +
-			`(?:TABLE\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(?:ONLY\s+)?` +
-			markerObject +
+			`(?:TABLE\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?` + tableModifier +
+			schemaQualifier + markerObject +
 			`|(?:^|;)\s*(?:CREATE|DROP|ALTER)\s+` +
 			`(?:POLICY|TRIGGER|RULE|INDEX|CONSTRAINT)\b` +
-			`[^;]*?\bON\s+(?:ONLY\s+)?(?:%|\$\?)` +
+			`[^;]*?\bON\s+` + tableModifier + schemaQualifier + `(?:%|\$\?)` +
 			`|(?:^|;)\s*(?:GRANT|REVOKE)\b[^;]*?\bON\s+(?:TABLE\s+)?` +
-			`(?:ALL\s+TABLES\s+IN\s+SCHEMA\s+)?(?:ONLY\s+)?(?:%|\$\?)`)
+			`(?:ALL\s+TABLES\s+IN\s+SCHEMA\s+)?` + tableModifier +
+			schemaQualifier + `(?:%|\$\?)`)
 	// Where a FROM or USING list ENDS, so a comma inside one can be told from
 	// a comma in an ORDER BY. RE2 cannot say "up to the first of these
 	// words", which is why fromListMarker is Go rather than a pattern.
@@ -473,7 +485,7 @@ func tableRef(table string) *regexp.Regexp {
 		// table, not just one. A shorthand nobody writes by hand is still a
 		// shorthand PostgreSQL executes.
 		`((?:` + tablePositions + `|UPDATE)\s+|,\s*)` + tableModifier +
-			`(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?` + table +
+			schemaQualifier + `"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
 
@@ -547,7 +559,7 @@ func fromListMarker(level string) (string, bool) {
 // no predicate could ever make them acceptable: naming a walled table at all
 // is the finding.
 func destructiveRef(table string) *regexp.Regexp {
-	const qualified = `(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?`
+	const qualified = schemaQualifier + `"?`
 	return regexp.MustCompile(
 		// the table right after the verb…
 		`\b(` + destructiveVerbs + `)\s+(?:TABLE\s+)?` +
@@ -894,7 +906,13 @@ type statement struct {
 // call, with the file and enclosing function it is written in.
 func sqlStatements(t *testing.T) []statement {
 	t.Helper()
-	files := apiPackage(t)
+	return statementsIn(apiPackage(t))
+}
+
+// statementsIn does the walking, over whatever files it is given — so the
+// shape tests can hand it a fixture rather than the package, and pin how a
+// text seen at two call sites is recorded.
+func statementsIn(files map[string]*ast.File) []statement {
 	values := stringValues(files)
 	var out []statement
 	for name, file := range files {
@@ -914,7 +932,9 @@ func sqlStatements(t *testing.T) []statement {
 			// branch: what the driver can execute, the canary must read
 			scopes := append([]map[string]string{localScope(values, fn)},
 				localScopeVariants(values, fn)...)
-			seen := map[string]bool{}
+			// Where each text was recorded, so a later call site can UPGRADE
+			// it. Keyed on the text, one entry per statement.
+			seen := map[string]int{}
 			for _, scoped := range scopes {
 				ast.Inspect(fn, func(n ast.Node) bool {
 					call, ok := n.(*ast.CallExpr)
@@ -929,12 +949,20 @@ func sqlStatements(t *testing.T) []statement {
 						// one variant per branch means the same statement is
 						// resolved several times; report each text once
 						key := name + "\x00" + fn.Name.Name + "\x00" + sql
-						if seen[key] {
+						runs := queryCalls[calledName(call)]
+						if at, already := seen[key]; already {
+							// The STRICTEST reading of a text seen twice. One
+							// call site logs it and the next one runs it —
+							// `fmt.Errorf("about to run: %s", sql)` before the
+							// Exec — and first-writer-wins recorded the log,
+							// so the rule that only judges executed statements
+							// never ran on a TRUNCATE PostgreSQL then ran.
+							out[at].Executed = out[at].Executed || runs
 							continue
 						}
-						seen[key] = true
+						seen[key] = len(out)
 						out = append(out, statement{name, fn.Name.Name, sql,
-							queryCalls[calledName(call)]})
+							runs})
 					}
 					return true
 				})

@@ -206,6 +206,7 @@ export function takeLinkToken(): string | null {
     // address bar and a blank page with a LIVE one still in it.
   }
   pending = token || null;
+  takenAt = Date.now();
   return pending;
 }
 
@@ -221,12 +222,29 @@ export function takeLinkToken(): string | null {
  *
  * Once consumed it is gone, so a second mount asks the server for nothing
  * and the link has to be clicked again.
+ *
+ * And it is good for THIS VISIT, which is what the age bound says. Dropping
+ * it per screen means naming every screen that cannot use it, and the list
+ * was short by one: the LOADING screen, where the mode is not known yet, is
+ * not a screen that cannot use the token — it is a screen that does not know
+ * — so it was not on the list, and a page that hangs there holds a live
+ * token for as long as it hangs. Somebody walks away, somebody else sits
+ * down, the campaign answers at last, and the session opens for the second
+ * person.
+ *
+ * Two minutes, which no load reaches: one that slow has already failed to
+ * the outage screen. The cost of being wrong is one click on a link that is
+ * still in its owner's inbox.
  */
 let pending: string | null = null;
+let takenAt = 0;
+
+const VISIT = 2 * 60 * 1000;
 
 export function consumeLinkToken(): string | null {
   const token = pending;
   pending = null;
+  if (token === null || Date.now() - takenAt > VISIT) return null;
   return token;
 }
 
