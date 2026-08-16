@@ -183,12 +183,10 @@ func (s *Server) router() chi.Router {
 		// the 131 072 a body may carry, and an image does not fit in what
 		// is left.
 		r.With(guard(s.coordinationOnly),
-			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly),
-			guard(mediaAdmission)).
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/campaign/logo", s.routeUploadLogo)
 		r.With(guard(s.coordinationOnly),
-			guard(s.limitAccount(limitWriteAccount)),
-			guard(mediaAdmission)).
+			guard(s.limitAccount(limitWriteAccount))).
 			Delete("/campaign/logo", s.routeDeleteLogo)
 
 		// The instance landing page: requesting a campaign, moderating.
@@ -283,46 +281,6 @@ func acceptableText(s string) bool {
 // holds no connection, and ctx.Done() sheds a caller who hung up before
 // their derivation started.
 var signInAdmission = make(chan struct{}, cap(hashGate))
-
-// mediaSlots bounds how many logo mutations an instance runs at once. Both
-// of them hold their pool connection across a round trip to the object
-// store — inCampaign takes it before the handler — so an unbounded burst
-// against a WEDGED store takes every connection the pod has, and the
-// readiness probe, which needs one, goes down with them. Measured on a
-// paused Garage with the pgx default of four connections: six uploads, six
-// readiness probes out of six lost, which is a pod dropped from its Service
-// because a picture would not upload.
-//
-// TWO, and not one: what this bounds is two writers of the same campaign
-// racing, and TestARemovedLogoCannotDestroyTheOneThatReplacedIt has to be
-// able to run that race.
-//
-// Two admitted uploads are not the whole bill: each one leaves behind a
-// deferred deletion that takes a connection of its own, so the real figure
-// is THREE of four, and the margin is one connection, not two. Measured on
-// a paused store with a mixed flow: at four, eight readiness probes out of
-// eight answered; at three, two were lost. Below four the start says so.
-//
-// REFUSED rather than queued, which is the opposite of signInAdmission
-// above and for its very reason: that gate sits BEFORE inScope, so waiting
-// there holds nothing, while this one sits after — a queue here would hold
-// exactly what it exists to protect.
-var mediaSlots = make(chan struct{}, 2)
-
-func mediaAdmission(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case mediaSlots <- struct{}{}:
-			defer func() { <-mediaSlots }()
-		default:
-			errorJSON(w, http.StatusServiceUnavailable,
-				"Une autre modification du logo est en cours sur cette "+
-					"instance. Réessayez dans quelques secondes.")
-			return
-		}
-		next(w, r)
-	}
-}
 
 func admitSignIn(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

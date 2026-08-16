@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -100,15 +101,36 @@ func readLogo(slug, dataURI string) (*Logo, int, string) {
 		return nil, http.StatusBadRequest, why
 	}
 
-	// The key carries a digest OF THE CONTENT: different bytes are a
-	// different key, which is what lets the public URL be cached for ever
-	// and makes a replacement impossible to serve stale.
+	// The key carries a digest OF THE CONTENT — so a bucket restored from an
+	// older copy is detectable rather than silent, and the public URL can be
+	// cached for ever — plus EIGHT BYTES that are never the same twice.
+	//
+	// Those eight bytes are the reason nothing has to be serialised. A key
+	// derived from the content alone can COME BACK: upload an image, replace
+	// it, upload the identical file again, and the key the deletion is about
+	// to remove is the key the pointer now names. Closing that window meant
+	// holding a row lock — hence a pool connection — across a round trip to
+	// the store, and a store that stopped answering then took every
+	// connection the instance had, readiness probe included. Unique, a key
+	// cannot come back, so a deletion can never destroy what anybody points
+	// at, and no lock has to span the network. The cost is that uploading
+	// the same file twice writes two objects instead of sharing one, which
+	// nothing depends on: the first is deleted as the pointer moves.
 	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])[:16]
+	unique := make([]byte, 8)
+	if _, err := rand.Read(unique); err != nil {
+		// crypto/rand does not fail on any platform this runs on, and a
+		// key that is not unique is the whole hazard above: refuse rather
+		// than fall back to something predictable.
+		return nil, http.StatusInternalServerError,
+			"Le nom de fichier n'a pas pu être tiré. Réessayez."
+	}
 	return &Logo{
 		ContentType: mime,
-		Key:         fmt.Sprintf("logos/%s/%s.%s", slug, digest, kind.ext),
-		Raw:         raw,
+		Key: fmt.Sprintf("logos/%s/%s-%s.%s",
+			slug, digest, hex.EncodeToString(unique), kind.ext),
+		Raw: raw,
 	}, 0, ""
 }
 

@@ -606,41 +606,48 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   SVG with a script, an `on*` attribute, a DOCTYPE or an external reference
   is refused.
 - **PostgreSQL holds the pointer, the store holds the bytes**
-  (`orgs.logo_key`, `orgs.logo_type` — no digest COLUMN: the key ends in
-  one, and the same fact written twice is a fact that can diverge). The key
-  carries a digest of the content,
-  so the URL is immutable and cached for ever; replacing a logo writes a new
-  key and deletes the old one, best-effort and never blocking the answer.
-  The object goes in BEFORE the pointer moves: the other order publishes a
-  URL that 404s.
+  (`orgs.logo_key`, `orgs.logo_type` — no digest COLUMN: the key carries
+  one, and the same fact written twice is a fact that can diverge). A key is
+  `logos/<slug>/<digest>-<8 random bytes>.<ext>`: the DIGEST makes a bucket
+  restored from an older copy detectable and the URL cacheable for ever, the
+  RANDOM half makes the key unrepeatable — see below, it is what keeps a
+  database connection out of every call to the store. Replacing a logo
+  writes a new key and deletes the old one, best-effort and never blocking
+  the answer. The object goes in BEFORE the pointer moves: the other order
+  publishes a URL that 404s.
 - **Five settings, all or nothing.** Half of them refuses the start, and so
   does a store that is configured but unreachable — the same posture as an
   unreadable `PARAPHE_WEB_DIR`. None of them is the normal state of a
   developer's instance and of most tests: the routes then answer 501 saying
   so, and the header shows the hexagon.
-- **A wedged store must not take the pod out of its Service.** Both logo
-  routes hold their pool connection across a round trip to the object store
-  — `inCampaign` takes it before the handler runs — so an unbounded burst
-  against a store that answers nothing takes every connection the instance
-  has, and `/health/db`, which needs one, fails with them. Measured on a
-  paused Garage at the pgx default of four connections: six uploads, six
-  readiness probes out of six lost, which is a pod dropped from its Service
-  because a picture would not upload. `mediaAdmission` bounds it to TWO in
-  flight and REFUSES past that (503) rather than queueing — the opposite of
-  `signInAdmission`, and for its very reason: that gate sits BEFORE
-  `inScope`, where waiting holds nothing, and this one sits after. Two and
-  not one, because the race
-  `TestARemovedLogoCannotDestroyTheOneThatReplacedIt` runs needs two writers
-  to meet; that test now fails if either is refused, so narrowing the gate
-  cannot quietly empty it. Same measurement after: six probes out of six at
-  200. The deferred deletion is bounded on its own (one per instance): it
-  answers nobody and holds both a connection and the row lock.
-  **The bill is THREE connections, not two**: each admitted upload leaves a
-  deferred deletion behind, and that deletion takes a connection of its own.
-  So the margin at the pgx default of four is ONE, and a smaller pool has
-  none — measured at three, two readiness probes out of eight lost. The
-  start warns below four rather than refusing: a small pool is a legitimate
-  choice, and pgx only goes under four when a DSN says so.
+- **NO DATABASE CONNECTION IS HELD ACROSS A CALL TO THE STORE**, and the
+  eight random bytes at the end of every key are what buys that. A key
+  derived from the content ALONE can come back — upload an image, replace
+  it, upload the identical file again — so the deletion of an old object
+  could destroy the one the pointer had just started naming. Closing that
+  window meant holding a row lock, hence a pool connection, across a round
+  trip to another machine; and a store that stopped answering then took
+  every connection the instance had, `/health/db` included. Measured on a
+  paused Garage at the pgx default of four: six uploads, **six readiness
+  probes out of six lost** — a pod dropped from its Service because a
+  picture would not upload.
+  Unique keys end it at the root. Nothing can be written back, so a
+  deletion is unconditional: `forgetLogo` reads nothing, locks nothing and
+  takes no connection, and the upload route hands its connection BACK
+  (`s.release`) before the store call and asks for one again after
+  (`s.reacquire`). The lock still exists and still matters — read and
+  replace the pointer under one lock, so each writer supersedes exactly one
+  key — but it spans two local statements. Same measurement after: **six
+  probes out of six at 200, and all six uploads answered** in five seconds
+  instead of two being served and four refused. The cost is that the same
+  file uploaded twice writes two objects rather than sharing one, which
+  nothing depends on.
+  `reacquire` is safe where `renew`'s rejected shape was not: it asks for a
+  connection with none in hand. Asking while holding one is the deadlock
+  that shape measured, so it refuses outright unless `release` has run.
+  An intermediate answer — an admission gate bounding logo mutations to two
+  in flight — was measured, worked, and was removed with this: a guard
+  whose reason has gone is a refusal without one.
 - **The XML DECLARATION is not a processing instruction to refuse.**
   `<?xml version="1.0" encoding="UTF-8"?>` is the first line Inkscape,
   Illustrator and Sketch write, so refusing every `xml.ProcInst` refused

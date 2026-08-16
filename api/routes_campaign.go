@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -174,14 +173,13 @@ func (s *Server) routeUploadLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The campaign's row is LOCKED before anything reaches the store, and
-	// `previous` is read back under that lock rather than trusted from the
-	// scope. Everything that removes an object takes the same lock, which is
-	// what makes the check on the other side mean something — see forgetLogo.
-	previous, ok := s.lockLogo(w, r)
-	if !ok {
-		return
-	}
+	// The connection goes back to the pool BEFORE the store is called, and
+	// is asked for again after. Nothing is written yet, so there is nothing
+	// to commit; what matters is that the round trip below holds no
+	// connection. Held, a store that stops answering takes every connection
+	// the instance has and the readiness probe with them — measured, six
+	// probes out of six.
+	s.release(r)
 
 	// The object goes in BEFORE the pointer: the other order publishes a URL
 	// that answers 404 for as long as the write takes, and for ever if it
@@ -195,6 +193,24 @@ func (s *Server) routeUploadLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.reacquire(r); err != nil {
+		// The object is written and nothing points at it: an orphan of a few
+		// kilobytes, which the next backup copies for nothing. Said, not
+		// hidden — the alternative is a pointer to an object that may not be
+		// there.
+		slog.Error("logo stored but the pointer could not be moved",
+			"slug", org.Slug, "key", logo.Key, "error", err)
+		s.failure(w, err)
+		return
+	}
+
+	// Read and replaced under the SAME lock, so `previous` is what this
+	// request is superseding and nothing else. The lock spans two local
+	// statements now — microseconds — where it used to span the store call.
+	previous, ok := s.lockLogo(w, r)
+	if !ok {
+		return
+	}
 	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
 		"UPDATE orgs SET logo_key="+req.p(logo.Key)+", "+
@@ -211,7 +227,7 @@ func (s *Server) routeUploadLogo(w http.ResponseWriter, r *http.Request) {
 	// Only once the pointer has MOVED, and never blocking the answer: a
 	// leftover object costs a few kilobytes, a deletion racing a rollback
 	// costs the campaign its logo.
-	s.forgetLogo(org.ID, previous, logo.Key)
+	s.forgetLogo(previous)
 	replyJSON(w, http.StatusOK, map[string]any{
 		"logo": map[string]string{
 			"url": s.media.URL(logo.Key), "type": logo.ContentType,
@@ -228,7 +244,6 @@ func (s *Server) routeDeleteLogo(w http.ResponseWriter, r *http.Request) {
 	if s.mediaUnavailable(w) {
 		return
 	}
-	org := orgOf(r)
 	previous, ok := s.lockLogo(w, r)
 	if !ok {
 		return
@@ -244,20 +259,24 @@ func (s *Server) routeDeleteLogo(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	s.forgetLogo(org.ID, previous, "")
+	s.forgetLogo(previous)
 	replyJSON(w, http.StatusOK, map[string]any{"logo": nil})
 }
 
 // lockLogo takes the campaign's row for the rest of the transaction and
 // returns the key it currently points at.
 //
-// The LOCK is the whole point. Reading `org.LogoKey` off the scope is a
-// value from before this request's transaction, and checking it against the
-// store afterwards is a check on a fact that may already have moved. Every
-// path that writes or removes an object goes through here first, so the
-// upload of an image and the deletion of the one it replaces cannot
-// interleave — which they did, and the loser destroyed an object every
-// screen still named.
+// The LOCK is what makes `previous` mean something: reading `org.LogoKey`
+// off the scope is a value from before this request's transaction, so two
+// writers could each read the same predecessor and one of them would delete
+// an object the other had just published. Read and replaced under the same
+// lock, each writer supersedes exactly one key.
+//
+// It spans two LOCAL statements and nothing else. It used to span the call
+// to the store as well, because a key derived from the content alone can be
+// written back by a concurrent upload of the same image — the eight random
+// bytes in every key ended that, and with it the need to hold a database
+// connection behind a machine that can stop answering.
 func (s *Server) lockLogo(w http.ResponseWriter, r *http.Request) (string, bool) {
 	req := scoped(r)
 	var key string
@@ -287,59 +306,25 @@ func (s *Server) lockLogo(w http.ResponseWriter, r *http.Request) (string, bool)
 // rounds out of 15 against a store on the same machine, and the window only
 // widens with the distance to it. A check without the lock narrows that
 // window; it does not close it, because the writer commits after the read.
-// forgetting: the deferred deletions, one at a time per instance.
-var forgetting = make(chan struct{}, 1)
-
-func (s *Server) forgetLogo(org int, previous, kept string) {
-	if s.media == nil || previous == "" || previous == kept {
+// forgetLogo removes the object a committed pointer no longer names.
+//
+// It reads NOTHING back, takes no lock and no connection, and that is what
+// the unique suffix in every key buys. A key cannot come back: no upload
+// can produce this one again, so once the pointer has moved there is no
+// state under which deleting it destroys what anybody points at. The
+// version before it re-read the pointer under a row lock and held that lock
+// across the store call — correct, and it put a database connection behind
+// a machine that can stop answering.
+//
+// Detached because the campaign's logo is already right: the only thing
+// left is a few kilobytes, and nobody should wait for them.
+func (s *Server) forgetLogo(previous string) {
+	if s.media == nil || previous == "" {
 		return
 	}
 	go func() {
-		// One at a time per instance. This work answers nobody, and it
-		// holds a pool connection AND the campaign's row lock across a
-		// store round trip: unbounded, a burst of uploads against a wedged
-		// store spawns one of these per upload, each eating a connection
-		// the pod needs to answer its readiness probe. Waited for — under a
-		// healthy store this is milliseconds — then given up, because an
-		// orphan costs kilobytes and a held connection costs the pod. The
-		// wait itself holds nothing.
-		select {
-		case forgetting <- struct{}{}:
-			defer func() { <-forgetting }()
-		case <-time.After(mediaTimeout):
-			slog.Warn("previous logo left in place: another deletion is "+
-				"still running", "key", previous)
-			return
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), mediaTimeout)
 		defer cancel()
-		tx, err := s.pool.Begin(ctx)
-		if err != nil {
-			// Unverified means not deleted: an orphan costs a few kilobytes,
-			// deleting an object still in use costs a campaign its logo.
-			slog.Warn("logo pointer not re-read; the object is left in place",
-				"key", previous, "error", err)
-			return
-		}
-		defer tx.Rollback(ctx) //nolint:errcheck // read-only
-		var current string
-		if err := tx.QueryRow(ctx,
-			"SELECT logo_key FROM orgs WHERE id=$1 FOR UPDATE", org).
-			Scan(&current); err != nil {
-			slog.Warn("logo pointer not re-read; the object is left in place",
-				"key", previous, "error", err)
-			return
-		}
-		if current == previous {
-			return // written again while this was in flight
-		}
-		// The lock is held ACROSS the deletion, and deliberately. Committing
-		// first and deleting after reads as the tidier shape and reopens the
-		// hole this whole function exists to close: between the release and
-		// the delete, an upload of the same image writes exactly this key
-		// back, and the delete then destroys an object the pointer names.
-		// The cost is that a campaign's other writers wait — at most
-		// mediaTimeout, and only while the store is wedged.
 		if err := s.media.Delete(ctx, previous); err != nil {
 			// Said, not raised: the campaign's logo is already correct, and
 			// the only cost is an orphan the next `task backup-media`

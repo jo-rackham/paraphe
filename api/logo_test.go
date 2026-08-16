@@ -64,18 +64,33 @@ func TestAValidLogoIsAcceptedAndKeyedByItsContent(t *testing.T) {
 		!strings.HasSuffix(logo.Key, ".png") {
 		t.Errorf("key = %q: expected logos/<slug>/<digest>.png", logo.Key)
 	}
-	// The key carries a digest of the CONTENT: that is what lets the public
-	// URL be cached for ever, so the same bytes must always produce it.
+	// A key is NEVER produced twice, not even by the same bytes. That is
+	// what lets a deletion be unconditional: no upload can write back the
+	// key another one is about to remove, so nothing has to hold a lock —
+	// or a database connection — across a call to the store. The cost is
+	// two objects where there used to be one, and the first is deleted as
+	// the pointer moves.
 	again, _, _ := readLogo("camille2027", dataURI("image/png", raw))
-	if again == nil || again.Key != logo.Key {
-		t.Errorf("the same image produced two keys: %q then %q",
+	if again == nil || again.Key == logo.Key {
+		t.Errorf("the same image produced the same key twice (%q): a key "+
+			"that can come back is a key a deletion can destroy in use",
+			logo.Key)
+	}
+	// And it still carries the digest of the content, which is what makes a
+	// bucket restored from an older copy detectable, and the URL cacheable.
+	digest, _, _ := strings.Cut(strings.TrimPrefix(logo.Key,
+		"logos/camille2027/"), "-")
+	if len(digest) != 16 {
+		t.Errorf("key %q does not open on a 16-character digest", logo.Key)
+	}
+	if again != nil && !strings.Contains(again.Key, digest) {
+		t.Errorf("the same bytes gave two digests: %q then %q",
 			logo.Key, again.Key)
 	}
 	other, _, _ := readLogo("camille2027", dataURI("image/png",
 		rasterPNG(t, 121, 40)))
-	if other != nil && other.Key == logo.Key {
-		t.Errorf("two different images share the key %q: replacing a logo "+
-			"would leave every browser on the old one", logo.Key)
+	if other != nil && strings.Contains(other.Key, digest) {
+		t.Errorf("two different images share the digest in %q", other.Key)
 	}
 }
 

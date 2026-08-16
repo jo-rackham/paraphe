@@ -162,6 +162,41 @@ func (s *Server) release(r *http.Request) {
 	}
 }
 
+// reacquire takes a connection again, after release handed one back.
+//
+// One route needs it: uploading a logo writes the object BEFORE it moves the
+// pointer — the other order publishes a URL that answers 404, and for ever
+// if the write fails — and that object goes to another machine. Holding a
+// pool connection across that round trip is what let a store which stopped
+// answering take every connection an instance had, readiness probe
+// included: measured, six probes out of six lost. So the route hands its
+// connection back, writes the object, and asks for one again.
+//
+// Where `renew` above warns that taking a SECOND connection deadlocks, this
+// is the opposite shape and safe for that very reason: the first one is
+// already back in the pool, so the caller waits holding nothing. Reversing
+// them — asking before releasing — is the deadlock, which is why this
+// refuses outright unless release has run.
+func (s *Server) reacquire(r *http.Request) error {
+	p := scopeOf(r)
+	if p == nil || !p.released {
+		return errors.New("reacquire without release: the request would " +
+			"wait for a connection while holding one")
+	}
+	conn, err := s.pool.Acquire(r.Context())
+	if err != nil {
+		return fmt.Errorf("taking a connection back: %w", err)
+	}
+	tx, err := conn.Begin(r.Context())
+	if err != nil {
+		conn.Release()
+		return fmt.Errorf("reopening a transaction: %w", err)
+	}
+	p.conn, p.Tx = conn, tx
+	p.released, p.committed = false, false
+	return nil
+}
+
 // inScope resolves the campaign and opens the transaction. Routes depending
 // on it do not run when the scope is unknown: better a readable 404 than an
 // arbitrary campaign served by accident.

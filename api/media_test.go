@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -342,18 +344,20 @@ func TestAPlainMediaOriginIsAccepted(t *testing.T) {
 // Measured at 14 rounds out of 15 before the campaign's row was locked
 // across both paths, on a store running on the same machine. A re-read
 // without that lock does NOT close it: the writer commits after the read.
-// A wedged store must not take the pod out of its Service. Both logo routes
-// hold their pool connection across a round trip to the object store, so an
-// unbounded burst against a store that answers nothing takes every
-// connection the instance has — measured on a paused Garage with the pgx
-// default of four: six uploads, and six readiness probes out of six lost.
-// The gate refuses past its second slot instead of queueing, because it
-// sits AFTER the connection is taken.
-func TestAWedgedStoreCannotTakeEveryPoolConnection(t *testing.T) {
+// A store that stops answering must cost a picture, and nothing else.
+//
+// Both logo routes talk to another machine. Held across that round trip, a
+// pool connection makes a store outage into an application outage: measured
+// on a paused Garage at the pgx default of four connections, six uploads
+// took every one of them and six readiness probes out of six were lost —
+// a pod dropped from its Service because a picture would not upload.
+//
+// The route hands its connection back before the call and asks for one
+// after, which it can do because a key can no longer come back and so no
+// lock has to span the network. This pins the property directly: while an
+// upload sits on a store that never answers, the pool is untouched.
+func TestAnUploadHoldsNoConnectionWhileTheStoreIsSilent(t *testing.T) {
 	s, srv := testServer(t)
-	if s.media == nil {
-		t.Skip("no object store: set PARAPHE_TEST_MEDIA_* (task garage)")
-	}
 	seedMayors(t, s, 1, "01")
 	email := "coord@exemple.fr"
 	pw := createAccount(t, s, email, RoleCoordination, nil)
@@ -361,29 +365,64 @@ func TestAWedgedStoreCannotTakeEveryPoolConnection(t *testing.T) {
 	if code := c.signIn(email, pw); code != http.StatusOK {
 		t.Fatalf("sign-in: %d", code)
 	}
-	// Both slots taken, as a wedged store takes them: nothing is released
-	// until the test hands them back.
-	for range cap(mediaSlots) {
-		mediaSlots <- struct{}{}
+
+	// A store that accepts the connection, reads the request, and answers
+	// nothing until this test lets it go — the shape of a wedged Garage,
+	// without pausing one.
+	arrived, release := make(chan struct{}, 1), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	silent := httptest.NewServer(http.HandlerFunc(
+		func(_ http.ResponseWriter, _ *http.Request) {
+			arrived <- struct{}{}
+			<-release
+		}))
+	defer silent.Close()
+	defer unblock()
+	endpoint, err := url.Parse(silent.URL)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer func() {
-		for range cap(mediaSlots) {
-			<-mediaSlots
-		}
-	}()
+	s.media = &MediaStore{
+		endpoint: endpoint, bucket: "seau", region: "garage",
+		accessKey: "GKtest", secretKey: "secret",
+		publicURL: "https://media.exemple.fr",
+		client:    &http.Client{Timeout: mediaTimeout},
+	}
 
 	body := map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 30, 30))}
-	code, rep := c.call(http.MethodPost, "/api/campaign/logo", body)
-	if code != http.StatusServiceUnavailable {
-		t.Errorf("a third upload answered %d, want 503: the gate is open and "+
-			"the pool is what bounds the damage", code)
+	done := make(chan int, 1)
+	go func() {
+		code, _ := c.call(http.MethodPost, "/api/campaign/logo", body)
+		done <- code
+	}()
+
+	select {
+	case <-arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upload never reached the store")
 	}
-	if text, _ := rep["error"].(string); !strings.Contains(text, "Réessayez") {
-		t.Errorf("the refusal does not tell the coordination what to do: %q", text)
+	// The request is inside the call to the store. Anything it holds now, it
+	// holds for as long as that store stays silent.
+	if held := s.pool.Stat().AcquiredConns(); held != 0 {
+		t.Errorf("%d pool connection(s) held while the store answers nothing: "+
+			"a store outage is then an application outage", held)
 	}
-	// And the rest of the instance still answers — which is the whole point.
-	if code, _ := c.call(http.MethodGet, "/api/config", nil); code != http.StatusOK {
-		t.Errorf("/api/config answered %d while the logo routes were full", code)
+	// And the readiness probe, which needs one, answers.
+	if code, _ := c.call(http.MethodGet, "/health/db", nil); code != http.StatusOK {
+		t.Errorf("readiness answered %d while an upload waited on the store", code)
+	}
+
+	// Let the store answer, and the route must finish: it takes a connection
+	// back, moves the pointer and commits. Handing the connection away
+	// mid-request is only safe if the request can pick one up again.
+	unblock()
+	if code := <-done; code != http.StatusOK {
+		t.Errorf("the upload answered %d once the store replied: the request "+
+			"gave its connection back and could not take one again", code)
+	}
+	if held := s.pool.Stat().AcquiredConns(); held != 0 {
+		t.Errorf("%d connection(s) still held after the answer", held)
 	}
 }
 
@@ -418,14 +457,11 @@ func TestARemovedLogoCannotDestroyTheOneThatReplacedIt(t *testing.T) {
 			replacement, _ = c.call(http.MethodPost, "/api/campaign/logo", body)
 		}()
 		wg.Wait()
-		// ADMITTED, both of them: the two together are the race this test
-		// runs, and `mediaAdmission` refuses past its second slot. Narrowed
-		// to one, the gate would answer 503 here, no two writers would ever
-		// meet, and this test would pass by running nothing at all.
-		if removal == http.StatusServiceUnavailable ||
-			replacement == http.StatusServiceUnavailable {
-			t.Fatalf("round %d: the admission gate refused one of the two "+
-				"(delete %d, upload %d) — the race is not being run",
+		// Both ADMITTED: the two together are the race, and a refusal
+		// would make this test pass by running nothing at all.
+		if removal >= 500 || replacement >= 500 {
+			t.Fatalf("round %d: one of the two was refused (delete %d, "+
+				"upload %d) — the race is not being run",
 				round, removal, replacement)
 		}
 		// let a detached deletion land before judging

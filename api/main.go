@@ -308,21 +308,6 @@ func run() error {
 		}
 		slog.Info("object store ready", "bucket", Get("media_bucket"),
 			"public", Get("media_public_url"))
-		// A logo mutation holds its pool connection across a round trip to
-		// the store, and the deferred deletion takes a THIRD one: two
-		// admitted uploads plus one deletion is three connections, so a
-		// wedged store leaves a fourth-connection pool with exactly one
-		// free — and a pool smaller than that with none, taking the
-		// readiness probe down. Measured: at three, two probes out of eight
-		// were lost; at four, none. Said rather than refused, because a
-		// small pool is a legitimate choice and pgx only goes below four
-		// when a DSN says so.
-		if n := s.pool.Config().MaxConns; n < 4 {
-			slog.Warn("pool_max_conns is below four with an object store "+
-				"configured: a store that stops answering can take every "+
-				"connection, and the readiness probe with them",
-				"pool_max_conns", n)
-		}
 	}
 	s.media = media
 
