@@ -632,6 +632,101 @@ func handler(mode int) {
 	}
 }
 
+// R14. A branching that may take NO branch is the one that matters most: the
+// wall then exists only INSIDE the branch, and the base alone is what the
+// driver runs the rest of the time. `if` without `else` and `switch` without
+// `default` were not enumerated at all — one assigning branch was not
+// considered a fork — and `select` was not a branching statement to begin
+// with. All four spellings are enumerated here, and the enumeration is what
+// the guard uses, so removing a case turns this red.
+func TestABranchingThatMayTakeNoBranchIsEnumerated(t *testing.T) {
+	for _, c := range []struct{ name, src string }{
+		{"if sans else", `package main
+func handler(restricted bool) {
+	sql := "SELECT email FROM accounts"
+	if restricted { sql += " WHERE org_id=$1" }
+	run(sql)
+}`},
+		{"switch sans default", `package main
+func handler(mode string) {
+	sql := "SELECT email FROM accounts"
+	switch mode {
+	case "restricted":
+		sql += " WHERE org_id=$1"
+	}
+	run(sql)
+}`},
+		{"switch avec default", `package main
+func handler(mode string) {
+	sql := "SELECT email FROM accounts"
+	switch mode {
+	case "a":
+		sql += " WHERE org_id=$1"
+	default:
+		sql += " WHERE team_id=$1"
+	}
+	run(sql)
+}`},
+		{"type switch", `package main
+func handler(v any) {
+	sql := "SELECT email FROM accounts"
+	switch v.(type) {
+	case string:
+		sql += " WHERE org_id=$1"
+	case int:
+		sql += " WHERE team_id=$1"
+	}
+	run(sql)
+}`},
+		{"select", `package main
+func handler(a, b chan int) {
+	sql := "SELECT email FROM accounts"
+	select {
+	case <-a:
+		sql += " WHERE org_id=$1"
+	case <-b:
+		sql += " WHERE team_id=$1"
+	}
+	run(sql)
+}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "b.go", c.src, 0)
+			if err != nil {
+				t.Fatalf("parsing the fixture: %v", err)
+			}
+			var fn *ast.FuncDecl
+			for _, decl := range file.Decls {
+				if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "handler" {
+					fn = f
+				}
+			}
+			if fn == nil {
+				t.Fatal("the fixture has no handler")
+			}
+			variants := localScopeVariants(map[string]string{}, fn)
+			if len(variants) < 2 {
+				t.Fatalf("%d variant(s): this branching is not enumerated, so "+
+					"its branches are read concatenated and one of them carries "+
+					"a campaign predicate for all the others", len(variants))
+			}
+			// at least one variant must be the reading with NO campaign
+			// predicate — the one the driver runs
+			bare := false
+			for _, v := range variants {
+				if !orgPredicate.MatchString(normaliseSQL(v["sql"])) {
+					bare = true
+				}
+			}
+			if !bare {
+				t.Error("every variant carries the wall: the branch that does " +
+					"not add it is never read on its own")
+			}
+		})
+	}
+}
+
 // R13. Containers NEST. `[][]query{{{…}}}` and `map[K][]query{…}` put another
 // container where the element type goes, so matching the immediate element
 // caught the one-level shapes and missed every deeper one.
