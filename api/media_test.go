@@ -614,8 +614,11 @@ func TestARemovedLogoCannotDestroyTheOneThatReplacedIt(t *testing.T) {
 				"upload %d) — the race is not being run",
 				round, removal, replacement)
 		}
-		// let a detached deletion land before judging
-		time.Sleep(250 * time.Millisecond)
+		// The detached deletions are counted in s.outbound, so they can be
+		// WAITED for instead of guessed at: 250 ms of sleep is a bet on a
+		// machine's speed, and it loses on a loaded CI or against a store
+		// one network away.
+		s.drainOutbound(3 * time.Second)
 
 		code, cfg := c.call(http.MethodGet, "/api/config", nil)
 		if code != http.StatusOK {

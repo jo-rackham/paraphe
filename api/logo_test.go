@@ -251,6 +251,24 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 			`<a href="data:image/svg+xml,%3Csvg%20xmlns=&apos;http://www.w3.org/2000/svg&apos;` +
 			`%3E%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E">` +
 			`<rect width="10" height="10"/></a></svg>`,
+		// One case per element of the list, and not one case that happens to
+		// carry several: the "embedded HTML" fixture above holds a
+		// foreignObject AND an iframe, so `iframe` could be deleted from the
+		// list without a single assertion moving.
+		"an iframe": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<iframe src="https://ailleurs.example/"/></svg>`,
+		"an embed": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<embed src="https://ailleurs.example/"/></svg>`,
+		"an object": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<object data="https://ailleurs.example/"/></svg>`,
+		"a handler element": `<svg xmlns="http://www.w3.org/2000/svg">` +
+			`<handler type="text/javascript">alert(1)</handler></svg>`,
+		"an animateTransform": `<svg xmlns="http://www.w3.org/2000/svg"><a>` +
+			`<animateTransform attributeName="href" to="https://ailleurs.example/"/>` +
+			`<rect width="10" height="10"/></a></svg>`,
+		"an animateMotion": `<svg xmlns="http://www.w3.org/2000/svg"><a>` +
+			`<animateMotion attributeName="href" to="https://ailleurs.example/"/>` +
+			`<rect width="10" height="10"/></a></svg>`,
 		// Deprecated, and parsed as `animate` by the engines that kept it.
 		"an animateColor rewriting href": `<svg xmlns="http://www.w3.org/2000/svg"><a>` +
 			`<animateColor attributeName="href" to="https://ailleurs.example/"/>` +
@@ -282,6 +300,32 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 		"an image MIME with something after it":     "ressource extérieure",
 		"an inline SVG carrying a script":           "ressource extérieure",
 		"an animateColor rewriting href":            "<animatecolor>",
+		"an iframe":                                 "<iframe>",
+		"an embed":                                  "<embed>",
+		"an object":                                 "<object>",
+		"a handler element":                         "<handler>",
+		"an animateTransform":                       "<animatetransform>",
+		"an animateMotion":                          "<animatemotion>",
+	}
+
+	// The list does not verify itself. Five of its eleven elements were
+	// exercised and six were not, so deleting `iframe`, `embed`, `object`,
+	// `handler` or either of the two remaining SMIL names changed nothing
+	// above — the same shape as a walled table nobody asks the database
+	// about. Every element must be named by a case, and adding one to the
+	// list without a case fails here.
+	for element := range svgForbidden {
+		found := false
+		for _, fragment := range by {
+			if fragment == "<"+element+">" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("<%s> is refused by the code and by no case here: add "+
+				"one that names it, or nothing holds it in the list", element)
+		}
 	}
 	for name, body := range cases {
 		logo, code, why := readLogo("c", dataURI("image/svg+xml", []byte(body)))

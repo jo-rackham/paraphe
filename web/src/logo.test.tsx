@@ -347,6 +347,25 @@ describe("a campaign offered by ?org=", () => {
     }
   });
 
+  it("inlines a logo the store really answers", async () => {
+    // The refusals above are worth nothing without this: `inlineLogo` was
+    // rewritten to throw unconditionally and the whole suite stayed green,
+    // while the adoption path swallows the throw and loses the logo without
+    // a word.
+    const png = Uint8Array.from(atob("iVBORw0KGgo="), (c) => c.charCodeAt(0));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob([png], { type: "image/png" }),
+      })),
+    );
+    await expect(
+      inlineLogo("https://media.exemple.fr/logos/c/abc.png"),
+    ).resolves.toMatch(/^data:image\/png;base64,/);
+  });
+
   it("treats a campaign with no logo as ordinary", async () => {
     answer(null);
     const offer = await fetchCampaign("camille2027");
