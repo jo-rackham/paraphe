@@ -607,7 +607,7 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 		}
 		row := make([]string, len(values))
 		for i, v := range values {
-			row[i] = text(v)
+			row[i] = csvSafe(text(v))
 		}
 		if err := writer.Write(row); err != nil {
 			truncatedExport(err)
