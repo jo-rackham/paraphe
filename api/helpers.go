@@ -130,8 +130,24 @@ func (s *Server) departmentLabels(r *http.Request) ([]string, error) {
 //
 // Checked where the row is WRITTEN, which is the only place the mistake can
 // still be told to whoever is making it.
+//
+// Format characters are refused HERE and not in `legible`, which has to allow
+// them: a name needs the Persian zero-width non-joiner and the Devanagari
+// joiner, an address needs neither. One that carries a zero-width space reads
+// as `admin@exemple.fr` on the moderator's screen and is stored as something
+// else, so the account they believe they are opening is not the one they
+// open. `safeAddress` does not catch it — U+200B is well above the control
+// range it refuses.
 func storableEmail(email string) bool {
-	return strings.Contains(email, "@") && safeAddress(email) == nil
+	if !strings.Contains(email, "@") || safeAddress(email) != nil {
+		return false
+	}
+	for _, r := range email {
+		if unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // text: CSV rendering of a value coming from PostgreSQL. NULL is written

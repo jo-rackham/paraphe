@@ -66,7 +66,10 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 				"chiffres et tirets, et ne pas être un nom réservé : %q.", slug)
 		return
 	}
-	if name == "" || requester == "" || !storableEmail(email) {
+	// `visible`, not `== ""`: a name of zero-width runes survives TrimSpace
+	// and reaches the moderation queue as a blank row. The campaign's own
+	// form reads its names the same way — two public doors, one reading.
+	if !visible(name) || !visible(requester) || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de la campagne, votre nom et votre adresse email sont requis.")
 		return
@@ -88,12 +91,15 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
-	// The administration READS these two before it approves them, and this
-	// form is as anonymous as the campaign's own.
-	if !legible(name) || !legible(requester) {
+	// The administration READS these three before it approves them, and this
+	// form is as anonymous as the campaign's own. The address is read like
+	// the rest: `storableEmail` above asks whether a message can still leave
+	// for it, this asks whether what the administrator reads is what is
+	// stored — a bidi override passes the first and fails the second.
+	if !legible(name) || !legible(requester) || !legible(email) {
 		errorJSON(w, http.StatusBadRequest,
-			"Le nom de la campagne et votre nom ne doivent contenir ni retour "+
-				"à la ligne ni caractère invisible.")
+			"Le nom de la campagne, votre nom et votre adresse email ne doivent "+
+				"contenir ni retour à la ligne ni caractère invisible.")
 		return
 	}
 	if utf8.RuneCountInString(d.Message) > maxNoteRunes {

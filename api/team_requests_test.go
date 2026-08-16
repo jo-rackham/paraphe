@@ -308,6 +308,84 @@ func TestTheHostingFormRefusesInvisibleCharactersToo(t *testing.T) {
 	}
 }
 
+// …and every other reading the campaign's form applies, because the two doors
+// are the same door one level apart. Hardening one and not the other is the
+// mistake this file exists to refuse: an administrator reads these rows on
+// the only screen that can approve them.
+func TestTheHostingFormReadsItsNamesLikeTheCampaignsForm(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	c := clientOn(t, srv, "paraphe.test")
+
+	// THREE probes, one per guard, and no more: `limitHostingIP` is 3 an hour
+	// and a fourth would be refused for a reason that has nothing to do with
+	// what is asserted here.
+	for _, probe := range []struct {
+		what, name, requester, email string
+	}{
+		// `visible`
+		{"a name of nothing but zero-width runes", "\u200b\u2060", "Qui",
+			"qui@exemple.fr"},
+		// `legible`, and ONLY it: U+2028 is `Zl`, so neither the `Cf` sweep
+		// of `storableEmail` nor the `< 0x20` of `safeAddress` sees it
+		{"a line separator in the address", "Campagne", "Qui",
+			"victime\u2028@exemple.fr"},
+		// `storableEmail`: reads as « admin@exemple.fr » on the screen that
+		// approves it, and is stored as something else
+		{"a zero-width space in the address", "Campagne", "Qui",
+			"admin\u200b@exemple.fr"},
+	} {
+		code, _ := c.call(http.MethodPost, "/api/request", map[string]any{
+			"slug": "nouvelle", "name": probe.name,
+			"requester_name": probe.requester, "requester_email": probe.email,
+		})
+		if code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", probe.what, code)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM hosting_requests"); n != 0 {
+		t.Fatalf("%d hosting request(s) the administrator cannot read were stored", n)
+	}
+}
+
+// An address is not a name. `legible` must allow the format characters a name
+// needs — the Persian zero-width non-joiner, the Devanagari joiner — and an
+// address needs none of them: one carrying a zero-width space reads as
+// `admin@exemple.fr` and is stored as something else, so the account the
+// coordination believes it is opening is not the one it opens.
+func TestAnAddressCarriesNoFormatCharacter(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	c := newClient(t, srv)
+
+	for _, probe := range []struct{ what, email string }{
+		{"a zero-width space", "admin\u200bistrateur@exemple.fr"},
+		{"a zero-width non-joiner", "admin\u200c@exemple.fr"},
+		{"a zero-width joiner", "admin\u200d@exemple.fr"},
+		{"a word joiner", "admin\u2060@exemple.fr"},
+		{"a soft hyphen", "admin\u00ad@exemple.fr"},
+		{"a left-to-right mark", "admin\u200e@exemple.fr"},
+	} {
+		body := teamRequestBody("Équipe "+probe.what, "01")
+		body["requester_email"] = probe.email
+		if code, _ := c.call(http.MethodPost, "/api/team/request", body); code !=
+			http.StatusBadRequest {
+			t.Errorf("%s in an address: %d, want 400", probe.what, code)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
+		org); n != 0 {
+		t.Fatalf("%d request(s) with a look-alike address were stored", n)
+	}
+	// and a plain address still gets through: this refuses a character class,
+	// not an alphabet
+	if code, rep := c.call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe du Nord", "01")); code != http.StatusCreated {
+		t.Fatalf("an ordinary address was turned away: %d %v", code, rep)
+	}
+}
+
 // A name can be present, non-empty, legible — and still show the moderator
 // nothing. `strings.TrimSpace` trims spaces, and the zero-width runes are not
 // spaces: they are `Cf`, and a name made only of them reached the queue as a
