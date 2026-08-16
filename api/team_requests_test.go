@@ -581,8 +581,16 @@ func TestAcceptingATeamRequestInvitesTheLeadItJustOpened(t *testing.T) {
 	if sent.to != requesterAddress {
 		t.Fatalf("the invitation went to %q, not to the person who asked", sent.to)
 	}
-	if !strings.Contains(sent.body, "/connexion#jeton=") {
-		t.Errorf("the invitation carries no link:\n%s", sent.body)
+	// It GREETS the requester, and does not merely reach them: the field is
+	// one argument away from the moderator's own name, and swapping the two
+	// left every assertion above green.
+	if !strings.Contains(sent.body, "Personne qui demande") {
+		t.Errorf("the invitation does not greet the person who asked:\n%s", sent.body)
+	}
+	// and the link opens THIS campaign, on the origin it is served from
+	if !strings.Contains(sent.body, "https://campagne.exemple.fr/connexion#jeton=") {
+		t.Errorf("the link does not point at the campaign's own origin:\n%s",
+			sent.body)
 	}
 }
 
