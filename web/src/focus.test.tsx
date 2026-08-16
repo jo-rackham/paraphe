@@ -298,6 +298,101 @@ describe("focus survives the control's own destruction", () => {
     ).toEqual([1]);
   });
 
+  // Signing in as the instance administrator, with a queue of two, and
+  // stopping wherever the caller asks.
+  const queueOfTwo = async (decide: ReturnType<typeof vi.fn>) => {
+    vi.mocked(API.me).mockResolvedValueOnce({
+      account: {
+        email: "admin@exemple.fr",
+        name: "Administration",
+        role: "administration" as unknown as "coordination",
+        team_id: null,
+        active: true,
+        personal_note: "",
+        team_name: null,
+      },
+      departments: [],
+      may_manage: true,
+    });
+    const pending = (id: number, slug: string) => ({
+      id,
+      slug,
+      name: `Campagne ${slug}`,
+      requester_email: "qui@exemple.fr",
+      requester_name: "Qui",
+      message: "",
+      state: "pending" as const,
+      listed: true,
+      reason: "",
+      ts: "2026-01-01T00:00",
+      decided_at: "",
+      decided_by: "",
+    });
+    vi.mocked(API.moderationQueue).mockResolvedValue({
+      requests: [pending(1, "une"), pending(2, "deux")],
+      organisations: [],
+      base_domain: "paraphe.test",
+    });
+    vi.mocked(API.decideRequest).mockImplementation(
+      decide as unknown as typeof API.decideRequest,
+    );
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    await flush();
+    return [...container.querySelectorAll("button")].filter((b) =>
+      b.textContent?.includes("Ouvrir la campagne"),
+    );
+  };
+
+  // ONE submit guard covers the whole queue, so while any card is in flight
+  // every other button's click is swallowed. Wearing aria-disabled only on
+  // the card in flight, the others look live and lie. The campaign-side
+  // screen was fixed for exactly this; its mirror kept `busy === d.id`.
+  it("Moderation: no other decision looks live while one is in flight", async () => {
+    const open = await queueOfTwo(vi.fn(() => new Promise<never>(() => {})));
+    expect(open.length, "the queue shows both requests").toBe(2);
+    await click(open[0]);
+    expect(
+      open[1].getAttribute("aria-disabled"),
+      "the other card's button must not look live while the guard would eat it",
+    ).toBe("true");
+  });
+
+  // The password is returned ONCE and stored nowhere in the clear. The reload
+  // that follows a decision can fail — and `load` swallows its own failure
+  // into a message — so the queue was never refreshed: the password card
+  // landed beside the very request it answers. A moderator reading that
+  // contradiction discards the credential, and the campaign's coordination
+  // has no way in.
+  it("Moderation: a failed reload leaves no pending card beside the password", async () => {
+    const open = await queueOfTwo(
+      vi.fn(async () => ({
+        id: 1,
+        decision: "accepted",
+        address: "une.paraphe.test",
+        coordination: "qui@exemple.fr",
+        password: "mot-de-passe-provisoire",
+      })),
+    );
+    // the refetch the decision triggers never lands
+    vi.mocked(API.moderationQueue).mockRejectedValue(new Error("réseau coupé"));
+    await click(open[0]);
+    await flush();
+
+    const shown = container.textContent ?? "";
+    expect(shown, "the one-time password is on screen").toContain(
+      "mot-de-passe-provisoire",
+    );
+    expect(
+      [...container.querySelectorAll("button")].filter((b) =>
+        b.textContent?.includes("Ouvrir la campagne"),
+      ).length,
+      "the decided card must not still be waiting beside its own password",
+    ).toBe(1);
+  });
+
   it("Demande: a request accepted replaces the whole form — focus is rescued", async () => {
     vi.mocked(API.me).mockRejectedValueOnce(
       Object.assign(new Error("non connecté"), { code: 401 }),

@@ -405,4 +405,48 @@ describe("the coordination's moderation queue", () => {
       "the other card's button must not look live while the guard would eat it",
     ).toBe("true");
   });
+
+  // The lead's password is returned ONCE and stored nowhere in the clear. The
+  // reload that follows the acceptance can fail, and the queue is then never
+  // refreshed: the password card lands beside the very request it answers.
+  // A moderator reading that contradiction either presses Accepter again —
+  // 409, « déjà traitée », so they conclude it never worked — or dismisses
+  // the password as stale. Either way the team has a lead who cannot sign in.
+  it("leaves no pending card beside the password when the reload fails", async () => {
+    await openTeamTab("coordination", [PENDING]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    vi.mocked(API.decideTeamRequest).mockResolvedValue({
+      id: 7,
+      decision: "accepted",
+      team: 3,
+      name: "Équipe du 01",
+      lead: "referente@exemple.fr",
+      password: "mot-de-passe-provisoire",
+    });
+    vi.mocked(API.team).mockRejectedValue(new Error("réseau coupé"));
+
+    const accept = button("Accepter");
+    // the moderator's focus is ON the button they press: that is the whole
+    // case, and holdFocusThrough rescues nobody who was holding nothing
+    await act(async () => {
+      accept.focus();
+    });
+    await act(async () => {
+      accept.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(text(), "the one-time password is on screen").toContain(
+      "mot-de-passe-provisoire",
+    );
+    expect(
+      text(),
+      "the decided card must not still be waiting beside its own password",
+    ).not.toContain("Nom de l'équipe ouverte");
+    // and the control that died with the card did not take the focus with it
+    expect(document.activeElement?.id).toBe("contenu");
+  });
 });

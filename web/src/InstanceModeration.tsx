@@ -13,6 +13,9 @@ import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  // `busy` says a decision is in flight, so EVERY pair can wear
+  // aria-disabled: the guard below covers the whole queue, so a button that
+  // stayed live would only swallow the click.
   const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
   // The coordination password is returned only ONCE: it does not go back
@@ -55,6 +58,20 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     const restoreFocus = holdFocusThrough();
     try {
       const rep = await API.decideRequest(d.id, decision, reasons[d.id] ?? "");
+      // The server has answered: the card leaves the pending list HERE, not
+      // when the reload lands. `load` swallows its own failure into a message,
+      // so a blip would otherwise leave the one-time password beside the very
+      // request it answers — and a moderator discards a password that
+      // contradicts the screen. It is shown once and never again.
+      setQueue(
+        (q) =>
+          q && {
+            ...q,
+            requests: q.requests.map((x) =>
+              x.id === d.id ? { ...x, state: decision } : x,
+            ),
+          },
+      );
       if (rep.password && rep.address && rep.coordination) {
         setOpened({
           address: rep.address,
@@ -189,10 +206,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             </label>
           </p>
           <p>
-            {/* one pair of buttons per request: the name says which */}
+            {/* one pair of buttons per request: the name says which.
+                `busy !== null`, not `=== d.id`: ONE submit guard covers the
+                whole queue, so while any card is in flight every other
+                button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={busy === d.id || undefined}
+              aria-disabled={busy !== null || undefined}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne
@@ -201,7 +221,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
             <button
               type="button"
               className="lien"
-              aria-disabled={busy === d.id || undefined}
+              aria-disabled={busy !== null || undefined}
               onClick={() => decide(d, "refused")}
             >
               Refuser

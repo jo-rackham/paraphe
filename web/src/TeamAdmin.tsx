@@ -181,7 +181,11 @@ function DemandesEquipes({
 }: {
   data: TeamData;
   onError: (e: unknown) => void;
-  onDecided: (r: NewAccess | null, said: string) => Promise<void>;
+  onDecided: (
+    decided: { id: number; state: "accepted" | "refused" },
+    r: NewAccess | null,
+    said: string,
+  ) => Promise<void>;
 }) {
   // one draft per request, seeded from what was asked
   const [drafts, setDrafts] = useState<
@@ -215,6 +219,7 @@ function DemandesEquipes({
       // nothing, and the three fields come back together or not at all.
       const lead = r.lead ?? "";
       await onDecided(
+        { id, state: decision },
         r.password
           ? {
               email: lead,
@@ -229,12 +234,15 @@ function DemandesEquipes({
             // a refusal leaves nothing on screen but one card fewer
             `Demande refusée : « ${draft.name} ».`,
       );
-      restoreFocus();
     } catch (e) {
       onError(e);
     } finally {
       done();
       setDeciding(null);
+      // in the `finally`, not after the await: the card leaves the pending
+      // list as soon as the decision answers, so a reload that THROWS still
+      // unmounts the button under the moderator's finger
+      restoreFocus();
     }
   };
 
@@ -564,7 +572,21 @@ export function GestionEquipe({
         <DemandesEquipes
           data={data}
           onError={onError}
-          onDecided={async (access, said) => {
+          onDecided={async (decided, access, said) => {
+            // The server has answered: the card leaves the pending list HERE,
+            // not when the reload lands. A reload that fails — a blip, a 5xx —
+            // would otherwise leave the one-time password beside the very
+            // request it answers, and a moderator discards a password that
+            // contradicts the screen. It is shown once and never again.
+            setData(
+              (d) =>
+                d && {
+                  ...d,
+                  requests: d.requests.map((r) =>
+                    r.id === decided.id ? { ...r, state: decided.state } : r,
+                  ),
+                },
+            );
             setCreated(access);
             // through the SHELL's region, which pre-exists this screen: an
             // acceptance leaves a password card that says what happened, a
