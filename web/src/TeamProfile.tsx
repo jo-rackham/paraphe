@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as API from "./api.ts";
-import { campaignLabel, label, ROLES } from "./common.tsx";
+import { campaignLabel, label, ROLES, useSubmitGuard } from "./common.tsx";
 import * as M from "./messages.ts";
 import type { Me, ServerConfig } from "./types.ts";
 
@@ -16,6 +16,7 @@ export function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
     me.account.personal_note ?? "",
   );
   const [sending, setSending] = useState(false);
+  const [busy, done] = useSubmitGuard();
   return (
     <>
       <h1>Mon profil</h1>
@@ -52,7 +53,7 @@ export function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
           type="button"
           aria-disabled={sending || undefined}
           onClick={async () => {
-            if (sending) return;
+            if (busy()) return;
             setSending(true);
             try {
               const r = await API.savePersonalNote(personalNote);
@@ -60,6 +61,7 @@ export function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
             } catch (e) {
               onError(e);
             } finally {
+              done();
               setSending(false);
             }
           }}

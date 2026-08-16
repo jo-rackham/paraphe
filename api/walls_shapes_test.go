@@ -580,6 +580,165 @@ func notAQuery() []string { return []string{"x"} }
 	}
 }
 
+// R13. A query built across an if/else is not ONE query. Read sequentially,
+// the two branches concatenate, the text carries `ORG_ID=$1` from the first,
+// and the reference counts as bounded — while the driver runs one of the two,
+// and the second is the very query the canary refuses when written alone.
+// Each branch is now resolved with the others removed, and every variant is
+// judged.
+func TestEachBranchOfAQueryIsJudgedOnItsOwn(t *testing.T) {
+	const src = `package main
+
+func handler(mode int) {
+	sql := "SELECT email FROM notes"
+	if mode == 1 {
+		sql += " WHERE org_id=$1"
+	} else {
+		sql += " WHERE parent_id=$1"
+	}
+	run(sql)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "branch.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "handler" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("the fixture has no handler")
+	}
+	variants := localScopeVariants(map[string]string{}, fn)
+	if len(variants) < 2 {
+		t.Fatalf("%d variant(s): the branches are not enumerated", len(variants))
+	}
+	unwalled := false
+	for _, v := range variants {
+		up := strings.ToUpper(v["sql"])
+		if strings.Contains(up, "PARENT_ID=$1") &&
+			!orgPredicate.MatchString(normaliseSQL(v["sql"])) {
+			unwalled = true
+		}
+	}
+	if !unwalled {
+		t.Error("no variant carries the unwalled branch on its own: the " +
+			"canary reads the two concatenated and calls it bounded, while " +
+			"the driver runs one of them")
+	}
+}
+
+// R13. Containers NEST. `[][]query{{{…}}}` and `map[K][]query{…}` put another
+// container where the element type goes, so matching the immediate element
+// caught the one-level shapes and missed every deeper one.
+func TestANestedCollectionOfQueriesIsStillABuilder(t *testing.T) {
+	const src = `package main
+
+func nested() [][]query        { return [][]query{{{}}} }
+func mapOfSlices() map[string][]query { return map[string][]query{"a": {{}}} }
+func pointers() []*query       { return []*query{{}} }
+func notAQuery() [][]string    { return [][]string{{"x"}} }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "nested.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if buildsAQuery(n) {
+				seen[fn.Name.Name] = true
+			}
+			return true
+		})
+	}
+	for _, name := range []string{"nested", "mapOfSlices", "pointers"} {
+		if !seen[name] {
+			t.Errorf("%s builds queries the constructor guard cannot see", name)
+		}
+	}
+	if seen["notAQuery"] {
+		t.Error("a [][]string reads as a query builder")
+	}
+}
+
+// R13. What a startup body CALLS runs at startup too: `init() { helper() }`
+// and `var _ = fn()` reach a reassignment through one hop, and reading only
+// the bodies themselves missed all of them.
+func TestAReassignmentOneHopFromStartupIsStillLive(t *testing.T) {
+	const src = `package main
+
+var viaHelper = "SELECT email FROM accounts WHERE org_id=$1"
+var viaInitialiser = "SELECT id FROM teams WHERE org_id=$1"
+
+func helper() { viaHelper = "SELECT email FROM accounts" }
+func initialise() bool { viaInitialiser = "SELECT id FROM teams"; return true }
+
+func init() { helper() }
+
+var _ = initialise()
+
+func handler() { run(viaHelper); run(viaInitialiser) }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "hop.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	known := stringValues(map[string]*ast.File{"hop.go": file})
+	for _, name := range []string{"viaHelper", "viaInitialiser"} {
+		if got, present := known[name]; present {
+			t.Errorf("the canary reads %q for %s, which a function called at "+
+				"startup reassigns: the declaration is not what runs", got, name)
+		}
+	}
+}
+
+// R13. A `+=` on a PACKAGE binding must start from what the package says.
+// Reset to nothing, the canary read the appended fragment alone — no SQL
+// verb, so the statement was dropped and the disjunction in it never judged.
+func TestAnAppendOnAPackageBindingKeepsItsBase(t *testing.T) {
+	const src = `package main
+
+func handler() {
+	pkgSQL += " OR TRUE"
+	run(pkgSQL)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "pkgappend.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "handler" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("the fixture has no handler")
+	}
+	base := "SELECT email FROM notes WHERE org_id=$1"
+	got := localScope(map[string]string{"pkgSQL": base}, fn)["pkgSQL"]
+	if !strings.Contains(strings.ToUpper(got), "FROM NOTES") {
+		t.Errorf("the base declared by the package is lost, so the statement "+
+			"carries no table and no rule ever runs on it:\n\tread: %q", got)
+	}
+	if !strings.Contains(strings.ToUpper(got), "OR TRUE") {
+		t.Errorf("the appended text is lost: %q", got)
+	}
+}
+
 // R12. `init()` is not the only thing that runs before the first request. A
 // package-level `var _ = func() bool { … }()` initialiser runs BEFORE init,
 // and reassigns just as effectively — the canary read the declaration and

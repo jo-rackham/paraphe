@@ -58,6 +58,15 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			reason TEXT NOT NULL DEFAULT '',
 			ts TEXT, decided_at TEXT, decided_by TEXT)`,
 		`CREATE INDEX IF NOT EXISTS hosting_requests_state ON hosting_requests(state, id DESC)`,
+		// One pending request per address, enforced by the DATABASE. The
+		// handler reads « is one pending? » and then inserts, and two clients
+		// between those two statements both read no and both insert: the
+		// moderation queue then shows one address twice, from a double click
+		// or from two strangers a hundred milliseconds apart. The unique
+		// index makes the loser of the race collide, and the handler answers
+		// it the 409 it already has a message for.
+		`CREATE UNIQUE INDEX IF NOT EXISTS hosting_requests_pending_slug ` +
+			`ON hosting_requests(slug) WHERE state='pending'`,
 		// Whether the apex directory lists the campaign: chosen on the
 		// hosting request, carried onto the organisation at approval, and
 		// adjustable later by its coordination — discretion is strategic

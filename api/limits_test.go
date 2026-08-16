@@ -187,13 +187,46 @@ func stringValues(files map[string]*ast.File) map[string]string {
 	// package-level `var x = func() … { … }()` initialiser runs BEFORE init,
 	// and `main` runs after it. All three reach production; a reassignment in
 	// any of them is what the driver executes.
+	// Everything a startup body CALLS runs at startup too. `init() {
+	// helper() }` and `var _ = fn()` reach a reassignment through one hop,
+	// and reading only the bodies themselves missed all of them. The closure
+	// is transitive and bounded by the package: a function is visited once.
+	funcs := map[string]*ast.FuncDecl{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name != nil {
+				// methods included: `init() { P{}.method() }` reaches one
+				funcs[fn.Name.Name] = fn
+			}
+		}
+	}
+	var reached func(ast.Node, map[string]bool) []ast.Node
+	reached = func(n ast.Node, seen map[string]bool) []ast.Node {
+		out := []ast.Node{n}
+		ast.Inspect(n, func(x ast.Node) bool {
+			call, ok := x.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name := calledName(call)
+			if name == "" || seen[name] {
+				return true
+			}
+			seen[name] = true
+			if fn, ok := funcs[name]; ok && fn.Body != nil {
+				out = append(out, reached(fn, seen)...)
+			}
+			return true
+		})
+		return out
+	}
 	startupBodies := func(file *ast.File) []ast.Node {
 		var bodies []ast.Node
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
 				if d.Recv == nil && (d.Name.Name == "init" || d.Name.Name == "main") {
-					bodies = append(bodies, d)
+					bodies = append(bodies, reached(d, map[string]bool{})...)
 				}
 			case *ast.GenDecl:
 				if d.Tok != token.VAR {
@@ -205,10 +238,12 @@ func stringValues(files map[string]*ast.File) map[string]string {
 					if !ok {
 						continue
 					}
+					// the initialiser ITSELF, so `var _ = fn()` reaches fn
 					for _, v := range value.Values {
+						bodies = append(bodies, reached(v, map[string]bool{})...)
 						ast.Inspect(v, func(n ast.Node) bool {
 							if lit, ok := n.(*ast.FuncLit); ok {
-								bodies = append(bodies, lit)
+								bodies = append(bodies, reached(lit, map[string]bool{})...)
 							}
 							return true
 						})

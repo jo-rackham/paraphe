@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import * as API from "./api.ts";
-import { Chip, Emoji, TableMaires } from "./common.tsx";
+import { Chip, Emoji, TableMaires, useSubmitGuard } from "./common.tsx";
 import { LigneCarte } from "./LigneCarte.tsx";
 import type {
   Dashboard as DashboardData,
@@ -54,6 +54,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
   const [rank, setRank] = useState("has_endorsed");
   const [democracy, setDemocracy] = useState(false);
   const [sending, setSending] = useState(false);
+  const [busy, done] = useSubmitGuard();
 
   const reload = useCallback(async () => {
     try {
@@ -70,7 +71,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
   if (!data) return <p role="status">Chargement…</p>;
 
   const take = async () => {
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    if (busy()) return; // a REF: state is a render behind
     setSending(true);
     try {
       const r = await API.takeBatch({ department: dept, rank, democracy });
@@ -83,6 +84,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
     } catch (e) {
       onError(e);
     } finally {
+      done();
       setSending(false);
     }
   };
