@@ -208,6 +208,9 @@ function DemandesEquipes({
     Record<number, { name: string; departments: string[] }>
   >({});
   const [deciding, setDeciding] = useState<number | null>(null);
+  // Ticked per card, and only the ACCEPT path reads it: accepting sends a
+  // session link to an address a stranger typed.
+  const [verified, setVerified] = useState<Record<number, boolean>>({});
   const [busy, done] = useSubmitGuard();
 
   if (data.requests.length === 0) return null;
@@ -219,6 +222,13 @@ function DemandesEquipes({
     decision: "accepted" | "refused",
     draft: { name: string; departments: string[] },
   ) => {
+    // BEFORE the submit guard, which TAKES it as a side effect: refusing
+    // after it would leave the guard held by a click that did nothing, and
+    // every later decision in the queue would be swallowed for good.
+    //
+    // What the greyed button shows, enforced: aria-disabled leaves a control
+    // clickable on purpose, so the refusal has to live in the handler too.
+    if (decision === "accepted" && !verified[id]) return;
     if (busy()) return;
     setDeciding(id);
     // captured BEFORE the round trip: this card leaves the queue when the
@@ -322,12 +332,31 @@ function DemandesEquipes({
                 </select>
               </label>
             </p>
+            {/* Accepting SENDS: an email signed by the campaign leaves for
+                an address a stranger typed, carrying a link that opens the
+                lead's session. The address is on the card, but a queue is
+                read fast — this puts it back under the eye at the moment of
+                the decision. A refusal sends nothing and needs none of it. */}
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={verified[r.id] ?? false}
+                  onChange={(e) =>
+                    setVerified({ ...verified, [r.id]: e.target.checked })
+                  }
+                />{" "}
+                J'ai vérifié que <strong>{r.requester_email}</strong> est bien
+                l'adresse de la personne qui demande : l'ouverture lui envoie un
+                lien qui ouvre sa session de référent.
+              </label>
+            </p>
             {/* `deciding !== null`, not `=== r.id`: ONE submit guard covers
                 the whole list, so while any card is in flight every other
                 button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={deciding !== null || undefined}
+              aria-disabled={deciding !== null || !verified[r.id] || undefined}
               onClick={() => decide(r.id, "accepted", draft)}
             >
               Accepter — ouvrir l'équipe

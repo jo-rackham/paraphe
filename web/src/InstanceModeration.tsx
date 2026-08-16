@@ -42,6 +42,9 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // stayed live would only swallow the click.
   const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
+  // Ticked per card, and only the ACCEPT path reads it: approving sends a
+  // session link to an address a stranger typed.
+  const [verified, setVerified] = useState<Record<number, boolean>>({});
   // The coordination password is returned only ONCE: it does not go back to
   // the database in the clear, and there is no way to retrieve it afterwards.
   //
@@ -85,6 +88,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     // and `setOpened` keeps the LAST — so the first coordinator's password,
     // shown once and stored nowhere, is gone from the only screen it existed
     // on. `aria-disabled` is what the pair shows; this is what guards it.
+    // BEFORE the submit guard, which TAKES it as a side effect: refusing
+    // after it would leave the guard held by a click that did nothing, and
+    // every later decision in the queue would be swallowed for good.
+    //
+    // What the greyed button shows, enforced: aria-disabled leaves a control
+    // clickable on purpose, so the refusal has to live in the handler too.
+    if (decision === "accepted" && !verified[d.id]) return;
     if (deciding()) return;
     setBusy(d.id);
     // captured BEFORE the round trip: the card leaves the queue when the
@@ -213,9 +223,6 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
                 screen reader enumerates N buttons of one name and none of
                 them says which card it closes */}
             <span className="sr-only"> {o.address}</span>
-            {/* several of these stand at once: without the address, a
-                screen reader enumerates N buttons of one name and none of
-                them says which card it closes */}
           </button>
         </div>
       ))}
@@ -250,6 +257,26 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
               />
             </label>
           </p>
+          {/* Approving SENDS: an email signed by this instance leaves for an
+              address a stranger typed, carrying a link that opens a session.
+              The address is on the card above, but a queue is read fast —
+              this puts it back under the eye at the moment of the decision,
+              and the accept button stays inert until it has been. A refusal
+              sends nothing and needs none of this. */}
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                checked={verified[d.id] ?? false}
+                onChange={(e) =>
+                  setVerified({ ...verified, [d.id]: e.target.checked })
+                }
+              />{" "}
+              J'ai vérifié que <strong>{d.requester_email}</strong> est bien
+              l'adresse de la personne qui demande : l'ouverture lui envoie un
+              lien qui ouvre la session de coordination.
+            </label>
+          </p>
           <p>
             {/* one pair of buttons per request: the name says which.
                 `busy !== null`, not `=== d.id`: ONE submit guard covers the
@@ -257,7 +284,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
                 button would look live and have its click swallowed */}
             <button
               type="button"
-              aria-disabled={busy !== null || undefined}
+              aria-disabled={busy !== null || !verified[d.id] || undefined}
               onClick={() => decide(d, "accepted")}
             >
               Ouvrir la campagne

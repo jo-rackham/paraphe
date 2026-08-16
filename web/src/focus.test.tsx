@@ -60,6 +60,25 @@ const click = (el: Element) =>
     el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
+/**
+ * Ticks the « J'ai vérifié cette adresse » box of every pending card.
+ *
+ * Approving sends a session link to an address a stranger typed, so the
+ * accept button stays inert until the moderator confirms having read it.
+ * The tests take the same path a person does.
+ */
+async function confirmAddresses() {
+  for (const l of container.querySelectorAll("label")) {
+    if (!l.textContent?.includes("J'ai vérifié")) continue;
+    const box = l.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (box && !box.checked) {
+      await act(async () => {
+        box.click();
+      });
+    }
+  }
+}
+
 describe("focus survives the control's own destruction", () => {
   it("Alerte: « fermer » hands focus to the content, not to <body>", async () => {
     function Harness() {
@@ -281,6 +300,7 @@ describe("focus survives the control's own destruction", () => {
     });
     await flush();
     await flush();
+    await confirmAddresses();
 
     const decide = [...container.querySelectorAll("button")].filter((b) =>
       b.textContent?.includes("Ouvrir la campagne"),
@@ -300,7 +320,10 @@ describe("focus survives the control's own destruction", () => {
 
   // Signing in as the instance administrator, with a queue of two, and
   // stopping wherever the caller asks.
-  const queueOfTwo = async (decide: ReturnType<typeof vi.fn>) => {
+  const queueOfTwo = async (
+    decide: ReturnType<typeof vi.fn>,
+    confirm = true,
+  ) => {
     vi.mocked(API.me).mockResolvedValueOnce({
       account: {
         email: "admin@exemple.fr",
@@ -341,6 +364,7 @@ describe("focus survives the control's own destruction", () => {
     });
     await flush();
     await flush();
+    if (confirm) await confirmAddresses();
     return [...container.querySelectorAll("button")].filter((b) =>
       b.textContent?.includes("Ouvrir la campagne"),
     );
@@ -391,6 +415,39 @@ describe("focus survives the control's own destruction", () => {
       ).length,
       "the decided card must not still be waiting beside its own password",
     ).toBe(1);
+  });
+
+  // Approving SENDS: an email signed by this instance leaves for an address a
+  // stranger typed, carrying a link that opens a session. The address is on
+  // the card, but a queue is read fast — so the button stays inert until the
+  // administrator has said, on that card, that they read it.
+  it("Moderation: approving is inert until the address is confirmed", async () => {
+    const decideRequest = vi.fn(async () => ({
+      id: 1,
+      decision: "accepted",
+      address: "une.paraphe.test",
+      coordination: "qui@exemple.fr",
+      password: "mot-de-passe-provisoire",
+    }));
+    const open = await queueOfTwo(decideRequest, false);
+    expect(
+      open[0].getAttribute("aria-disabled"),
+      "an unconfirmed accept must not look live",
+    ).toBe("true");
+
+    await click(open[0]);
+    await flush();
+    expect(
+      decideRequest.mock.calls.length,
+      "the click was swallowed, and nothing was sent",
+    ).toBe(0);
+
+    // …and it opens the moment the address is confirmed
+    await confirmAddresses();
+    expect(open[0].getAttribute("aria-disabled")).toBeNull();
+    await click(open[0]);
+    await flush();
+    expect(decideRequest.mock.calls.length).toBe(1);
   });
 
   // The coordination password is returned once and stored nowhere in the
@@ -453,6 +510,7 @@ describe("focus survives the control's own destruction", () => {
     });
     await flush();
     await flush();
+    await confirmAddresses();
 
     const open = () =>
       [...container.querySelectorAll("button")].filter((b) =>

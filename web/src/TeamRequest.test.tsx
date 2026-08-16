@@ -97,6 +97,25 @@ const click = (label: string) =>
     button(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
+/**
+ * Ticks the « J'ai vérifié cette adresse » box of every pending card.
+ *
+ * Approving sends a session link to an address a stranger typed, so the
+ * accept button stays inert until the moderator confirms having read it.
+ * The tests take the same path a person does.
+ */
+async function confirmAddresses() {
+  for (const l of container.querySelectorAll("label")) {
+    if (!l.textContent?.includes("J'ai vérifié")) continue;
+    const box = l.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (box && !box.checked) {
+      await act(async () => {
+        box.click();
+      });
+    }
+  }
+}
+
 /** A labelled field, found the way a person reads the form. */
 function field<T extends HTMLElement>(labelStart: string): T {
   const l = [...container.querySelectorAll("label")].find((el) =>
@@ -263,6 +282,7 @@ describe("the coordination's moderation queue", () => {
     // not the campaign's map
     await fill("Nom de l'équipe ouverte", "Équipe Nord-Est");
     await select("Départements accordés", ["01", "02"]);
+    await confirmAddresses();
     // the queue comes back empty: the decided card unmounts under the button
     vi.mocked(API.team).mockResolvedValue({
       accounts: [],
@@ -318,6 +338,7 @@ describe("the coordination's moderation queue", () => {
   ) => {
     await openTeamTab("coordination", [PENDING]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     vi.mocked(API.decideTeamRequest).mockResolvedValue(answer);
     // the reload the decision triggers takes 200 ms, as a round trip does
@@ -387,6 +408,7 @@ describe("the coordination's moderation queue", () => {
     const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
     await openTeamTab("coordination", [PENDING, second]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     vi.mocked(API.decideTeamRequest).mockImplementation(
       () =>
@@ -415,6 +437,7 @@ describe("the coordination's moderation queue", () => {
   it("leaves no pending card beside the password when the reload fails", async () => {
     await openTeamTab("coordination", [PENDING]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     vi.mocked(API.decideTeamRequest).mockResolvedValue({
       id: 7,
@@ -450,6 +473,32 @@ describe("the coordination's moderation queue", () => {
     expect(document.activeElement?.id).toBe("contenu");
   });
 
+  // Accepting SENDS: an email signed by the campaign leaves for an address a
+  // stranger typed, carrying a link that opens the lead's session. The button
+  // stays inert until the coordination has said, on that card, that it read
+  // the address. The mirror screen is guarded the same way.
+  it("is inert until the coordination confirms the address", async () => {
+    await openTeamTab("coordination", [PENDING]);
+    await until(() => text().includes("Demandes d'équipe"), "the queue");
+
+    const accept = button("Accepter");
+    expect(
+      accept.getAttribute("aria-disabled"),
+      "an unconfirmed accept must not look live",
+    ).toBe("true");
+    await act(async () => {
+      accept.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(
+      vi.mocked(API.decideTeamRequest).mock.calls.length,
+      "the click was swallowed, and nothing was sent",
+    ).toBe(0);
+
+    await confirmAddresses();
+    expect(button("Accepter").getAttribute("aria-disabled")).toBeNull();
+  });
+
   // The lead's password is shown once and stored nowhere in the clear. It
   // lived in a SINGLE slot written by two flows — accepting a request, and
   // opening an access directly — each behind its own re-entry guard, so
@@ -460,6 +509,7 @@ describe("the coordination's moderation queue", () => {
     const second: TeamRequest = { ...PENDING, id: 8, name: "Équipe du 02" };
     await openTeamTab("coordination", [PENDING, second]);
     await until(() => text().includes("Demandes d'équipe"), "the queue");
+    await confirmAddresses();
 
     // a REAL server: a decided request comes back decided
     const settled = new Set<number>();

@@ -90,8 +90,15 @@ test.describe
       await expect(
         page.getByRole("heading", { name: "Demandes d'hébergement" }),
       ).toBeVisible();
-      await expect(page.getByText(REQUESTER)).toBeVisible();
+      // scoped to the card, as the team queue's own journey does: the
+      // address is now on the card AND in the confirmation the button waits
+      // for, so a page-wide match resolves to two
+      const queued = page.locator(".carte", { hasText: SLUG });
+      await expect(queued).toContainText(REQUESTER);
 
+      // approving SENDS a session link to the address a stranger typed: the
+      // button is inert until the administrator confirms having read it
+      await page.getByLabel(/J'ai vérifié/).check();
       await page.getByRole("button", { name: "Ouvrir la campagne" }).click();
       const opened = page.getByRole("heading", {
         name: `Campagne ouverte : ${SLUG}.localhost`,
