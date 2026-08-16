@@ -185,15 +185,9 @@ function DemandesEquipes({
   const [deciding, setDeciding] = useState<number | null>(null);
   const [busy, done] = useSubmitGuard();
 
+  if (data.requests.length === 0) return null;
   const pending = data.requests.filter((r) => r.state === "pending");
   const decided = data.requests.filter((r) => r.state !== "pending");
-  if (data.requests.length === 0) return null;
-
-  const draftOf = (id: number, asked: string) =>
-    drafts[id] ?? {
-      name: data.requests.find((r) => r.id === id)?.name ?? "",
-      departments: asked ? asked.split(";") : [],
-    };
 
   const decide = async (
     id: number,
@@ -210,12 +204,14 @@ function DemandesEquipes({
       // the card carrying this button is about to vanish from the queue
       rescueFocusAfterCommit();
       // an acceptance opens the lead's access, and its password is shown
-      // once, in the same card every new access uses
+      // once, in the same card every new access uses. A refusal opens
+      // nothing, and the three fields come back together or not at all.
+      const lead = r.lead ?? "";
       onDecided(
         r.password
           ? {
-              email: r.lead ?? "",
-              name: `${r.name ?? draft.name} — ${r.lead ?? ""}`,
+              email: lead,
+              name: `${r.name ?? draft.name} — ${lead}`,
               role: "lead",
               password: r.password,
             }
@@ -233,7 +229,11 @@ function DemandesEquipes({
     <>
       <h2>Demandes d'équipe ({pending.length})</h2>
       {pending.map((r) => {
-        const draft = draftOf(r.id, r.departments);
+        // seeded from what was asked, until the coordination edits it
+        const draft = drafts[r.id] ?? {
+          name: r.name,
+          departments: r.departments ? r.departments.split(";") : [],
+        };
         return (
           <div className="carte" key={r.id}>
             <h3 style={{ marginTop: 0 }}>{r.name}</h3>

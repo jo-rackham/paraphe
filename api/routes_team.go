@@ -61,8 +61,7 @@ func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	departments, err := s.column(r, "SELECT DISTINCT department FROM mayors "+
-		"ORDER BY department")
+	departments, err := s.departmentLabels(r)
 	if err != nil {
 		s.failure(w, err)
 		return

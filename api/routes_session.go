@@ -42,13 +42,10 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// The departments of the COMMON mayor list — public data, the same for
-	// every campaign, and the only way the public team-request form can offer
+	// The only way the public team-request form on this very screen can offer
 	// a perimeter instead of asking a visitor to guess how the register spells
-	// « Côtes-d'Armor ». One distinct scan per page load, not per request:
-	// this route is read once, before anything else.
-	departments, err := s.column(r, "SELECT DISTINCT department FROM mayors "+
-		"ORDER BY department")
+	// « Côtes-d'Armor ».
+	departments, err := s.departmentLabels(r)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -240,13 +237,7 @@ func (s *Server) teamDepartments(r *http.Request, c *Account) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	departments := []string{}
-	for _, d := range strings.Split(raw, ";") {
-		if d != "" {
-			departments = append(departments, d)
-		}
-	}
-	return departments, nil
+	return splitDepartments(raw), nil
 }
 
 type personalNoteRequest struct {

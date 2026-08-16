@@ -177,9 +177,7 @@ func (s *Server) knownDepartments(r *http.Request, wanted []string) ([]string, s
 	if len(asked) == 0 {
 		return nil, "", nil
 	}
-	// `mayors` is the common list: public, identical for every campaign, and
-	// carrying no org_id — hence no campaign to name here.
-	known, err := s.column(r, "SELECT DISTINCT department FROM mayors")
+	known, err := s.departmentLabels(r)
 	if err != nil {
 		return nil, "", err
 	}
@@ -375,18 +373,6 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 		"requester", s.accountPseudonym(requesterEmail),
 		"by", s.accountPseudonym(me.Email))
 	replyJSON(w, http.StatusOK, response)
-}
-
-// splitDepartments: the stored perimeter as a list. Empty means the whole
-// country, which is what a team with no departments already draws from.
-func splitDepartments(raw string) []string {
-	out := []string{}
-	for _, d := range strings.Split(raw, ";") {
-		if d != "" {
-			out = append(out, d)
-		}
-	}
-	return out
 }
 
 // insertTeam and insertAccount are shared by the direct creation
