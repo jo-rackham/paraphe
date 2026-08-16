@@ -3,6 +3,7 @@ import * as API from "./api.ts";
 import {
   Alerte,
   CompteurResultats,
+  httpUrl,
   Marque,
   PiedDePage,
   RenderGuard,
@@ -135,6 +136,7 @@ function Accueil({
   onDemande: () => void;
   onAdministration: () => void;
 }) {
+  const browserUrl = httpUrl(config.browser_version_url);
   return (
     <>
       <h1>Chercher 500 parrainages, méthodiquement</h1>
@@ -206,15 +208,14 @@ function Accueil({
       </div>
 
       <Annuaire />
-      {config.browser_version_url && (
+      {browserUrl && (
         <>
           <h2>Essayer sans compte</h2>
           <p>
-            La <a href={config.browser_version_url}>version navigateur</a> offre
-            le même outil, sans inscription : les listes se chargent dans votre
-            navigateur et rien ne quitte votre poste. Pour travailler à
-            plusieurs et partager le suivi, demandez plutôt l'hébergement d'une
-            campagne.
+            La <a href={browserUrl}>version navigateur</a> offre le même outil,
+            sans inscription : les listes se chargent dans votre navigateur et
+            rien ne quitte votre poste. Pour travailler à plusieurs et partager
+            le suivi, demandez plutôt l'hébergement d'une campagne.
           </p>
         </>
       )}

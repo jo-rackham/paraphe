@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Alerte, EMPTY_CFG, Fiche } from "./common.tsx";
+import { Alerte, EMPTY_CFG, Fiche, httpUrl } from "./common.tsx";
 import type { Mayor, Message } from "./types.ts";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,6 +26,22 @@ const show = (message: Message | null, onClose: () => void) =>
   act(() => {
     root.render(<Alerte message={message} onClose={onClose} />);
   });
+
+describe("httpUrl", () => {
+  it("keeps http(s) and same-origin relative URLs", () => {
+    expect(httpUrl("https://github.com/x/y")).toBe("https://github.com/x/y");
+    expect(httpUrl("http://example.fr")).toBe("http://example.fr");
+    expect(httpUrl("/navigateur/")).toBe("/navigateur/");
+  });
+  it("rejects a script or data scheme, and the empty value", () => {
+    // eslint-disable-next-line no-script-url
+    expect(httpUrl("javascript:alert(1)")).toBeUndefined();
+    expect(httpUrl("data:text/html,<script>1</script>")).toBeUndefined();
+    expect(httpUrl("")).toBeUndefined();
+    expect(httpUrl(undefined)).toBeUndefined();
+    expect(httpUrl(null)).toBeUndefined();
+  });
+});
 
 describe("Alerte", () => {
   it("dismisses a success on its own after seven seconds", () => {

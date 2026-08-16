@@ -749,6 +749,24 @@ export function TableMaires({ children }: { children: ReactNode }) {
   // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
 }
 
+/**
+ * A URL fit to be an href, or undefined. source_url and browser_version_url
+ * come from the instance's own configuration (PARAPHE_*), never from a
+ * request — but `javascript:` in an href runs on click, so an operator's typo
+ * should fail to render rather than fire a script. Resolved against the
+ * current origin, so a relative path (« /navigateur/ ») still works; only
+ * http and https are returned.
+ */
+export function httpUrl(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw, window.location.origin);
+    return u.protocol === "http:" || u.protocol === "https:" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function PiedDePage({
   children,
   sourceUrl,
@@ -756,6 +774,7 @@ export function PiedDePage({
   children?: ReactNode;
   sourceUrl?: string;
 }) {
+  const source = httpUrl(sourceUrl);
   return (
     <footer>
       <p className="officiel">
@@ -764,9 +783,9 @@ export function PiedDePage({
         ni aucune administration.
       </p>
       {children}
-      {sourceUrl && (
+      {source && (
         <p>
-          <a href={sourceUrl} rel="noreferrer">
+          <a href={source} rel="noreferrer">
             Code source
           </a>{" "}
           — logiciel libre.
