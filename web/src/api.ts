@@ -347,6 +347,17 @@ export const toggleAccount = (
     body: {},
   });
 
+/** Coordination only: moves an account to another campaign role. Promoting
+ * to coordination unbinds the team server-side. */
+export const changeRole = (
+  email: string,
+  role: string,
+): Promise<{ email: string; role: string }> =>
+  call(`team/account/${encodeURIComponent(email)}/role`, {
+    method: "POST",
+    body: { role },
+  });
+
 // -- Asking a campaign to open a local team ---------------------------------
 
 /** Public: no session, and it creates nothing until the coordination accepts. */

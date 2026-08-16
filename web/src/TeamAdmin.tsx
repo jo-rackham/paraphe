@@ -717,23 +717,56 @@ export function GestionEquipe({
                 <td>{c.team ?? "—"}</td>
                 <td>
                   {c.email !== me.account.email && (
-                    <button
-                      type="button"
-                      className="lien"
-                      onClick={async () => {
-                        try {
-                          await API.toggleAccount(c.email);
-                          await reload();
-                        } catch (e) {
-                          onError(e);
-                        }
-                      }}
-                    >
-                      {c.active ? "désactiver" : "réactiver"}
-                      {/* nine identical buttons in a column: the name says
-                          whose access this one touches */}
-                      <span className="sr-only"> {c.name}</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="lien"
+                        onClick={async () => {
+                          try {
+                            await API.toggleAccount(c.email);
+                            await reload();
+                          } catch (e) {
+                            onError(e);
+                          }
+                        }}
+                      >
+                        {c.active ? "désactiver" : "réactiver"}
+                        {/* nine identical buttons in a column: the name says
+                            whose access this one touches */}
+                        <span className="sr-only"> {c.name}</span>
+                      </button>
+                      {/* a campaign carries as many coordinators as it
+                          trusts: promotion is coordination's, and stepping
+                          someone down needs another coordinator to remain —
+                          the server refuses the last one (409) */}
+                      {coordination && (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className="lien"
+                            onClick={async () => {
+                              try {
+                                await API.changeRole(
+                                  c.email,
+                                  c.role === "coordination"
+                                    ? "volunteer"
+                                    : "coordination",
+                                );
+                                await reload();
+                              } catch (e) {
+                                onError(e);
+                              }
+                            }}
+                          >
+                            {c.role === "coordination"
+                              ? "rendre bénévole"
+                              : "promouvoir coordination"}
+                            <span className="sr-only"> {c.name}</span>
+                          </button>
+                        </>
+                      )}
+                    </>
                   )}
                 </td>
               </tr>
