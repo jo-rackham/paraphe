@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.tsx";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
-import { resetViewMemory } from "./common.tsx";
+import { DELAI_COMPTEUR_MS, resetViewMemory } from "./common.tsx";
 import * as DB from "./db.ts";
 import Team from "./Team.tsx";
 import { teamConfig } from "./testing/fixtures.ts";
@@ -51,6 +51,23 @@ const flush = () =>
   act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
+
+/**
+ * Flush until `done` holds, or fail saying so. Bounded generously: the bound
+ * is there to end a wait that never will, not to time anything — a bound
+ * tight enough to be a measurement is a bound a busy runner trips.
+ */
+const waitFor = async (done: () => boolean, bound = 5000) => {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > bound) {
+      throw new Error(`condition never held within ${bound} ms`);
+    }
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+  }
+};
 
 /** A promise that never settles: freezes the component in its loading state. */
 const pending = () => new Promise<never>(() => {});
@@ -131,10 +148,15 @@ describe("live regions pre-exist their first message", () => {
       root.render(<Browser />);
     });
     await flush();
-    // past the announcement debounce: a lagging mirror is exactly the
-    // two-node state this test refuses
+    // The debounce only starts once the stored list has loaded, so a single
+    // sleep races a commit it cannot see and loses: on a loaded runner it
+    // read the line before it existed and the test failed on a counter that
+    // was merely late. Wait for the line, THEN give a lagging mirror a full
+    // debounce of its own — that lag is exactly the two-node state this
+    // test refuses.
+    await waitFor(() => /affiché\(s\) sur/.test(container.textContent ?? ""));
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 700));
+      await new Promise((r) => setTimeout(r, DELAI_COMPTEUR_MS));
     });
 
     const matches = (container.textContent ?? "").match(/affiché\(s\) sur/g);
