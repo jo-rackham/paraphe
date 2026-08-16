@@ -311,7 +311,14 @@ tasks:
     # it useful.
     cmds:
       - pnpm install
-      - pnpm exec playwright install --with-deps chromium
+      # No `--with-deps`: that flag installs system packages through sudo,
+      # which asks for a password no task runner can answer — the whole
+      # target then fails before a single journey runs, and a spec nobody
+      # can run is a spec nobody notices is broken. `e2e/08-logo.spec.ts`
+      # was written, committed, and first executed weeks later, with two of
+      # its three journeys failing on an ambiguous locator. CI installs the
+      # system dependencies in its own step, where sudo is free.
+      - pnpm exec playwright install chromium
       - pnpm exec playwright test --config e2e/playwright.config.ts
 
   purge-notes:
