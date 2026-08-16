@@ -335,11 +335,35 @@ func resolveString(expr ast.Expr, values map[string]string) (string, bool) {
 	return "", false
 }
 
-// oneRow: a query whose result cannot grow. An aggregate over the whole
-// table returns exactly one row — refusing those blocked legitimate reads
-// (the highest id since the last poll) for nothing.
+// Every exemption below describes the WHOLE statement, anchored, and none of
+// them is a substring test. A substring is satisfied by ADDING text: written
+// as `strings.Contains(sql, "STATE='PENDING'")`, the pending exemption was
+// granted to `WHERE state='pending' OR state='refused'` — refused rows are
+// never deleted, so that is the unbounded response the guard exists to refuse
+// — and to `WHERE NOT (state='pending')`, and to the same substring sitting
+// in a COMMENT. Anchored, anything extra falls outside the shape and the
+// LIMIT is required again, comments included: they break it CLOSED.
+//
+// oneRow: a query whose result cannot grow. An aggregate over the whole table
+// returns exactly one row — refusing those blocked legitimate reads (the
+// highest id since the last poll) for nothing. GROUP BY is what makes that
+// false: `SELECT MAX(id), note FROM notes GROUP BY note` opens with an
+// aggregate and returns one row per distinct note.
 var oneRow = regexp.MustCompile(
 	`^SELECT\s+(COUNT|MAX|MIN|SUM|AVG)\(`)
+
+// pendingQueue: the ONE shape the insert's ceiling bounds — the pending set
+// and nothing else. Anything ANDed, ORed or negated onto it reads rows the
+// ceiling does not count.
+var pendingQueue = regexp.MustCompile(
+	`\bWHERE\s+STATE\s*=\s*'PENDING'\s*(?:ORDER\s+BY[A-Z0-9_,. ]*)?$`)
+
+// singleRowByID: one row by primary key, with the locking clause the card
+// allocation ends on. Anchored for the same reason: `WHERE id=$1 OR ts > $2`
+// carries the substring and reads the table.
+var singleRowByID = regexp.MustCompile(
+	`\bWHERE\s+ID\s*=\s*\$\d+\s*(?:FOR\s+(?:UPDATE|SHARE)` +
+		`(?:\s+SKIP\s+LOCKED|\s+NOWAIT)?)?\s*$`)
 
 // aggregateOver: the same one row, read as a SUBQUERY rather than as the
 // whole statement — `… WHERE (SELECT count(*) FROM t WHERE …) < $n`, which
@@ -350,6 +374,91 @@ var oneRow = regexp.MustCompile(
 func aggregateOver(table string) *regexp.Regexp {
 	return regexp.MustCompile(
 		`SELECT\s+(?:COUNT|MAX|MIN|SUM|AVG)\([^()]*\)\s+FROM\s+` + table + `\b`)
+}
+
+// readsTable: this statement names the table where rows come FROM. A comma
+// counts, because a second table hides behind one.
+func readsTable(sql, table string) bool {
+	return regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`).
+		MatchString(sql)
+}
+
+// boundedRead: this statement's result cannot grow with the table, so it
+// needs no LIMIT of its own.
+//
+// One function, so the guard below and the test that walks the shapes read
+// the SAME decision. Two copies of it would be two things that must agree,
+// which is the shape most of this project's criticals have had.
+func boundedRead(sql, table string) bool {
+	trimmed := strings.TrimSpace(sql)
+	refs := regexp.MustCompile(`(FROM|JOIN|,)\s+`+table+`\b`).
+		FindAllString(sql, -1)
+	switch {
+	// every reference to it here is an aggregate: one row, whichever way the
+	// statement is shaped
+	case len(refs) > 0 &&
+		len(aggregateOver(table).FindAllString(sql, -1)) == len(refs):
+		return true
+	case oneRow.MatchString(trimmed) && !strings.Contains(sql, "GROUP BY"):
+		return true
+	case strings.Contains(sql, "EXISTS("):
+		return true
+	case singleRowByID.MatchString(trimmed):
+		return true
+	// The PENDING set alone is bounded by the INSERT: the ceiling is applied
+	// there, so the rows that exist are already the bound. A LIMIT here would
+	// bound the read by a number the insert only approximates, and past the
+	// cap — where a race is able to leave the table — it cut off the OLDEST,
+	// the legitimate early requests, on the one screen that can accept them.
+	// Whatever is not pending has no such bound and keeps a LIMIT of its own.
+	case pendingQueue.MatchString(trimmed):
+		return true
+	}
+	return false
+}
+
+// An exemption describes the WHOLE statement, and these are the shapes that
+// proved it has to. Every one of them was granted the pending exemption when
+// it was a `strings.Contains`, and each returns rows the ceiling does not
+// count — the refused ones are never deleted either.
+func TestAnExemptionDescribesTheWholeStatement(t *testing.T) {
+	const q = "HOSTING_REQUESTS"
+	for _, sql := range []string{
+		// what must STAY exempt: the queue as it is written
+		"SELECT ID, SLUG FROM HOSTING_REQUESTS WHERE STATE='PENDING' " +
+			"ORDER BY ID DESC",
+		"SELECT COUNT(*) FROM HOSTING_REQUESTS WHERE STATE=$1",
+		"SELECT SLUG, NAME FROM HOSTING_REQUESTS WHERE ID=$1 FOR UPDATE",
+		"SELECT EXISTS(SELECT 1 FROM HOSTING_REQUESTS WHERE SLUG=$1)",
+	} {
+		if !boundedRead(sql, q) {
+			t.Errorf("a bounded read is refused, which is the false positive "+
+				"that sends the next author around the guard:\n\t%s", sql)
+		}
+	}
+	for _, sql := range []string{
+		// pending OR something the ceiling does not count
+		"SELECT ID, SLUG FROM HOSTING_REQUESTS WHERE STATE='PENDING' OR " +
+			"STATE='REFUSED' ORDER BY ID DESC",
+		// the negation of it
+		"SELECT ID FROM HOSTING_REQUESTS WHERE NOT (STATE='PENDING')",
+		// the exempting text in a comment, and in a trailing one
+		"SELECT ID FROM HOSTING_REQUESTS /* STATE='PENDING' */",
+		"SELECT ID FROM HOSTING_REQUESTS WHERE STATE<>'PENDING' " +
+			"-- STATE='PENDING'",
+		// one row by key, with something ORed onto it
+		"SELECT ID FROM HOSTING_REQUESTS WHERE ID=$1 OR TS > $2",
+	} {
+		if boundedRead(sql, q) {
+			t.Errorf("this reads rows the ceiling does not count and the "+
+				"guard calls it bounded:\n\t%s", sql)
+		}
+	}
+	// …and the aggregate GROUP BY makes unbounded: one row per distinct note
+	if boundedRead("SELECT MAX(ID), NOTE FROM NOTES GROUP BY NOTE", "NOTES") {
+		t.Error("an aggregate under GROUP BY returns one row per group, and " +
+			"the guard reads the SELECT list alone")
+	}
 }
 
 // Tables the application only ever adds to. `notes` grows by one row per
@@ -380,42 +489,17 @@ func TestEveryReadOfAnAppendOnlyTableIsBounded(t *testing.T) {
 					return true
 				}
 				for _, arg := range call.Args {
-					// SQL is case-insensitive; the canary must be too, or
-					// `select … from notes` walks straight past it
-					sql := strings.ToUpper(sqlText(arg, scoped))
+					// SQL is case-insensitive and its whitespace is free; the
+					// canary must be both, or `select … from  notes` walks
+					// straight past it and no anchored shape ever matches.
+					sql := sqlSpaces.ReplaceAllString(
+						strings.ToUpper(sqlText(arg, scoped)), " ")
 					if !strings.Contains(sql, "SELECT ") {
 						continue
 					}
 					selects++
 					for _, table := range appendOnly {
-						// FROM, JOIN or a comma list: the table is read the same
-						// way whichever keyword introduces it
-						named := regexp.MustCompile(`(FROM|JOIN|,)\s+` + table + `\b`)
-						refs := named.FindAllString(sql, -1)
-						if len(refs) == 0 {
-							continue
-						}
-						// every reference to it here is an aggregate: one row,
-						// whichever way the statement is shaped
-						if len(aggregateOver(table).FindAllString(sql, -1)) ==
-							len(refs) {
-							continue
-						}
-						if oneRow.MatchString(strings.TrimSpace(sql)) ||
-							strings.Contains(sql, "EXISTS(") ||
-							strings.Contains(sql, "WHERE ID=$1") {
-							continue
-						}
-						// The PENDING set alone is bounded by the INSERT: the
-						// ceiling is applied there, so the rows that exist are
-						// already the bound. A LIMIT here would bound the read
-						// by a number the insert only approximates, and past
-						// the cap — where a race is able to leave the table —
-						// it cut off the OLDEST, the legitimate early
-						// requests, on the one screen that can accept them.
-						// Whatever is not pending has no such bound and keeps
-						// a LIMIT of its own; `<>'PENDING'` is not this.
-						if strings.Contains(sql, "STATE='PENDING'") {
+						if !readsTable(sql, table) || boundedRead(sql, table) {
 							continue
 						}
 						if !strings.Contains(sql, "LIMIT") {
