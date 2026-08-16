@@ -162,33 +162,48 @@ func unwalled() { run("SELECT email" + scopedFilter("anything")) }
 // adding a verb to the guard without teaching it its unreadable form goes
 // red here, rather than three months later in a round nobody ran.
 func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
+	// …over the same axes as every other table position. Walked on the verb
+	// alone, this certified an agreement that did not hold: the schema
+	// qualifier was carried by all three destructive alternatives and checked
+	// on none of them, so an edit dropping it went green while
+	// `TRUNCATE public.`+t went back to reading as a statement touching no
+	// walled table.
+	qualifiers := []string{"", "PUBLIC.", `"PUBLIC".`, "PARAPHE.PUBLIC."}
 	for _, verb := range strings.Split(destructiveVerbs, "|") {
-		named := verb + " ACCOUNTS"
-		if !destructiveRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("destructiveRef does not know %q, so nothing refuses "+
-				"it with the table named:\n\t%s", verb, named)
-		}
-		// …and the same statement with the name taken out
-		for _, unreadable := range []string{verb + " %S", verb + " $?"} {
-			if _, found := unreadablePosition(unreadable, true); !found {
-				t.Errorf("%q names a table nobody can read and no rule says "+
-					"so — the statement reads as touching no walled table:"+
-					"\n\t%s", verb, unreadable)
+		for _, modifier := range []string{"", "ONLY "} {
+			for _, schema := range qualifiers {
+				named := verb + " " + modifier + schema + "ACCOUNTS"
+				if !destructiveRef("ACCOUNTS").MatchString(named) {
+					t.Errorf("destructiveRef does not know %q, so nothing "+
+						"refuses it with the table named:\n\t%s", verb, named)
+				}
+				// …and the same statement with the name taken out
+				for _, marker := range []string{"%S", "$?"} {
+					unreadable := verb + " " + modifier + schema + marker
+					if _, found := unreadablePosition(unreadable, true); !found {
+						t.Errorf("%q names a table nobody can read and no rule "+
+							"says so — the statement reads as touching no "+
+							"walled table:\n\t%s", verb, unreadable)
+					}
+				}
 			}
 		}
 	}
 	// The privilege and object-governing shapes, which name their table after
-	// an ON rather than after the verb.
-	for _, unreadable := range []string{
-		`GRANT SELECT ON %S TO PUBLIC`,
-		`REVOKE ALL ON $? FROM PARAPHE`,
-		`CREATE POLICY P ON %S USING $SUB0`,
-		`DROP POLICY P ON $?`,
-		`CREATE TRIGGER T AFTER DELETE ON %S FOR EACH ROW EXECUTE F$SUB0`,
-	} {
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("the table this governs cannot be read and no rule says "+
-				"so:\n\t%s", unreadable)
+	// an ON rather than after the verb — over the same qualifiers.
+	for _, schema := range qualifiers {
+		for _, unreadable := range []string{
+			`GRANT SELECT ON ` + schema + `%S TO PUBLIC`,
+			`REVOKE ALL ON ` + schema + `$? FROM PARAPHE`,
+			`CREATE POLICY P ON ` + schema + `%S USING $SUB0`,
+			`DROP POLICY P ON ` + schema + `$?`,
+			`CREATE TRIGGER T AFTER DELETE ON ` + schema +
+				`%S FOR EACH ROW EXECUTE F$SUB0`,
+		} {
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("the table this governs cannot be read and no rule "+
+					"says so:\n\t%s", unreadable)
+			}
 		}
 	}
 	// And what must NOT be a finding: a message is not a statement. `sqlVerb`
@@ -250,27 +265,35 @@ func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 	// and is a locking clause, not a table position — so it is walked here
 	// rather than left out of the grid.
 	for _, modifier := range modifiers {
-		named := "UPDATE " + modifier + "ACCOUNTS SET X=1"
-		if !tableRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("tableRef does not read the table of %q", named)
-		}
-		unreadable := "UPDATE " + modifier + "%S SET X=1"
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("a marker after UPDATE %sis a table nobody can read and "+
-				"no rule says so:\n\t%s", modifier, unreadable)
+		for _, schema := range schemas {
+			named := "UPDATE " + modifier + schema + "ACCOUNTS SET X=1"
+			if !tableRef("ACCOUNTS").MatchString(named) {
+				t.Errorf("tableRef does not read the table of %q", named)
+			}
+			unreadable := "UPDATE " + modifier + schema + "%S SET X=1"
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("a marker after UPDATE is a table nobody can read "+
+					"and no rule says so:\n\t%s", unreadable)
+			}
 		}
 	}
 	// …and the comma position, which tableRef has read since the day a second
-	// table hid behind one.
+	// table hid behind one — walked over the SAME axes as the keywords above,
+	// schemas included. Walked at the keyword positions and not at this one,
+	// the grid certified an agreement that did not hold: `FROM accounts a,
+	// public.`+t named a walled table tableRef read and unreadableTable did
+	// not, and PostgreSQL cross-joined every campaign's rows into the answer.
 	for _, modifier := range modifiers {
-		named := "SELECT X FROM TEAMS G, " + modifier + "ACCOUNTS C"
-		if !tableRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("tableRef does not read the table of %q", named)
-		}
-		unreadable := "SELECT X FROM TEAMS G, " + modifier + "%S"
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("a marker after a comma %sis a table nobody can read "+
-				"and no rule says so:\n\t%s", modifier, unreadable)
+		for _, schema := range schemas {
+			named := "SELECT X FROM TEAMS G, " + modifier + schema + "ACCOUNTS C"
+			if !tableRef("ACCOUNTS").MatchString(named) {
+				t.Errorf("tableRef does not read the table of %q", named)
+			}
+			unreadable := "SELECT X FROM TEAMS G, " + modifier + schema + "%S"
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("a marker after a comma is a table nobody can read "+
+					"and no rule says so:\n\t%s", unreadable)
+			}
 		}
 	}
 }
@@ -328,6 +351,71 @@ func onlyLogs(table string) {
 	if executed["onlyLogs"] {
 		t.Error("a text that is only ever logged was recorded as run: the " +
 			"gate is open, and prose goes back to being refused as SQL")
+	}
+}
+
+// A statement built from a LOCAL DECLARATION is read like any other.
+//
+// localScope learned every local ASSIGNMENT and no local declaration, and a
+// `const` holding half a statement is this package's own idiom, not an
+// exotic shape. `const columns = "id, email FROM accounts "` followed by
+// `"SELECT "+columns+"WHERE …"` resolved to a text with no FROM in it: the
+// statement named no walled table, so no rule applied to it and the canary
+// passed it in silence — while the same query written inline is refused.
+//
+// Not a table position two rules read differently, which is what seven
+// rounds of this class had been: a whole statement neither of them ever saw.
+// Both `const` and `var` are walked, and so is the shadowing direction — a
+// local declaration that hides a package binding must not leave the package
+// text standing in its place.
+//
+// On a fixture, because the shape has to be written down to be tested and it
+// must not ship.
+func TestAStatementBuiltFromALocalDeclarationIsRead(t *testing.T) {
+	const src = `package main
+
+var columns = "id, name FROM notes "
+
+func fromConst() {
+	const cols = "id, email FROM accounts "
+	run("SELECT " + cols + "WHERE role = $1")
+}
+
+func fromVar() {
+	var cols = "id, name FROM teams "
+	run("SELECT " + cols + "WHERE id = $1")
+}
+
+func shadowsThePackage() {
+	const columns = "id FROM assignments "
+	run("SELECT " + columns + "WHERE insee_code = $1")
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	seen := map[string]string{}
+	for _, st := range statementsIn(map[string]*ast.File{"fixture.go": file}) {
+		seen[st.Func] = st.SQL
+	}
+	for fn, table := range map[string]string{
+		"fromConst":         "ACCOUNTS",
+		"fromVar":           "TEAMS",
+		"shadowsThePackage": "ASSIGNMENTS",
+	} {
+		if !strings.Contains(seen[fn], table) {
+			t.Errorf("%s builds its statement from a local declaration and the "+
+				"canary reads %q: %s is named nowhere, so no rule applies and "+
+				"an unbounded query passes in silence",
+				fn, seen[fn], table)
+		}
+	}
+	// …and the shadowed package text is NOT what stands in its place
+	if strings.Contains(seen["shadowsThePackage"], "NOTES") {
+		t.Errorf("a local declaration shadowing a package binding was read as "+
+			"the package's: %s", seen["shadowsThePackage"])
 	}
 }
 

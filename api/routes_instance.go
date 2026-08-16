@@ -152,36 +152,35 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 			slug, BaseDomain())
 		return
 	}
-	// A request is never deleted, so this is the only thing bounding what
-	// the table can grow to.
-	var waiting int
-	if err := s.tx(r).QueryRow(r.Context(),
-		"SELECT count(*) FROM hosting_requests WHERE state=$1",
-		RequestPending).Scan(&waiting); err != nil {
+	campaign, err := json.Marshal(completeCampaign(d.Campaign))
+	if err != nil {
 		s.failure(w, err)
 		return
 	}
-	if waiting >= maxPendingRequests {
+	// A request is never deleted, so the ceiling is the only thing bounding
+	// what the table can grow to — and it is applied BY THE INSERT, never by
+	// a count read before it. Read separately, two clients both saw 999 and
+	// both wrote; the queue then dropped the oldest, legitimate requests off
+	// the only screen that can accept them. No row comes back when the
+	// instance is full.
+	var id int64
+	err = s.tx(r).QueryRow(r.Context(),
+		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
+			"requester_name, message, state, ts, listed) "+
+			"SELECT $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9 WHERE (SELECT count(*) "+
+			"FROM hosting_requests WHERE state=$7) < $10 RETURNING id",
+		slug, name, string(campaign), email, requester,
+		strings.TrimSpace(d.Message), RequestPending,
+		shortTimestamp(), d.Listed == nil || *d.Listed,
+		maxPendingRequests).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		errorJSON(w, http.StatusServiceUnavailable,
 			"Trop de demandes sont en attente de modération sur cette "+
 				"instance. Écrivez à son administration : elle peut créer "+
 				"votre campagne sans passer par ce formulaire.")
 		return
 	}
-
-	campaign, err := json.Marshal(completeCampaign(d.Campaign))
 	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	var id int64
-	if err := s.tx(r).QueryRow(r.Context(),
-		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
-			"requester_name, message, state, ts, listed) "+
-			"VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9) RETURNING id",
-		slug, name, string(campaign), email, requester,
-		strings.TrimSpace(d.Message), RequestPending,
-		shortTimestamp(), d.Listed == nil || *d.Listed).Scan(&id); err != nil {
 		// The loser of the race against the partial unique index: the check
 		// above read « none pending » a moment before the other insert
 		// committed. Same answer as that check gives, not a 500.
@@ -217,13 +216,20 @@ func (s *Server) routeHostingQueue(w http.ResponseWriter, r *http.Request) {
 	// LIMIT over both would let 200 anonymous requests push a real
 	// campaign's off the only screen that can accept it, with no way for
 	// that campaign to know.
+	//
+	// The pending read carries NO ceiling of its own either. Bounded at
+	// maxPendingRequests it was bounded by a number the insert only
+	// approximated: past the cap — where a race is able to leave the table —
+	// this showed its newest thousand and dropped the OLDEST, the legitimate
+	// early requests, below the cut, while the flood sat on top. No decision
+	// ever brought them back, and nobody knew they were there. The insert
+	// bounds what exists, this shows all of it.
 	const queueColumns = "id, slug, name, requester_email, requester_name, " +
 		"message, state, listed, COALESCE(reason,'') AS reason, COALESCE(ts,'') AS ts, " +
 		"COALESCE(decided_at,'') AS decided_at, " +
 		"COALESCE(decided_by,'') AS decided_by FROM hosting_requests "
 	requests, err := s.rows(r,
-		"SELECT "+queueColumns+"WHERE state='pending' ORDER BY id DESC LIMIT $1",
-		maxPendingRequests)
+		"SELECT "+queueColumns+"WHERE state='pending' ORDER BY id DESC")
 	if err != nil {
 		s.failure(w, err)
 		return

@@ -309,6 +309,26 @@ One instance can host several campaigns, one per subdomain.
   `TestEveryTablePositionIsReadByBothRules` walks keyword × modifier
   demanding that one read a NAME there and the other a MARKER. Teaching one
   rule a position without the other goes red in the round that does it.
+  **A grid walked at some positions and not at others certifies an agreement
+  that does not hold** — which is how the SEVENTH round of this class arrived.
+  The schema axis was added at the keyword positions, and the comma, which
+  had its own loop, kept walking modifiers alone: `FROM accounts a,
+  public.`+t named a walled table `tableRef` read and `unreadableTable` did
+  not, and PostgreSQL cross-joined every campaign's rows into the answer
+  (measured, two rows against ten). An axis added anywhere is added at EVERY
+  position, and the test walks each position over all of them.
+  **The EIGHTH round was not a table position at all**, and it is the one to
+  remember: `localScope` learned every local ASSIGNMENT and no local
+  DECLARATION. `const columns = "id, email FROM accounts "` followed by
+  `"SELECT "+columns+"WHERE …"` resolved to a text with no FROM in it, so the
+  statement named no walled table, no rule applied, and it passed in silence
+  — while the same query written inline is refused. Worse in the shadowing
+  direction: a local `const` hiding a package binding made the canary judge a
+  DIFFERENT statement than the one that runs. A `const` holding half a
+  statement is this package's own idiom. Whoever teaches the reader a new way
+  a name gets its value teaches BOTH the forgetting pass and the learning
+  pass; `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var and
+  the shadow.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
@@ -329,6 +349,15 @@ One instance can host several campaigns, one per subdomain.
 - A public request form plus moderation: a request creates NOTHING until an
   instance administrator approves it. Without that, the first abuse is
   squatting a candidate's name, with no recourse for the campaign squatted.
+  **Its pending ceiling is applied BY THE INSERT and its queue read carries
+  no LIMIT** — the same two halves as the team form one level down, and the
+  reason they are written twice is that the lesson was learned there and not
+  here. Read separately, two clients both saw 999 and both wrote; the read
+  then showed its newest thousand and dropped the OLDEST, the legitimate
+  early requests, off the only screen that can accept them, with no decision
+  ever bringing them back. `TestEveryReadOfAnAppendOnlyTableIsBounded` knows
+  the exemption by name: the pending set is bounded by the insert, whatever
+  is not pending keeps a LIMIT of its own.
 
 ## Accounts and teams
 
@@ -543,6 +572,24 @@ works when the relay is down, and still bootstraps the instance.
   Refunding does both: counted on arrival like every event — which is what
   still bounds a flood whose handlers never finish — and given back once the
   attempt proved legitimate, so the bucket ends where it stood.
+  **And a bucket the refund EMPTIES is dropped, because the window is as
+  observable as the count.** Giving the count back and keeping the bucket
+  left its reset standing, and `count` only arms a window when it finds
+  none: the next caller on that key inherited the owner's, so the delay the
+  429 handed back was short by exactly the time since the owner signed in —
+  in seconds, in a `Retry-After` header, to an anonymous caller who chose
+  the address. Measured one-for-one, four minutes of gap read as four
+  minutes of difference. The shared store never had it, its `count`
+  re-arming whenever `INCR` answers 1, which a key sitting at zero does:
+  **the two stores answer the same callers, so any difference between them
+  is readable from outside**, and both now hold the same test.
+  **A refund that FAILS leaves that same oracle standing** — the attempt
+  counted and its window armed — and the next round found it one step past
+  the fix. It takes the shared store answering the count of a request and
+  failing its refund, a failover landing between two calls; the local store
+  has nothing to give back, because the count never went there. Assumed:
+  retrying would hold a successful sign-in on a store already known down,
+  and the residue is bounded by the class. The warning says what it leaves.
   **What is refunded is what THIS ROUTE counted, not the door the caller
   came through.** Redeeming a link counts nothing per account — the token
   carries no address, so the source ceiling is its whole bound — and

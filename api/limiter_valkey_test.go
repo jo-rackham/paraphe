@@ -117,6 +117,42 @@ func TestValkeyCountsAtomicallyAndExpires(t *testing.T) {
 	}
 }
 
+// The same promise as TestARefundedAttemptLeavesNoWindowBehind, on the other
+// store: a key a refund emptied hands the NEXT caller a whole window, exactly
+// like a key that never was. Held here as well because the two stores answer
+// the same callers and any difference between them is readable from outside —
+// this one arrives as a Retry-After short by the time since the owner signed
+// in. The process store had to be taught it; this one gets it from the
+// PEXPIRE its count does whenever INCR answers 1, and nothing but this test
+// says it must keep it.
+func TestValkeyRefundLeavesNoWindowBehind(t *testing.T) {
+	v := testValkey(t)
+	ctx := context.Background()
+	const window = time.Minute
+	key := "rl:test:" + testNonce + ":" + t.Name()
+
+	if _, _, err := v.count(ctx, key, window); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.refund(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	total, retryIn, err := v.count(ctx, key, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Fatalf("the refunded event is still counted: %d, want 1", total)
+	}
+	if window-retryIn > 100*time.Millisecond {
+		t.Fatalf("the window handed back is %s of %s, so it was armed before "+
+			"this caller arrived: the delay says how long ago somebody else "+
+			"was here", retryIn, window)
+	}
+}
+
 func TestValkeyForgetResetsTheWindow(t *testing.T) {
 	v := testValkey(t)
 	ctx := context.Background()

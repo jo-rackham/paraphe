@@ -956,6 +956,10 @@ export function Alerte({
  * DISAGREE while the mirror lags. The table itself is the instant
  * feedback; this line can settle 400 ms behind it.
  */
+/** How far behind the table this line settles. Exported so the test that
+ * pins the single node waits on the real figure rather than a copy of it. */
+export const DELAI_COMPTEUR_MS = 400;
+
 export function CompteurResultats({
   shown,
   total,
@@ -968,7 +972,7 @@ export function CompteurResultats({
   // text — the very pattern the doctrine refuses everywhere else
   const [settled, setSettled] = useState("");
   useEffect(() => {
-    const timer = setTimeout(() => setSettled(line), 400);
+    const timer = setTimeout(() => setSettled(line), DELAI_COMPTEUR_MS);
     return () => clearTimeout(timer);
   }, [line]);
   return (

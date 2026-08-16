@@ -194,8 +194,22 @@ func (l *rateLimiter) refund(ctx context.Context, class limitClass, subject stri
 	key := l.bucket(class, subject)
 	if l.shared != nil {
 		if err := l.shared.refund(ctx, key); err != nil {
-			// worst case the attempt counted; said, not hidden
-			slog.Warn("rate limit counter not refunded", "class", class.name,
+			// The attempt stays counted AND its window stays armed, which is
+			// the oracle this whole shape exists to close: the shared store
+			// answered the count, so the local one has nothing to give back,
+			// and the next caller on that key inherits a window whose age is
+			// the time since this sign-in. Measured on a fifteen-minute
+			// ceiling four minutes on: eleven where an address naming nobody
+			// answers fifteen.
+			//
+			// ASSUMED, for want of a correct cheap fix: it takes the shared
+			// store failing HERE while it answered the count of the same
+			// request — a failover landing between two calls — and retrying
+			// would hold a successful sign-in on a store already known down.
+			// Said, never hidden, and the window it leaves is bounded by the
+			// class.
+			slog.Warn("rate limit counter not refunded: the attempt stays "+
+				"counted and its window stays armed", "class", class.name,
 				"error", err)
 		}
 	}
@@ -294,6 +308,16 @@ func (p *processStore) forget(_ context.Context, key string) error {
 // extended — an attempt that arrived after the window closed has already been
 // counted in a fresh one, and giving it back must not make that window look
 // older than it is.
+//
+// An emptied bucket is DROPPED, and that is the whole refund rather than a
+// tidy-up. Giving the count back while keeping the window left the reset
+// standing, and count only arms one when it finds none: the next caller on
+// that key inherited the owner's window, so the delay a 429 handed back was
+// short by exactly the time since the owner signed in — in seconds, in a
+// header, to an anonymous caller who chose the address. The shared store
+// never had it, because its count re-arms whenever INCR answers 1, which a
+// key sitting at zero does. A bucket nobody has spent an event in must be a
+// bucket that never was, in either store.
 func (p *processStore) refund(_ context.Context, key string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -302,6 +326,9 @@ func (p *processStore) refund(_ context.Context, key string) error {
 		return nil
 	}
 	w.n--
+	if w.n == 0 {
+		delete(p.buckets, key)
+	}
 	return nil
 }
 

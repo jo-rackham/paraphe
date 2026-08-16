@@ -225,6 +225,51 @@ func TestBucketNamesDependOnTheSecret(t *testing.T) {
 	}
 }
 
+// A refunded attempt leaves NOTHING behind — not a count, and not a window.
+//
+// Giving the event back was half of it. The bucket stayed, empty, carrying
+// the reset it was armed with, and count only arms a window when it finds
+// none: the next caller on that key inherits the owner's. So the delay a 429
+// hands back is short by exactly the time since the owner signed in, and
+// Retry-After is in SECONDS — the refusal's sentence is coarse, the header
+// is not. Burn the ceiling for an address you know, read the header, and it
+// says both that the address names an account and when its owner last signed
+// in. That is the oracle the refund exists to close, reopened through the one
+// observable nobody was watching.
+//
+// The shared store never had it: its count re-arms whenever INCR answers 1,
+// which a bucket sitting at zero does. The two stores must be observably the
+// same, and this is where they were not.
+func TestARefundedAttemptLeavesNoWindowBehind(t *testing.T) {
+	const gap = 4 * time.Minute
+	class := limitClass{"test", 3, 15 * time.Minute}
+	ctx := context.Background()
+
+	// what an anonymous caller reads from the 429 after burning the ceiling
+	// for a subject, `gap` after the moment under test
+	burn := func(signedIn bool) time.Duration {
+		clock := newFakeClock()
+		l := newRateLimiter([]byte("secret"), nil, clock.now)
+		if signedIn {
+			l.allow(ctx, class, "s")
+			l.refund(ctx, class, "s")
+		}
+		clock.advance(gap)
+		for range class.events {
+			l.allow(ctx, class, "s")
+		}
+		return l.allow(ctx, class, "s").retryIn
+	}
+
+	owner, nobody := burn(true), burn(false)
+	if owner != nobody {
+		t.Errorf("Retry-After tells the two apart by %s, which is the time "+
+			"since the owner signed in: an address that names an account "+
+			"answers %s where an address that names none answers %s",
+			nobody-owner, owner, nobody)
+	}
+}
+
 func TestHumanDelaySpeaksCoarsely(t *testing.T) {
 	for _, tc := range []struct {
 		seconds int
