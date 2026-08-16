@@ -18,17 +18,11 @@ import (
 // "instance", and the front end shows the public landing page — hosting
 // request and administration sign-in.
 func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
-	var noAccount bool
-	var one int
-	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT 1 FROM accounts WHERE org_id=$1 AND active", scopeOrg(r)).Scan(&one)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		noAccount = true
-	case err != nil:
-		s.failure(w, err)
-		return
-	}
+	// Whether the scope has any active account is NOT reported here. This body
+	// is read by anyone, with no session: a boolean saying "this campaign has
+	// no accounts yet" is an enumeration signal for the price of a GET. An
+	// instance started without an administrator is told so where it belongs —
+	// in the server logs, which name the variables to set (bootstrap.go).
 
 	// The account-less alternative, offered beside the hosting form: same
 	// tool, alone, nothing leaving the visitor's browser. When this image
@@ -44,7 +38,6 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 			"base_domain":         BaseDomain(),
 			"source_url":          s.cfg.SourceURL,
 			"browser_version_url": browserURL,
-			"no_account":          noAccount,
 			"campaign_keys":       CampaignKeys,
 		})
 		return
@@ -58,7 +51,6 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		"source_url": s.cfg.SourceURL,
 		"statuses":   Statuses,
 		"ranks":      Ranks,
-		"no_account": noAccount,
 		// null when the campaign has none, or when the instance has no
 		// object store: either way the header shows the hexagon alone.
 		"logo": s.logoOf(org),
