@@ -88,6 +88,14 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
+	// The administration READS these two before it approves them, and this
+	// form is as anonymous as the campaign's own.
+	if !legible(name) || !legible(requester) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de la campagne et votre nom ne doivent contenir ni retour "+
+				"à la ligne ni caractère invisible.")
+		return
+	}
 	if utf8.RuneCountInString(d.Message) > maxNoteRunes {
 		errorJSON(w, http.StatusBadRequest,
 			"Votre message ne doit pas dépasser 5000 caractères.")

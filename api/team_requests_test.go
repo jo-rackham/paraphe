@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -128,6 +129,139 @@ func TestATeamRequestBoundsWhatAnAnonymousFormCanWrite(t *testing.T) {
 	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
 		org); n != 0 {
 		t.Fatalf("%d oversized request(s) written", n)
+	}
+}
+
+// The ceiling bounds STORAGE and hides NOTHING — that is what the constant's
+// comment promises the coordination. A ceiling read and then written to in
+// two statements lets concurrent inserts past it, and a queue that reads the
+// newest 200 then drops the OLDEST pending requests off the only screen that
+// can accept them: the legitimate early ones, in favour of whatever arrived
+// last. The invariant is asserted where it can be: on the read.
+func TestTheQueueHidesNoPendingRequestEvenOverTheCeiling(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	password := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+
+	// past the ceiling, as a race is able to leave it
+	const over = maxPendingTeamRequests + 25
+	for i := range over {
+		execAsMaintenance(t, s,
+			"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
+				"requester_name, message, state, ts) "+
+				"VALUES($1,$2,'','qui@exemple.fr','Qui','','pending','2026-01-01T00:00')",
+			org, fmt.Sprintf("Équipe %04d", i))
+	}
+
+	coord := newClient(t, srv)
+	if code := coord.signIn("coord@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	code, payload := coord.call(http.MethodGet, "/api/team", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/team: %d", code)
+	}
+	requests, _ := payload["requests"].([]any)
+	if len(requests) != over {
+		t.Fatalf("the queue shows %d of %d pending requests: %d are hidden from "+
+			"the only screen that can accept them, and the oldest go first",
+			len(requests), over, over-len(requests))
+	}
+	// and the earliest one — the one a flood pushes off the page — is there
+	raw, err := json.Marshal(requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Équipe 0000") {
+		t.Error("the oldest pending request is not on the screen")
+	}
+}
+
+// The two early refusals told a stranger WHICH door they hit: a real team, or
+// somebody else's pending request. Team names are internal to a campaign —
+// neither /api/config nor /api/campaign/public carries them — so the pair was
+// an enumeration oracle, ten a source per hour, for a visitor with no account.
+func TestTheFormRefusesATakenNameWithoutSayingWhatHoldsIt(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	createTeamIn(t, s, org, "Équipe qui existe", "01")
+	c := newClient(t, srv)
+
+	if code, _ := c.call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe demandée", "01")); code != http.StatusCreated {
+		t.Fatal("the public form did not accept the first request")
+	}
+	_, onATeam := c.call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe qui existe", "01"))
+	_, onARequest := c.call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe demandée", "01"))
+
+	team, _ := onATeam["error"].(string)
+	request, _ := onARequest["error"].(string)
+	if team == "" || request == "" {
+		t.Fatalf("no refusal came back: %q / %q", team, request)
+	}
+	// the NAME may be quoted — the sender typed it. What must not differ is
+	// what the sentence says about the campaign's own rows.
+	if strings.ReplaceAll(team, "Équipe qui existe", "X") !=
+		strings.ReplaceAll(request, "Équipe demandée", "X") {
+		t.Errorf("the two refusals differ, so they tell a stranger which door "+
+			"a name hit:\n\tteam:    %s\n\trequest: %s", team, request)
+	}
+}
+
+// A name is read by the coordination before it decides. A right-to-left
+// override reverses what the screen shows without changing what is stored, so
+// the row a moderator believes they are accepting is not the one they accept.
+// Legitimate French carries no control and no format character.
+func TestTheFormRefusesInvisibleCharactersInTheNames(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	c := newClient(t, srv)
+
+	// ESCAPED, never written literally: a source file carrying an override
+	// reads reversed in the editor of whoever opens it next, which is the
+	// very thing being refused here.
+	for _, probe := range []struct{ what, name, requester string }{
+		{"a right-to-left override", "Innocent\u202eiliaM", "Qui"},
+		{"a zero-width joiner", "Équipe\u200d\u200d", "Qui"},
+		{"an ANSI escape", "Équipe\x1b[31m", "Qui"},
+		{"a line break", "Équipe\nAutre ligne", "Qui"},
+		{"an override in the requester's name", "Équipe", "Qui\u202emoc"},
+	} {
+		body := teamRequestBody(probe.name, "01")
+		body["requester_name"] = probe.requester
+		if code, _ := c.call(http.MethodPost, "/api/team/request", body); code !=
+			http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", probe.what, code)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
+		org); n != 0 {
+		t.Fatalf("%d request(s) carrying an invisible character were stored", n)
+	}
+}
+
+// The same door, one level up: the instance's hosting form is as anonymous,
+// and an administrator reads its name before approving it. The refusal lives
+// in one helper, so the two forms cannot drift.
+func TestTheHostingFormRefusesInvisibleCharactersToo(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	c := clientOn(t, srv, "paraphe.test")
+
+	code, _ := c.call(http.MethodPost, "/api/request", map[string]any{
+		"slug": "nouvelle", "name": "Campagne\u202eeénnoisrevni",
+		"requester_name": "Qui", "requester_email": "qui@exemple.fr",
+	})
+	if code != http.StatusBadRequest {
+		t.Errorf("a right-to-left override in a campaign name: %d, want 400", code)
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM hosting_requests"); n != 0 {
+		t.Fatalf("%d hosting request(s) carrying an override were stored", n)
 	}
 }
 

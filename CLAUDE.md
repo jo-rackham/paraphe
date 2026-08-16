@@ -152,6 +152,15 @@ licence for the RNE.
   browser. Leaving the outage shell focuses the next view's h1
   (`useViewFocus` remembers across shells). `web/src/focus.test.tsx` pins
   all three.
+  **A control that dies at the completion of an awaited RELOAD is a fourth
+  case, and `rescueFocusAfterCommit` does not cover it**: a moderated card
+  leaves its queue when the refetch lands, not when the decision answers.
+  Called before the await, that helper's two checks (0 ms then 60 ms) watch
+  a button still in the page; called after, it finds focus already on
+  `<body>` and cannot tell "nobody was holding anything" from "the holder
+  just died". `holdFocusThrough` captures the element before the round trip
+  and WATCHES for its removal — a timer is a bet on when React commits, and
+  it loses. Both moderation screens use it.
   Tab strips go through `NavOnglets` (`aria-current="page"`), view changes
   through `useViewFocus` (focus to the h1, per-view `document.title`),
   decorative pictograms through `Emoji` (aria-hidden). `--focus` is the
@@ -298,6 +307,23 @@ is the campaign's coordination that decides.
   ever, and nothing downstream ever says why. `/api/config` carries the
   department list for that form alone — public data, common to every
   campaign.
+- **The ceiling on pending requests is applied BY THE INSERT**, never by a
+  count read before it. Read separately, two clients both see 199 and both
+  write; the queue then showed its newest 200 and dropped the OLDEST — the
+  legitimate early requests — off the only screen that can accept them. The
+  pending read therefore carries no `LIMIT` of its own either: the insert
+  bounds what exists, the read shows all of it.
+- **One refusal for a name already spoken for**, whether a team bears it or
+  a request is pending on it. Two sentences answered a question nobody
+  asked: an anonymous visitor learned which of the two a name hit, and a
+  campaign's team names appear in no public route. The hosting form may
+  distinguish them — a slug is public by construction, every subdomain
+  answers.
+- **A public form's names go through `legible`**: no control character, no
+  format character. A right-to-left override reverses what a moderator
+  reads without touching a byte of what is stored, so the row they believe
+  they are accepting is not the one they accept. Free text is exempt — a
+  message is allowed its line breaks.
 
 ## Security and operations
 

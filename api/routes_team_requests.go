@@ -29,6 +29,13 @@ import (
 // that refuses points at the coordination, who can open the team directly.
 const maxPendingTeamRequests = 200
 
+// nameNotAvailable: the ONE refusal both early checks give. Two sentences —
+// « a team already bears it » and « a request is pending on it » — answered a
+// question nobody asked: an anonymous visitor learned which of the two a name
+// hit, and a campaign's team names are in no public route.
+const nameNotAvailable = "Le nom « %s » n'est pas disponible dans cette " +
+	"campagne. Choisissez-en un autre."
+
 type teamRequestForm struct {
 	Name           string   `json:"name"`
 	Departments    []string `json:"departments"`
@@ -69,6 +76,13 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
+	// The coordination READS these two before it decides on them.
+	if !legible(name) || !legible(requester) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de l'équipe et votre nom ne doivent contenir ni retour à "+
+				"la ligne ni caractère invisible.")
+		return
+	}
 	if utf8.RuneCountInString(d.Message) > maxNoteRunes {
 		errorJSON(w, http.StatusBadRequest,
 			"Votre message ne doit pas dépasser 5000 caractères.")
@@ -85,9 +99,15 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An already-taken name is refused EARLY, as the hosting form refuses a
-	// taken address: the requester picks another one now instead of learning
-	// it after moderation.
+	// A name already spoken for is refused EARLY, as the hosting form refuses
+	// a taken address: the requester picks another one now instead of
+	// learning it after moderation.
+	//
+	// ONE sentence for both doors, deliberately. Saying « a team already
+	// bears that name » where the other says « a request is pending » told a
+	// visitor with no account which of the two a name hit — and a campaign's
+	// team names appear in no public route. The hosting form may distinguish
+	// them because a slug is public by construction: every subdomain answers.
 	var taken bool
 	if err := s.tx(r).QueryRow(r.Context(),
 		"SELECT EXISTS(SELECT 1 FROM teams WHERE org_id=$1 AND name=$2)",
@@ -95,54 +115,45 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	if !taken {
+		if err := s.tx(r).QueryRow(r.Context(),
+			"SELECT EXISTS(SELECT 1 FROM team_requests WHERE org_id=$1 AND name=$2 "+
+				"AND state=$3)", scopeOrg(r), name, RequestPending).Scan(&taken); err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	if taken {
-		errorJSON(w, http.StatusConflict,
-			"Une équipe nommée « %s » existe déjà dans cette campagne.", name)
+		errorJSON(w, http.StatusConflict, nameNotAvailable, name)
 		return
 	}
-	var pending bool
-	if err := s.tx(r).QueryRow(r.Context(),
-		"SELECT EXISTS(SELECT 1 FROM team_requests WHERE org_id=$1 AND name=$2 "+
-			"AND state=$3)", scopeOrg(r), name, RequestPending).Scan(&pending); err != nil {
-		s.failure(w, err)
-		return
-	}
-	if pending {
-		errorJSON(w, http.StatusConflict,
-			"Une demande porte déjà sur l'équipe « %s » et attend une réponse.",
-			name)
-		return
-	}
-	var waiting int
-	if err := s.tx(r).QueryRow(r.Context(),
-		"SELECT count(*) FROM team_requests WHERE org_id=$1 AND state=$2",
-		scopeOrg(r), RequestPending).Scan(&waiting); err != nil {
-		s.failure(w, err)
-		return
-	}
-	if waiting >= maxPendingTeamRequests {
+
+	// The ceiling is applied BY THE INSERT, not by a count read before it.
+	// Read separately, two clients both saw 199 and both wrote — and the
+	// queue then dropped the oldest, legitimate requests off the only screen
+	// that can accept them. No row comes back when the campaign is full.
+	var id int64
+	err = s.tx(r).QueryRow(r.Context(),
+		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
+			"requester_name, message, state, ts) "+
+			"SELECT $1,$2,$3,$4,$5,$6,$7,$8 WHERE (SELECT count(*) FROM "+
+			"team_requests WHERE org_id=$1 AND state=$7) < $9 RETURNING id",
+		orgOf(r).ID, name, strings.Join(departments, ";"), email, requester,
+		strings.TrimSpace(d.Message), RequestPending, shortTimestamp(),
+		maxPendingTeamRequests).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		errorJSON(w, http.StatusServiceUnavailable,
 			"Trop de demandes attendent la coordination de cette campagne. "+
 				"Écrivez-lui : elle peut ouvrir votre équipe sans passer par "+
 				"ce formulaire.")
 		return
 	}
-
-	var id int64
-	if err := s.tx(r).QueryRow(r.Context(),
-		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
-			"requester_name, message, state, ts) "+
-			"VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-		orgOf(r).ID, name, strings.Join(departments, ";"), email, requester,
-		strings.TrimSpace(d.Message), RequestPending,
-		shortTimestamp()).Scan(&id); err != nil {
+	if err != nil {
 		// The loser of the race against the partial unique index: the check
-		// above read « none pending » a moment before the other insert
-		// committed. Same answer as that check gives, not a 500.
+		// above read « free » a moment before the other insert committed.
+		// Same answer as that check gives, not a 500.
 		if isUniqueViolation(err) {
-			errorJSON(w, http.StatusConflict,
-				"Une demande porte déjà sur l'équipe « %s » et attend une réponse.",
-				name)
+			errorJSON(w, http.StatusConflict, nameNotAvailable, name)
 			return
 		}
 		s.failure(w, err)
@@ -203,10 +214,16 @@ const teamRequestColumns = "id, name, COALESCE(departments,'') AS departments, "
 // EVERY pending request, and only then the last decided ones. A single LIMIT
 // over both would let a flood of requests push a real team's off the only
 // screen that can accept it, with nobody able to tell.
+//
+// The pending read carries NO ceiling of its own either. Bounded at
+// maxPendingTeamRequests it was bounded by a number the insert only
+// approximated: a race past the cap left the oldest — the legitimate early
+// requests — below the cut, invisible on the one screen that can accept them,
+// while the flood sat on top. The insert now applies the ceiling itself, and
+// this read shows whatever got through it.
 func (s *Server) teamRequests(r *http.Request) ([]map[string]any, error) {
 	pending, err := s.rows(r, "SELECT "+teamRequestColumns+
-		"WHERE org_id=$1 AND state='pending' ORDER BY id DESC LIMIT $2",
-		scopeOrg(r), maxPendingTeamRequests)
+		"WHERE org_id=$1 AND state='pending' ORDER BY id DESC", scopeOrg(r))
 	if err != nil {
 		return nil, err
 	}

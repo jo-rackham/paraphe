@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // normalizeEmail: addresses are stored and compared lowercase, trimmed —
@@ -12,6 +13,29 @@ import (
 // the account their lead created as jo@….
 func normalizeEmail(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// legible: whether a one-line label can be trusted to LOOK, on the screen of
+// whoever moderates it, like what is stored.
+//
+// A public form's name is read by a human before they act on it, and a
+// right-to-left override reverses what the screen shows without touching a
+// byte of what is written — so the row a moderator believes they are
+// accepting is not the one they accept. Zero-width joiners hide a difference
+// between two rows, ANSI escapes colour a terminal reading the logs, and a
+// line break turns one label into two. Refused at the door rather than
+// escaped at each of the places that render it.
+//
+// Controls (Cc) and format characters (Cf) only: no legitimate name carries
+// either. Free text is NOT passed through this — a message is allowed its
+// line breaks.
+func legible(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // splitDepartments: a `;`-joined perimeter as a list. Empty means the whole
