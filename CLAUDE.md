@@ -344,6 +344,17 @@ One instance can host several campaigns, one per subdomain.
   statement, so `if sql := "…org_id=$1…"; cond {}` left the outer statement
   standing while the reader had taken the inner one. Four shapes, one
   question asked wrongly. `TestEveryPathThatSkipsTheWallIsRead` walks them.
+  **And three more that are not paths at all but READINGS the one scope per
+  function could not hold**: two sibling branchings are enumerated one at a
+  time, each reading applying the other in full, so the path where NEITHER
+  runs — the bare statement — was the one nobody made; a closure binds where
+  it RUNS, so a `defer` appending a wall walled the query in front of it and
+  a closure nobody invokes walled one that never changes; and a call reads
+  the text as of ITS position, so a query before a later `sql +=` was judged
+  on the text that comes after it. The last one is generated only where a
+  call actually SITS between two bindings — without that, `sql := base; sql
+  += wall; query(sql)`, which is how half this package builds a query, would
+  be refused on a reading no caller executes.
   **Assumed, and the safe direction**: a nested declaration shadowing an
   outer SQL name is read on BOTH paths, so a dead unbounded decoy beside a
   bounded statement is refused. The canary cannot tell inside a block from

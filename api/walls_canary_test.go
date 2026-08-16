@@ -834,7 +834,82 @@ func localScopeVariants(
 		}
 		return true
 	})
+	// A closure binds where it RUNS, not where it is written, and the
+	// learning pass walks into every one of them and applies what it assigns
+	// as though it already had. `defer func(){ sql += " WHERE org_id=$1" }()`
+	// walled a statement the driver runs BEFORE the defer, and a closure
+	// nobody invokes walled one that never changes at all. It is a branch
+	// that may not be taken — here, or later, or never.
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok && binds(lit) {
+			groups = append(groups, group{[]ast.Node{lit}, true})
+		}
+		return true
+	})
+	// A call reads the text as of ITS OWN position, and this reader has one
+	// scope for the whole function: `sql := base; if cond { query(sql);
+	// return }; sql += wall; query(sql)` resolved the EARLY query as though
+	// the wall were already appended, and the driver runs the bare statement
+	// on that path. So every name bound more than once gets the readings its
+	// prefixes give.
+	//
+	// Only where a call actually SITS between two bindings. Without that,
+	// `sql := base; sql += wall; query(sql)` — ordinary, and how half this
+	// package builds a query — would be read as `base` alone by a variant no
+	// caller ever executes, and refused.
+	boundAt := map[string][]ast.Node{}
+	var calls []token.Pos
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if c, ok := n.(*ast.CallExpr); ok {
+			calls = append(calls, c.Pos())
+		}
+		if a, ok := n.(*ast.AssignStmt); ok && len(a.Lhs) == 1 {
+			if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
+				boundAt[id.Name] = append(boundAt[id.Name], n)
+			}
+		}
+		for _, name := range declaredNames(n) {
+			boundAt[name] = append(boundAt[name], n)
+		}
+		return true
+	})
+	callBetween := func(after, before token.Pos) bool {
+		for _, p := range calls {
+			if p > after && p < before {
+				return true
+			}
+		}
+		return false
+	}
 	var out []map[string]string
+	for _, sites := range boundAt {
+		for k := 1; k < len(sites); k++ {
+			if !callBetween(sites[k-1].End(), sites[k].Pos()) {
+				continue
+			}
+			skip := map[ast.Node]bool{}
+			for _, later := range sites[k:] {
+				skip[later] = true
+			}
+			out = append(out, localScopeSkipping(values, fn, skip))
+		}
+	}
+	// …and the reading where NOTHING binds. Groups are enumerated one at a
+	// time, each variant applying every OTHER group in full, so with two
+	// sibling `if`s each carrying a wall the path where neither runs was the
+	// one reading nobody made — and it is the bare statement, the one no wall
+	// covers. The full cross-product is not enumerated (it is exponential,
+	// and a combination of two walls is walled either way); this is the
+	// corner of it that matters.
+	if len(groups) > 1 {
+		skip := map[ast.Node]bool{}
+		for _, g := range groups {
+			for _, b := range g.branches {
+				skip[b] = true
+			}
+		}
+		out = append(out, localScopeSkipping(values, fn, skip))
+	}
 	for _, g := range groups {
 		for _, keep := range g.branches {
 			skip := map[ast.Node]bool{}

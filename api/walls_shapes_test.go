@@ -523,6 +523,38 @@ func TestEveryPathThatSkipsTheWallIsRead(t *testing.T) {
 		_ = sql
 	}
 	run(sql)`},
+		// Two branchings are enumerated one at a time, each reading applying
+		// the OTHER in full, so the path where neither runs — the bare
+		// statement, the one no wall covers — was the reading nobody made.
+		{"two sibling branchings, neither taken", `
+	sql := "SELECT id FROM notes"
+	if n == 1 {
+		sql += " WHERE org_id = $1"
+	}
+	if n == 2 {
+		sql += " WHERE org_id = $1 AND team_id = $2"
+	}
+	run(sql)`},
+		// A closure binds where it RUNS. The learning pass walks into every
+		// one and applies what it assigns as though it already had.
+		{"a closure that walls after the query", `
+	sql := "SELECT id FROM notes"
+	defer func() { sql += " WHERE org_id = $1" }()
+	run(sql)`},
+		{"a closure nobody invokes", `
+	sql := "SELECT id FROM notes"
+	_ = func() { sql += " WHERE org_id = $1" }
+	run(sql)`},
+		// A call reads the text as of its OWN position, and this reader had
+		// one scope for the whole function.
+		{"a call before the wall is appended", `
+	sql := "SELECT id FROM notes"
+	if n == 1 {
+		run(sql)
+		return
+	}
+	sql += " WHERE org_id = $1"
+	run(sql)`},
 	} {
 		src := "package main\n\nfunc probe(n int, items, other chan int) {" +
 			tc.body + "\n}\n"
