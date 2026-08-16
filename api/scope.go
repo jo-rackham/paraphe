@@ -123,6 +123,21 @@ func (s *Server) instanceOnly(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// campaignOnly: a campaign's own public routes — no session, but a campaign
+// to write into. The mirror of instanceOnly, and the reason it exists apart
+// from inCampaign: that one requires an account, and the team request form
+// is answered for a visitor who has none yet.
+func (s *Server) campaignOnly(next http.HandlerFunc) http.HandlerFunc {
+	return s.inScope(func(w http.ResponseWriter, r *http.Request) {
+		if orgOf(r) == nil {
+			errorJSON(w, http.StatusNotFound,
+				"Cette page appartient à une campagne, pas à %s.", BaseDomain())
+			return
+		}
+		next(w, r)
+	})
+}
+
 func (s *Server) openScope(w http.ResponseWriter, r *http.Request) (*Scope, bool) {
 	ctx := r.Context()
 	base := BaseDomain()

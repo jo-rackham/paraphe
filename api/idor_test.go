@@ -36,7 +36,10 @@ type idorFixture struct {
 	team1, team2 int
 	teamB        int
 	requestID    int64
-	passwords    map[string]string
+	// a team request PENDING in campaign A: the object campaign B must not
+	// be able to name
+	teamRequestID int64
+	passwords     map[string]string
 	// clients bound to the fixture's HTTP server
 	newClientOn    func(host string) *client
 	signedInClient func(t *testing.T, host, email string) *client
@@ -44,6 +47,7 @@ type idorFixture struct {
 
 const (
 	idorHostA = testSlug + ".paraphe.test"
+	idorHostB = "other.paraphe.test"
 	idorApex  = "paraphe.test"
 
 	idorLead1 = "lead1@exemple.fr"
@@ -54,6 +58,7 @@ const (
 	idorVol2   = "vol2@exemple.fr"
 	idorCoord  = "coord-a@exemple.fr"
 	idorVolB   = "vol-b@exemple.fr"
+	idorCoordB = "coord-b@exemple.fr"
 	idorAdmin  = "admin@exemple.fr"
 
 	// the card team 2 owns: the object of every cross-team case
@@ -80,6 +85,7 @@ func idorSetup(t *testing.T) *idorFixture {
 	f.passwords[idorVol2] = createAccountIn(t, s, f.orgA, idorVol2, RoleVolunteer, &f.team2)
 	f.passwords[idorCoord] = createAccountIn(t, s, f.orgA, idorCoord, RoleCoordination, nil)
 	f.passwords[idorVolB] = createAccountIn(t, s, f.orgB, idorVolB, RoleVolunteer, nil)
+	f.passwords[idorCoordB] = createAccountIn(t, s, f.orgB, idorCoordB, RoleCoordination, nil)
 	f.passwords[idorAdmin] = createAccountIn(t, s, OrgInstance, idorAdmin, RoleAdministration, nil)
 
 	// team 2's work: a reserved card and a nominative note on it
@@ -100,6 +106,12 @@ func idorSetup(t *testing.T) *idorFixture {
 		"requester_email, requester_name, message, state, ts) "+
 		"VALUES('newcampaign','New','{}'::jsonb,'req@exemple.fr','Req','', "+
 		"'pending','2026-01-01T00:00') RETURNING id", &f.requestID)
+	// a team request pending in campaign A, which campaign B may name by
+	// identifier and must never reach
+	asMaintenanceRow(t, s, "INSERT INTO team_requests(org_id, name, departments, "+
+		"requester_email, requester_name, message, state, ts) "+
+		"VALUES($1,'Équipe demandée','01','demandeur@exemple.fr','Demandeur','', "+
+		"'pending','2026-01-01T00:00') RETURNING id", &f.teamRequestID, f.orgA)
 
 	f.signedInClient = func(t *testing.T, host, email string) *client {
 		t.Helper()
@@ -238,6 +250,66 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				if !scalar[bool](t, s, "SELECT active FROM accounts WHERE org_id=$1 "+
 					"AND email=$2", f.orgB, idorVolB) {
 					t.Fatal("the neighbouring campaign's account was deactivated")
+				}
+			}},
+		},
+		"POST /api/team/requests/{id}": {
+			{"a neighbouring campaign cannot decide this one's request", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostB, idorCoordB)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/team/requests/%d", f.teamRequestID),
+					map[string]string{"decision": RequestAccepted})
+				if code != http.StatusNotFound {
+					t.Fatalf("deciding the neighbour's team request: %d, want 404 — "+
+						"the row is bounded by the campaign, so it does not exist here", code)
+				}
+				if got := scalar[string](t, s, "SELECT state FROM team_requests "+
+					"WHERE org_id=$1 AND id=$2", f.orgA, f.teamRequestID); got != RequestPending {
+					t.Fatalf("the request left 'pending' (%q) decided by another campaign", got)
+				}
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM teams WHERE "+
+					"org_id=$1 AND name='Équipe demandée'", f.orgA); n != 0 {
+					t.Fatal("the neighbour's refused decision opened the team anyway")
+				}
+				// and nothing landed on the DECIDER's side either — an accepted
+				// request writes a team and an account, and writing them into
+				// campaign B would be the same defect wearing the other hat
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM teams WHERE "+
+					"org_id=$1 AND name='Équipe demandée'", f.orgB); n != 0 {
+					t.Fatal("the team was opened in the campaign that decided, " +
+						"from a request belonging to another")
+				}
+			}},
+			{"a team lead cannot decide, it is the coordination's call", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/team/requests/%d", f.teamRequestID),
+					map[string]string{"decision": RequestAccepted})
+				if code != http.StatusForbidden {
+					t.Fatalf("a lead deciding a team request: %d, want 403", code)
+				}
+				if got := scalar[string](t, s, "SELECT state FROM team_requests "+
+					"WHERE org_id=$1 AND id=$2", f.orgA, f.teamRequestID); got != RequestPending {
+					t.Fatalf("the request left 'pending' (%q), decided by a lead", got)
+				}
+			}},
+			// last: the guard guards, it does not brick the feature — and every
+			// case above needed the request still pending
+			{"the campaign's own coordination opens the team and its lead", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorCoord)
+				code, body := c.call(http.MethodPost,
+					fmt.Sprintf("/api/team/requests/%d", f.teamRequestID),
+					map[string]string{"decision": RequestAccepted})
+				if code != http.StatusOK {
+					t.Fatalf("the coordination's own decision: %d (%v)", code, body)
+				}
+				if role := scalar[string](t, s, "SELECT role FROM accounts "+
+					"WHERE org_id=$1 AND email='demandeur@exemple.fr'", f.orgA); role != RoleLead {
+					t.Fatalf("the requester's account carries role %q, want lead", role)
+				}
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM teams WHERE "+
+					"org_id=$1 AND name='Équipe demandée'", f.orgA); n != 1 {
+					t.Fatalf("%d teams named after the accepted request, want 1", n)
 				}
 			}},
 		},

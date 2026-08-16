@@ -240,6 +240,45 @@ export const toggleAccount = (
     body: {},
   });
 
+// -- Asking a campaign to open a local team ---------------------------------
+
+/** Public: no session, and it creates nothing until the coordination accepts. */
+export const requestTeam = (request: {
+  name: string;
+  departments: string[];
+  requester_name: string;
+  requester_email: string;
+  message: string;
+}): Promise<{ id: number; name: string; message: string }> =>
+  call("team/request", { method: "POST", body: request });
+
+/**
+ * Coordination only. `name` and `departments` are what it actually opens:
+ * the person who filled the form knows their department, not the campaign's
+ * map, and correcting a perimeter must not mean refusing the request.
+ */
+export const decideTeamRequest = (
+  id: number,
+  decision: "accepted" | "refused",
+  {
+    reason = "",
+    name,
+    departments,
+  }: { reason?: string; name?: string; departments?: string[] } = {},
+): Promise<{
+  id: number;
+  decision: string;
+  team?: number;
+  name?: string;
+  departments?: string[];
+  lead?: string;
+  password?: string;
+}> =>
+  call(`team/requests/${id}`, {
+    method: "POST",
+    body: { decision, reason, name, departments },
+  });
+
 export const exportUrl = () => `${ROOT}export.csv`;
 
 // -- Campaign configuration (coordination) ----------------------------------

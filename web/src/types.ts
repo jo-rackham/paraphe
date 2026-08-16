@@ -75,6 +75,8 @@ export interface ServerConfig {
   source_url: string;
   statuses: Status[];
   ranks: Rank[];
+  /** Departments of the common mayor list: the perimeter a team can ask for. */
+  departments: string[];
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
 }
@@ -179,10 +181,28 @@ export interface Team {
   reserved: number;
 }
 
+/** A request to open a local team, as its campaign's coordination reads it. */
+export interface TeamRequest {
+  id: number;
+  name: string;
+  /** `;`-joined, empty = the whole country */
+  departments: string;
+  requester_email: string;
+  requester_name: string;
+  message: string;
+  state: "pending" | "accepted" | "refused";
+  reason: string;
+  ts: string;
+  decided_at: string;
+  decided_by: string;
+}
+
 export interface TeamData {
   accounts: TeamAccount[];
   teams: Team[];
   departments: string[];
+  /** Empty for a lead: the moderation queue is the coordination's. */
+  requests: TeamRequest[];
 }
 
 /** Local tracking (browser mode): one record per mayor. */

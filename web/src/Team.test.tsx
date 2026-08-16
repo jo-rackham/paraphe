@@ -28,6 +28,7 @@ const CAMPAIGN = Object.fromEntries(
 
 const CONFIG: ServerConfig = {
   mode: "team",
+  departments: [],
   campaign: CAMPAIGN,
   batch_size: 10,
   unfilled: [],

@@ -65,6 +65,9 @@ who use them).
   without names.
 - 🔑 **Individual accounts, three roles** — coordination, team lead,
   volunteer.
+- 🙋 **A team can ask to exist** — a public form on the campaign's sign-in
+  screen, moderated by its coordination, which settles the name and the
+  perimeter as it accepts. Nothing is created before that.
 - 📊 **Dashboard** — my mayors, my team, departments won.
 - 📤 **CSV export** in `;` UTF-8-BOM, which Excel and LibreOffice open without
   a fight.

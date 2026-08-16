@@ -7,9 +7,18 @@ import {
   focusContenu,
   label,
   ROLES,
+  rescueFocusAfterCommit,
   useSubmitGuard,
 } from "./common.tsx";
 import type { Me, Message, ServerConfig, TeamData } from "./types.ts";
+
+/** An access just opened, whose password is shown once and never again. */
+interface NewAccess {
+  email: string;
+  name: string;
+  role: string;
+  password: string;
+}
 
 // Labels of the campaign keys. A campaign opened from a hosting request
 // arrives with not a word filled in: this is where its coordination fills
@@ -151,6 +160,179 @@ function ConfigurationCampagne({
   );
 }
 
+/**
+ * The moderation queue: requests to open a local team, and what the
+ * coordination actually opens.
+ *
+ * The name and the perimeter are EDITABLE here. The person who filled the
+ * form knows their department, not the campaign's map, and a coordination
+ * that can only accept or refuse ends up refusing a good request because the
+ * name is wrong.
+ */
+function DemandesEquipes({
+  data,
+  onError,
+  onDecided,
+}: {
+  data: TeamData;
+  onError: (e: unknown) => void;
+  onDecided: (r: NewAccess | null) => void;
+}) {
+  // one draft per request, seeded from what was asked
+  const [drafts, setDrafts] = useState<
+    Record<number, { name: string; departments: string[] }>
+  >({});
+  const [deciding, setDeciding] = useState<number | null>(null);
+  const [busy, done] = useSubmitGuard();
+
+  const pending = data.requests.filter((r) => r.state === "pending");
+  const decided = data.requests.filter((r) => r.state !== "pending");
+  if (data.requests.length === 0) return null;
+
+  const draftOf = (id: number, asked: string) =>
+    drafts[id] ?? {
+      name: data.requests.find((r) => r.id === id)?.name ?? "",
+      departments: asked ? asked.split(";") : [],
+    };
+
+  const decide = async (
+    id: number,
+    decision: "accepted" | "refused",
+    draft: { name: string; departments: string[] },
+  ) => {
+    if (busy()) return;
+    setDeciding(id);
+    try {
+      const r = await API.decideTeamRequest(id, decision, {
+        name: draft.name,
+        departments: draft.departments,
+      });
+      // the card carrying this button is about to vanish from the queue
+      rescueFocusAfterCommit();
+      // an acceptance opens the lead's access, and its password is shown
+      // once, in the same card every new access uses
+      onDecided(
+        r.password
+          ? {
+              email: r.lead ?? "",
+              name: `${r.name ?? draft.name} — ${r.lead ?? ""}`,
+              role: "lead",
+              password: r.password,
+            }
+          : null,
+      );
+    } catch (e) {
+      onError(e);
+    } finally {
+      done();
+      setDeciding(null);
+    }
+  };
+
+  return (
+    <>
+      <h2>Demandes d'équipe ({pending.length})</h2>
+      {pending.map((r) => {
+        const draft = draftOf(r.id, r.departments);
+        return (
+          <div className="carte" key={r.id}>
+            <h3 style={{ marginTop: 0 }}>{r.name}</h3>
+            <p className="gris">
+              Demandée par {r.requester_name} ({r.requester_email}) le {r.ts} —
+              périmètre souhaité :{" "}
+              {r.departments.split(";").join(", ") || "toute la France"}
+            </p>
+            {r.message && <p>{r.message}</p>}
+            <p>
+              <label>
+                Nom de l'équipe ouverte
+                <input
+                  type="text"
+                  value={draft.name}
+                  onChange={(e) =>
+                    setDrafts({
+                      ...drafts,
+                      [r.id]: { ...draft, name: e.target.value },
+                    })
+                  }
+                />
+              </label>
+            </p>
+            <p>
+              <label>
+                Départements accordés
+                <select
+                  multiple
+                  size={5}
+                  value={draft.departments}
+                  onChange={(e) =>
+                    setDrafts({
+                      ...drafts,
+                      [r.id]: {
+                        ...draft,
+                        departments: [...e.target.selectedOptions].map(
+                          (o) => o.value,
+                        ),
+                      },
+                    })
+                  }
+                >
+                  {data.departments.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </p>
+            <button
+              type="button"
+              aria-disabled={deciding === r.id || undefined}
+              onClick={() => decide(r.id, "accepted", draft)}
+            >
+              Accepter — ouvrir l'équipe
+              <span className="sr-only"> {r.name}</span>
+            </button>{" "}
+            <button
+              type="button"
+              className="secondaire"
+              aria-disabled={deciding === r.id || undefined}
+              onClick={() => decide(r.id, "refused", draft)}
+            >
+              Refuser
+              <span className="sr-only"> {r.name}</span>
+            </button>
+          </div>
+        );
+      })}
+      {decided.length > 0 && (
+        <div className="carte">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Équipe demandée</th>
+                <th scope="col">Demandeur</th>
+                <th scope="col">Décision</th>
+                <th scope="col">Motif</th>
+              </tr>
+            </thead>
+            <tbody>
+              {decided.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.name}</td>
+                  <td className="gris">{r.requester_email}</td>
+                  <td>{r.state === "accepted" ? "Acceptée" : "Refusée"}</td>
+                  <td className="gris">{r.reason || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function GestionEquipe({
   onError,
   me,
@@ -165,12 +347,7 @@ export function GestionEquipe({
   onMessage: (m: Message) => void;
 }) {
   const [data, setData] = useState<TeamData | null>(null);
-  const [created, setCreated] = useState<{
-    email: string;
-    name: string;
-    role: string;
-    password: string;
-  } | null>(null);
+  const [created, setCreated] = useState<NewAccess | null>(null);
   const [draft, setDraft] = useState({
     email: "",
     name: "",
@@ -335,6 +512,17 @@ export function GestionEquipe({
           </p>
         )}
       </div>
+
+      {coordination && (
+        <DemandesEquipes
+          data={data}
+          onError={onError}
+          onDecided={async (access) => {
+            setCreated(access);
+            await reload();
+          }}
+        />
+      )}
 
       <h2>Les accès ({data.accounts.length})</h2>
       <div className="carte">

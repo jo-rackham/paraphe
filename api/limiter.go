@@ -54,6 +54,11 @@ var (
 	limitSignInIP      = limitClass{"signin_ip", 60, 10 * time.Minute}
 	limitSignInAccount = limitClass{"signin_account", 10, 15 * time.Minute}
 	limitHostingIP     = limitClass{"hosting_ip", 3, time.Hour}
+	// Asking a campaign to open a local team. Wider than the hosting form —
+	// a real campaign meeting can send several requests from one room, one
+	// per department, in the same hour — and narrower than anything else,
+	// because each one is moderation work for its coordination.
+	limitTeamRequestIP = limitClass{"team_request_ip", 10, time.Hour}
 	limitAnonIP        = limitClass{"anon_ip", 120, time.Minute}
 	limitWriteAccount  = limitClass{"write_account", 120, time.Minute}
 	limitExportAccount = limitClass{"export_account", 6, 10 * time.Minute}

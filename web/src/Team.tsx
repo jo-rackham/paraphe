@@ -25,6 +25,7 @@ import { GestionEquipe } from "./TeamAdmin.tsx";
 import { Tableau } from "./TeamDashboard.tsx";
 import { ListeServeur } from "./TeamMayors.tsx";
 import { Profil } from "./TeamProfile.tsx";
+import { DemandeEquipe } from "./TeamRequest.tsx";
 import type { Account, MayorCard, Me, Message, ServerConfig } from "./types.ts";
 
 // Team mode: the work lives in PostgreSQL, shared and walled off per local
@@ -395,6 +396,7 @@ function Connexion({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [busy, done] = useSubmitGuard();
 
   const submit = async (e: React.FormEvent) => {
@@ -458,6 +460,22 @@ function Connexion({
           regénérer un.
         </p>
       </form>
+      {/* The toggle SURVIVES the form it opens: a disclosure that unmounts
+          itself would drop focus to <body> on the way in and on the way
+          back out. */}
+      <p>
+        <button
+          type="button"
+          className="lien"
+          aria-expanded={asking}
+          onClick={() => setAsking((v) => !v)}
+        >
+          {asking
+            ? "Masquer la demande d'équipe"
+            : "Pas encore d'accès ? Demander à créer une équipe"}
+        </button>
+      </p>
+      {asking && <DemandeEquipe cfg={cfg} />}
     </>
   );
 }

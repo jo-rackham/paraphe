@@ -34,6 +34,17 @@ func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The moderation queue rides along with the screen that answers it, rather
+	// than on a route of its own: a team lead sees neither, and the
+	// coordination reloads this payload after every decision anyway.
+	requests := []map[string]any{}
+	if c.Coordination() {
+		if requests, err = s.teamRequests(r); err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
+
 	teams := []map[string]any{}
 	if c.Coordination() {
 		teams, err = s.rows(r,
@@ -57,7 +68,8 @@ func (s *Server) routeTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyJSON(w, http.StatusOK, map[string]any{
-		"accounts": accounts, "teams": teams, "departments": departments})
+		"accounts": accounts, "teams": teams, "departments": departments,
+		"requests": requests})
 }
 
 type teamRequest struct {
@@ -92,11 +104,7 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 			departments = append(departments, x)
 		}
 	}
-	var id int
-	err := s.tx(r).QueryRow(r.Context(),
-		"INSERT INTO teams(org_id, name, departments, created_at) VALUES($1,$2,$3,$4) "+
-			"RETURNING id", orgOf(r).ID, name, strings.Join(departments, ";"),
-		shortTimestamp()).Scan(&id)
+	id, err := insertTeam(r.Context(), s.tx(r), orgOf(r).ID, name, departments)
 	if isUniqueViolation(err) {
 		errorJSON(w, http.StatusConflict, "Une équipe nommée « %s » existe déjà.", name)
 		return
@@ -181,20 +189,8 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 		role, team = RoleVolunteer, &g
 	}
 
-	password, err := ReadablePassword()
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	hashed, err := HashPassword(password)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	_, err = s.tx(r).Exec(r.Context(),
-		"INSERT INTO accounts(org_id, email, name, password_hash, role, team_id, created_at, created_by) "+
-			"VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
-		orgOf(r).ID, email, name, hashed, role, team, shortTimestamp(), me.Email)
+	password, err := insertAccount(r.Context(), s.tx(r), orgOf(r).ID, email, name,
+		role, team, me.Email)
 	if isUniqueViolation(err) {
 		errorJSON(w, http.StatusConflict, "Un compte existe déjà pour %s.", email)
 		return

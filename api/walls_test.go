@@ -29,6 +29,14 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 
 	const neighbourVolunteer = "b-only@exemple.fr"
 	const neighbourNote = "NOTE QUI APPARTIENT A LA CAMPAGNE B"
+	// Two names A will POST back on its own host, so neither can be a leak
+	// marker: what A legitimately holds cannot prove a leak. The requester and
+	// the message are B's alone, never written by A, and they are what the
+	// queue would hand over.
+	const neighbourTeamName = "ÉQUIPE QUI EXISTE CHEZ B"
+	const neighbourRequestName = "ÉQUIPE DEMANDÉE CHEZ B"
+	const neighbourRequester = "demandeur-b@exemple.fr"
+	const neighbourRequestMessage = "MOTIVATION DE LA DEMANDE CHEZ B"
 	// B's own configuration, marked and DIFFERENT from A's in every column
 	// /api/campaign writes. Reading the name back alone left the other two
 	// unwatched: a write that stayed row-bound on the name while pouring A's
@@ -100,6 +108,20 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
 			"VALUES($1,'01005',$2,'email_sent')", a, shared)
 
+	// A team request pending in B, and a team B already holds. The public
+	// form's two early refusals — « that name is taken » and « a request is
+	// already pending » — are reads on walled tables, and unwalled they answer
+	// 409 on A's host: a campaign would learn its neighbours' team names by
+	// trying them, and could freeze any name it guessed.
+	execAsMaintenance(t, s,
+		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
+			"requester_name, message, state, ts) "+
+			"VALUES($1,$2,'01',$3,'Demandeur de B',$4,'pending','2026-01-01T00:00')",
+		b, neighbourRequestName, neighbourRequester, neighbourRequestMessage)
+	execAsMaintenance(t, s,
+		"INSERT INTO teams(org_id, name, departments) VALUES($1,$2,'01')",
+		b, neighbourTeamName)
+
 	// an account in A, to sign in with
 	const mine = "a-only@exemple.fr"
 	execAsMaintenance(t, s,
@@ -131,11 +153,13 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 		// personal note, its name and its slug all travel through
 		// /api/config or /api/me.
 		for marker, what2 := range map[string]string{
-			neighbourCandidate: "candidate",
-			neighbourOwnNote:   "personal note",
-			"Other campaign":   "name",
-			"other":            "slug",
-			"beefbeefbeefbeef": "logo",
+			neighbourCandidate:      "candidate",
+			neighbourOwnNote:        "personal note",
+			"Other campaign":        "name",
+			"other":                 "slug",
+			"beefbeefbeefbeef":      "logo",
+			neighbourRequester:      "team requester",
+			neighbourRequestMessage: "team request message",
 		} {
 			if strings.Contains(body, marker) {
 				t.Errorf("%s: the neighbouring campaign's %s appears", what, what2)
@@ -207,6 +231,23 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 		map[string]any{"email": "nouveau-chez-a@exemple.fr", "name": "Nouveau",
 			"role": "volunteer"}); code != http.StatusCreated {
 		t.Fatalf("A can no longer create an account of its own: %d %v", code, rep)
+	}
+	// The public team request form, ANONYMOUS on A's host, once against the
+	// name of a TEAM B holds and once against the name of a REQUEST pending in
+	// B. Each drives one of the handler's two early refusals, and each must go
+	// through: what B holds is invisible here.
+	anon := clientOn(t, srv, testSlug+".paraphe.test")
+	for what, name := range map[string]string{
+		"a team B holds":         neighbourTeamName,
+		"a request pending in B": neighbourRequestName,
+	} {
+		if code, rep := anon.call(http.MethodPost, "/api/team/request",
+			map[string]any{"name": name, "departments": []string{"01"},
+				"requester_name":  "Demandeur de A",
+				"requester_email": "demandeur-a@exemple.fr"}); code != http.StatusCreated {
+			t.Fatalf("A's public form refused the name of %s: %d %v — the "+
+				"conflict was read across the wall", what, code, rep)
+		}
 	}
 	// The return code, asserted: a handler that refuses writes nothing, and
 	// "B is untouched" then holds for a reason that has nothing to do with a

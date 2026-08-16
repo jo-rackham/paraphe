@@ -42,6 +42,17 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The departments of the COMMON mayor list — public data, the same for
+	// every campaign, and the only way the public team-request form can offer
+	// a perimeter instead of asking a visitor to guess how the register spells
+	// « Côtes-d'Armor ». One distinct scan per page load, not per request:
+	// this route is read once, before anything else.
+	departments, err := s.column(r, "SELECT DISTINCT department FROM mayors "+
+		"ORDER BY department")
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	campaign := completeCampaign(org.Campaign)
 	replyJSON(w, http.StatusOK, map[string]any{
 		"mode":       "team",
@@ -51,6 +62,11 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		"source_url": s.cfg.SourceURL,
 		"statuses":   Statuses,
 		"ranks":      Ranks,
+		// The COMMON mayor list's departments — public open data, identical
+		// for every campaign and already published beside the browser
+		// version. Unlike the `no_account` boolean this body stopped
+		// carrying, it says nothing about THIS campaign.
+		"departments": departments,
 		// null when the campaign has none, or when the instance has no
 		// object store: either way the header shows the hexagon alone.
 		"logo": s.logoOf(org),

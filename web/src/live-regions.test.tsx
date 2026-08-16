@@ -28,6 +28,7 @@ vi.mock("./db.ts", { spy: true });
 
 const CONFIG: ServerConfig = {
   mode: "team",
+  departments: [],
   campaign: Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, `valeur ${k}`])),
   batch_size: 10,
   unfilled: [],

@@ -279,6 +279,26 @@ counters stay visible to all, without names. `PARAPHE_ADMIN_EMAIL` /
 `_PASSWORD` bootstrap coordination: with no coordination account the app
 refuses to open rather than let anyone in.
 
+**A team can also be ASKED FOR**, from a public form on the campaign's own
+sign-in screen — the instance's hosting request, one level down, and for the
+same reason: whoever wants to gather a team around them has no account yet.
+Like that one, it creates NOTHING. `team_requests` is a walled table, and it
+is the campaign's coordination that decides.
+
+- **The coordination edits the name and the perimeter as it accepts.** The
+  person filling the form knows their department, not the campaign's map; a
+  coordination that could only accept or refuse would refuse a good request
+  because the name is wrong.
+- **Accepting opens the team and its lead account in one transaction.** If
+  the address already has an account here it is refused (409) rather than
+  promoted behind its owner's back — and the team is not opened either, since
+  a team whose lead could not be created is a team nobody leads.
+- **The requested departments are checked against the mayor list.** A
+  perimeter of labels no mayor bears is a team that draws zero cards for
+  ever, and nothing downstream ever says why. `/api/config` carries the
+  department list for that form alone — public data, common to every
+  campaign.
+
 ## Security and operations
 
 - `PARAPHE_INSTANCE_ADMIN_*` bootstrap the instance administration.

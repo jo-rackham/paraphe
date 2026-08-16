@@ -15,6 +15,13 @@ const ORIGIN = campaignOrigin(FIRST_CAMPAIGN);
 const TEAM = "Équipe Aveyron";
 const LEAD = { email: "referente@premiere.test", name: "Renée Référente" };
 const VOLUNTEER = { email: "benevole@premiere.test", name: "Bastien Bénévole" };
+// the requested team: asked under one name, opened under another
+const ASKED = "Comité du Cantal";
+const OPENED = "Équipe Cantal";
+const APPLICANT = {
+  email: "candidate@premiere.test",
+  name: "Camille Candidate",
+};
 
 test.describe
   .serial("local teams", () => {
@@ -141,6 +148,74 @@ test.describe
       expect((await card.json()).error).toContain(
         "réservée par une autre équipe",
       );
+    });
+
+    // The whole loop, through the interface: somebody with no account asks,
+    // the coordination corrects the name and grants the perimeter, and the
+    // access that comes out of it actually opens.
+    test("someone with no account asks for a team, and the coordination opens it", async ({
+      page,
+    }) => {
+      await page.goto(`${ORIGIN}/`);
+      await expect(
+        page.getByRole("heading", { name: "Connexion" }),
+      ).toBeVisible();
+      await page
+        .getByRole("button", { name: "Demander à créer une équipe" })
+        .click();
+
+      await page.getByLabel("Nom de l'équipe").fill(ASKED);
+      await page
+        .getByLabel("Départements (plusieurs possibles)")
+        .selectOption("Cantal");
+      await page.getByLabel("Votre nom").fill(APPLICANT.name);
+      await page.getByLabel("Votre adresse email").fill(APPLICANT.email);
+      await page.getByRole("button", { name: "Envoyer la demande" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Demande enregistrée" }),
+      ).toBeVisible();
+
+      // nothing exists yet: the request opened no access at all
+      const before = await page.request.post(`${ORIGIN}/api/session`, {
+        data: { email: APPLICANT.email, password: "peu importe" },
+      });
+      expect(before.status()).toBe(401);
+
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      await openTab(page, "Mon équipe");
+      const queued = page.locator(".carte", { hasText: ASKED });
+      await expect(queued).toContainText(APPLICANT.email);
+
+      // the name is the campaign's call, the perimeter too
+      await queued.getByLabel("Nom de l'équipe ouverte").fill(OPENED);
+      await queued.getByLabel("Départements accordés").selectOption("Cantal");
+      await queued
+        .getByRole("button", { name: "Accepter — ouvrir l'équipe" })
+        .click();
+
+      await expect(page.getByText("affiché une seule fois")).toBeVisible();
+      const password = (await page.locator(".grand-tel").innerText()).trim();
+      // the LAST table is « Les équipes locales » — the accounts table above
+      // it carries the same name, in the new lead's team column
+      await expect(
+        page.locator("table").last().locator("tr", { hasText: OPENED }),
+      ).toContainText("Cantal");
+
+      // and the access opens, on the team the coordination named. The
+      // coordination's own session is closed first: signIn fills the form,
+      // which is not on screen while somebody is signed in.
+      await page.getByRole("button", { name: "déconnexion" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Connexion" }),
+      ).toBeVisible();
+      await signIn(page, ORIGIN, APPLICANT.email, password);
+      await openTab(page, "Mon équipe");
+      await expect(
+        page.getByText("vous ouvrez des accès bénévoles"),
+      ).toBeVisible();
+      await expect(
+        page.locator("tr", { hasText: APPLICANT.email }),
+      ).toContainText("Référent");
     });
 
     test("a deactivated access no longer opens", async ({ page }) => {

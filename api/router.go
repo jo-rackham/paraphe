@@ -129,6 +129,16 @@ func (s *Server) router() chi.Router {
 		// Managing the campaign's own teams and accounts.
 		r.Route("/team", func(r chi.Router) {
 			r.With(guard(s.managers)).Get("/", s.routeTeam)
+			// Public, on the campaign: asking it to open a local team. The
+			// ceiling is per source and narrow, like the hosting form's —
+			// each request is moderation work for a coordination that has a
+			// campaign to run.
+			r.With(guard(s.limitIP(limitTeamRequestIP)), guard(jsonOnly),
+				guard(s.campaignOnly)).
+				Post("/request", s.routeTeamRequest)
+			r.With(guard(s.coordinationOnly),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/requests/{id}", s.routeDecideTeamRequest)
 			r.With(guard(s.coordinationOnly),
 				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/group", s.routeCreateTeam)

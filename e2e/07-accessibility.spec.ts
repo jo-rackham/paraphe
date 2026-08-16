@@ -214,6 +214,20 @@ test.describe
       ).toBeVisible();
       await checkA11y(page, "team:connexion");
 
+      // the public team-request form: a disclosure on this very screen, so
+      // the scan above would never reach it — and it is the one screen a
+      // person with no account at all fills in
+      await page
+        .getByRole("button", { name: "Demander à créer une équipe" })
+        .click();
+      await expect(
+        page.getByRole("heading", { name: "Demander à créer une équipe" }),
+      ).toBeVisible();
+      await checkA11y(page, "team:demande-equipe");
+      await page
+        .getByRole("button", { name: "Masquer la demande d'équipe" })
+        .click();
+
       await signIn(page, origin, COORDINATION.email, COORDINATION.password);
       await checkA11y(page, "team:guide");
 

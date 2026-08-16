@@ -11,6 +11,7 @@ import type { ServerConfig } from "./types.ts";
 
 const CONFIG: ServerConfig = {
   mode: "team",
+  departments: [],
   campaign: { candidat: "Camille" },
   batch_size: 10,
   unfilled: [],

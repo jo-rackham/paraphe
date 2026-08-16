@@ -25,6 +25,9 @@ var publicAPIRoutes = map[string]string{
 	"GET /api/campaign/public": "read cross-origin by the browser version: " +
 		"the campaign a mayor already reads in every message",
 	"POST /api/request": "the public hosting request form, on the apex",
+	"POST /api/team/request": "the public form asking a campaign to open a " +
+		"local team — answered for a visitor who has no account yet, which " +
+		"is the point: it creates nothing until the coordination accepts",
 	"GET /api/campaigns": "the public directory of hosted campaigns, on " +
 		"the apex — names and addresses every subdomain already tells",
 }
