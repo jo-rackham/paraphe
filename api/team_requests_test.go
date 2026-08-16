@@ -308,6 +308,114 @@ func TestTheHostingFormRefusesInvisibleCharactersToo(t *testing.T) {
 	}
 }
 
+// A name can be present, non-empty, legible — and still show the moderator
+// nothing. `strings.TrimSpace` trims spaces, and the zero-width runes are not
+// spaces: they are `Cf`, and a name made only of them reached the queue as a
+// blank row indistinguishable from the next blank row.
+func TestTheFormRefusesANameNothingCanBeSeenIn(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	c := newClient(t, srv)
+
+	for _, probe := range []struct{ what, name, requester string }{
+		{"a zero-width space", "\u200b", "Qui"},
+		{"a word joiner", "\u2060", "Qui"},
+		{"a soft hyphen", "\u00ad", "Qui"},
+		{"a zero-width non-joiner", "\u200c", "Qui"},
+		{"several invisible runes", "\u200b\u2060\u00ad", "Qui"},
+		{"invisible runes around a space", "\u200b \u2060", "Qui"},
+		// an Ogham space mark is a SPACE (Zs), so a name of nothing but that
+		// is a name of nothing but spaces
+		{"an Ogham space mark", "\u1680", "Qui"},
+		{"the same in the requester's name", "Équipe", "\u200b\u2060"},
+	} {
+		body := teamRequestBody(probe.name, "01")
+		body["requester_name"] = probe.requester
+		if code, _ := c.call(http.MethodPost, "/api/team/request", body); code !=
+			http.StatusBadRequest {
+			t.Errorf("%s as the whole name: %d, want 400", probe.what, code)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
+		org); n != 0 {
+		t.Fatalf("%d request(s) with nothing visible in them were stored", n)
+	}
+
+	// The line held here is "carries something graphic", not "carries no rune
+	// that renders blank" — that second list has no end. U+3164 is a letter
+	// and U+2800 a symbol: they pass, deliberately, and telling two labels
+	// apart stays a matter of comparison. Pinned so that tightening it later
+	// is a decision someone takes, not a side effect.
+	for _, probe := range []struct{ what, name string }{
+		{"a Hangul filler", "\u3164"},
+		{"a blank Braille pattern", "\u2800"},
+	} {
+		if code, rep := c.call(http.MethodPost, "/api/team/request",
+			teamRequestBody(probe.what+" "+probe.name, "01")); code !=
+			http.StatusCreated {
+			t.Errorf("%s was turned away: %d %v", probe.what, code, rep)
+		}
+	}
+}
+
+// The address is not only read by the coordination: on acceptance it BECOMES
+// the primary key of the lead's account. A carriage return in it opens a team
+// whose lead can never type their own login, and the screen that shows the
+// address renders it differently from what is stored.
+func TestTheFormRefusesAnAddressThatCannotBeTypedBack(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	c := newClient(t, srv)
+
+	for _, probe := range []struct{ what, email string }{
+		{"a carriage return", "victime\r@exemple.fr"},
+		{"a line feed", "victime\n@exemple.fr"},
+		{"a line separator", "victime\u2028@exemple.fr"},
+		{"a right-to-left override", "victime\u202e@exemple.fr"},
+		{"a byte-order mark", "\ufeffvictime@exemple.fr"},
+	} {
+		body := teamRequestBody("Équipe "+probe.what, "01")
+		body["requester_email"] = probe.email
+		if code, _ := c.call(http.MethodPost, "/api/team/request", body); code !=
+			http.StatusBadRequest {
+			t.Errorf("%s in the address: %d, want 400", probe.what, code)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
+		org); n != 0 {
+		t.Fatalf("%d request(s) with an unusable address were stored", n)
+	}
+}
+
+// `team_requests.id` is ONE sequence for the whole table, hence for every
+// campaign on the instance. Handed back to an anonymous visitor, the gap
+// between two of them counts what the neighbouring campaigns received — a
+// number of the neighbour's, which is exactly what no campaign may see of
+// another. The coordination finds the request in its queue instead.
+func TestThePublicFormReturnsNoInstanceWideIdentity(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	c := newClient(t, srv)
+
+	code, rep := c.call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe du Nord", "01"))
+	if code != http.StatusCreated {
+		t.Fatalf("the public form: %d %v", code, rep)
+	}
+	for _, forbidden := range []string{"id", "org_id", "ts"} {
+		if _, present := rep[forbidden]; present {
+			t.Errorf("the anonymous answer carries %q: %v", forbidden, rep)
+		}
+	}
+	// and the row exists all the same: nothing was traded for the silence
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE "+
+		"org_id=$1 AND state='pending'", orgID(t, s, testSlug)); n != 1 {
+		t.Fatalf("%d pending requests, want 1", n)
+	}
+}
+
 // The queue is the coordination's, and a lead reads the same payload without
 // it: /api/team answers both, and the walk that guards roles cannot see a
 // field that is simply always present.

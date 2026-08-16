@@ -61,6 +61,27 @@ func legible(s string) bool {
 	return true
 }
 
+// visible: whether a label carries anything a person can SEE.
+//
+// `strings.TrimSpace` trims what Unicode calls a space, and the zero-width
+// runes are not spaces — U+200B, U+2060 and U+00AD are all `Cf`, with
+// `IsGraphic` false and `IsSpace` false. A name made only of those survives
+// the `== ""` check and reaches the moderation queue as a blank row.
+//
+// The test is POSITIVE — at least one graphic non-space rune — because the
+// list of runes that happen to render blank has no end. It says nothing
+// about U+3164 (`Lo`) or U+2800 (`So`): those ARE graphic, they pass here as
+// they pass everywhere, and telling two labels apart stays a matter of
+// comparison rather than of refusing characters.
+func visible(s string) bool {
+	for _, r := range s {
+		if unicode.IsGraphic(r) && !unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // splitDepartments: a `;`-joined perimeter as a list. Empty means the whole
 // country, which is what a team with no departments draws from.
 //

@@ -54,7 +54,14 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 	requester := strings.TrimSpace(d.RequesterName)
 	email := normalizeEmail(d.RequesterEmail)
 
-	if name == "" || requester == "" || !storableEmail(email) {
+	// `visible`, not `== ""`: a name of zero-width runes survives TrimSpace
+	// and lands in the queue as a blank row the coordination cannot tell from
+	// the next blank row.
+	//
+	// `storableEmail`, the same reader the team form uses: an address is
+	// refused here or it becomes an account this application can never write
+	// to, and the address is the primary key, so it cannot be corrected after.
+	if !visible(name) || !visible(requester) || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de l'équipe, votre nom et votre adresse email sont requis.")
 		return
@@ -76,11 +83,14 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 				"200 caractères.")
 		return
 	}
-	// The coordination READS these two before it decides on them.
-	if !legible(name) || !legible(requester) {
+	// The coordination READS these three before it decides on them — and the
+	// address does more than get read: it BECOMES the primary key of the lead
+	// account on acceptance. A carriage return in it opens a team whose lead
+	// can never type their own login, and no keyboard reproduces it.
+	if !legible(name) || !legible(requester) || !legible(email) {
 		errorJSON(w, http.StatusBadRequest,
-			"Le nom de l'équipe et votre nom ne doivent contenir ni retour à "+
-				"la ligne ni caractère invisible.")
+			"Le nom de l'équipe, votre nom et votre adresse email ne doivent "+
+				"contenir ni retour à la ligne ni caractère invisible.")
 		return
 	}
 	if utf8.RuneCountInString(d.Message) > maxNoteRunes {
@@ -134,18 +144,24 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 	//
 	// Under READ COMMITTED, which is what every request runs at, the count
 	// subquery is evaluated on the transaction's own snapshot: concurrent
-	// writers each see the same total and each pass the test. Measured, two
-	// sessions at 199 both insert and the table lands at 201; a hundred
-	// goroutines overshoot by 2 to 14. Merging the read into the write
-	// narrows the window and closes nothing.
+	// writers each see the same total and each pass the test. Merging the
+	// read into the write narrows the window and closes nothing.
+	//
+	// What bounds the overshoot is how many transactions can hold a snapshot
+	// at once — `max_connections`, not any constant. Measured: 95 dedicated
+	// connections released together against a table at 199 leave it at 294.
+	// Through the pool the API actually uses, the same test overshoots by one
+	// or two, which is the number this comment used to state and it was the
+	// wrong one to reason from.
 	//
 	// It is left that way deliberately. An exact cap needs
 	// `pg_advisory_xact_lock` per campaign or SERIALIZABLE with a retry, and
 	// a blocking lock on an anonymous form makes every request queue while
 	// holding a pool connection — the failure this codebase buffers request
-	// bodies to avoid (auth.go, jsonOnly). What the slack costs is a few
-	// hundred kilobytes; what it must NOT cost is a request the coordination
-	// never sees, and that is why the queue below reads without a LIMIT.
+	// bodies to avoid (auth.go, jsonOnly). What the slack costs is a heavier
+	// moderation payload (1.6 MiB measured at 294 pending, served in 250 ms);
+	// what it must NOT cost is a request the coordination never sees, and
+	// that is why the queue below reads without a LIMIT.
 	var id int64
 	err = s.tx(r).QueryRow(r.Context(),
 		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
@@ -177,8 +193,13 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// The identity is NOT returned. `team_requests.id` is one sequence for the
+	// whole table, hence for every campaign on the instance: handed to an
+	// anonymous visitor, the gap between two of them counts what the
+	// neighbouring campaigns received. The coordination finds the request in
+	// its queue; the visitor has no route that takes an identity.
 	replyJSON(w, http.StatusCreated, map[string]any{
-		"id": id, "name": name,
+		"name": name,
 		"message": "Demande enregistrée. La coordination de la campagne " +
 			"l'examinera et vous répondra à " + email + ".",
 	})
