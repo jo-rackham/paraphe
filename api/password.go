@@ -50,6 +50,20 @@ const (
 	scryptP      = 1
 	scryptKeyLen = 64
 	saltLength   = 16
+
+	// Cost ceilings for the legacy readers. Nothing in this build WRITES
+	// scrypt or pbkdf2 — HashPassword emits argon2id only — so a hash in
+	// either scheme can only reach VerifyPassword through a werkzeug import,
+	// a path that does not exist yet. Should it be added, these bound a
+	// planted hash: /api/session is public, and an unbounded scrypt N (memory,
+	// 128·N·r bytes) or pbkdf2 iteration count (CPU) would let one attempt
+	// take the process down. The values clear werkzeug's own defaults
+	// (scrypt N=2¹⁵, pbkdf2 600k) with a wide margin. maxScryptN caps memory
+	// near 256 MiB at the largest r accepted.
+	maxScryptN          = 1 << 17
+	maxScryptR          = 16
+	maxScryptP          = 16
+	maxPbkdf2Iterations = 10_000_000
 )
 
 const saltAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -180,6 +194,17 @@ func VerifyPassword(stored, password string) (bool, error) {
 			return false, fmt.Errorf("scrypt expects 3 parameters, got %d",
 				len(args)-1)
 		}
+		// A cost ceiling, the same reason argon2id has one above: /api/session
+		// is public, and scrypt's memory is 128·N·r bytes, so an unbounded N
+		// lets one attempt claim gigabytes and take the process down. Nothing
+		// in this build WRITES scrypt — a hash in it can only arrive through a
+		// werkzeug import, whose defaults these clear with margin.
+		if n < 2 || n > maxScryptN || r < 1 || r > maxScryptR ||
+			p < 1 || p > maxScryptP {
+			return false, fmt.Errorf(
+				"scrypt: parameters %d:%d:%d are outside the accepted range "+
+					"(2..%d, 1..%d, 1..%d)", n, r, p, maxScryptN, maxScryptR, maxScryptP)
+		}
 		var err error
 		// the derived length is not in the hash: werkzeug uses the
 		// hashlib.scrypt default (64 bytes)
@@ -197,6 +222,14 @@ func VerifyPassword(stored, password string) (bool, error) {
 			if iterations, err = strconv.Atoi(args[2]); err != nil {
 				return false, fmt.Errorf("pbkdf2: unreadable iteration count (%q)", args[2])
 			}
+		}
+		// Same ceiling, for CPU rather than memory: an unbounded iteration
+		// count is a public sign-in that spins forever. Ten million clears
+		// werkzeug's default (600k) many times over.
+		if iterations < 1 || iterations > maxPbkdf2Iterations {
+			return false, fmt.Errorf(
+				"pbkdf2: %d iterations are outside the accepted range (1..%d)",
+				iterations, maxPbkdf2Iterations)
 		}
 		factory, size, err := digest(name)
 		if err != nil {

@@ -147,6 +147,42 @@ func TestArgon2ParametersAboveWhatWeWriteAreRefused(t *testing.T) {
 	}
 }
 
+// scrypt N and pbkdf2 iterations were read from the hash with no ceiling,
+// where argon2id already had one: nothing in this build writes either scheme,
+// but a hash planted through a future werkzeug import — /api/session is
+// public — could claim a terabyte of memory or a billion iterations and take
+// the process down on one sign-in. werkzeug's own defaults must still verify.
+func TestScryptAndPbkdf2CostBombsAreRefused(t *testing.T) {
+	for name, hash := range map[string]string{
+		"scrypt N=2^25 (a terabyte)": "scrypt:33554432:8:1$sel$abcd",
+		"scrypt r out of range":      "scrypt:32768:64:1$sel$abcd",
+		"scrypt N=0":                 "scrypt:0:8:1$sel$abcd",
+		"pbkdf2 a billion passes":    "pbkdf2:sha256:1000000000$sel$abcd",
+		"pbkdf2 zero passes":         "pbkdf2:sha256:0$sel$abcd",
+	} {
+		ok, err := VerifyPassword(hash, referencePassword)
+		if err == nil {
+			t.Errorf("%s: accepted without error (ok=%v)", name, ok)
+		}
+		if ok {
+			t.Errorf("%s: the password verified against it", name)
+		}
+	}
+	// werkzeug's scrypt default (N=2^15, r=8, p=1) is not refused for its
+	// parameters — it reaches the derivation and simply fails on the digest
+	salt := strings.Repeat("a", 16)
+	sum, err := deriveScrypt(referencePassword, salt, scryptN, scryptR, scryptP)
+	if err != nil {
+		t.Fatalf("deriving the reference scrypt hash: %v", err)
+	}
+	ok, err := VerifyPassword("scrypt:32768:8:1$"+salt+"$"+hex.EncodeToString(sum),
+		referencePassword)
+	if err != nil || !ok {
+		t.Errorf("a werkzeug-default scrypt hash no longer verifies: ok=%v err=%v",
+			ok, err)
+	}
+}
+
 // A broken hash must NEVER pass for "wrong password": conflating them would
 // turn a corrupted database into a wave of mistyped passwords, without a
 // single log line.
