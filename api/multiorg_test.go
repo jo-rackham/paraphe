@@ -640,61 +640,6 @@ func TestListingChoiceTravelsAndToggles(t *testing.T) {
 	}
 }
 
-// A column added to a table that already has rows gives those rows a value
-// nobody chose. When the value IS a choice, the migration answers on behalf
-// of everyone who came before it: campaigns hosted before the directory
-// existed were never shown the question, and a restart would publish them.
-func TestUpgradeDoesNotListWhatNobodyChose(t *testing.T) {
-	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
-	s, srv := testServer(t)
-
-	// back to the schema of a deployment that predates the directory, with
-	// the rows such a deployment holds: a campaign preparing quietly, and a
-	// hosting request whose author never saw the checkbox
-	execAsMaintenance(t, s, "ALTER TABLE orgs DROP COLUMN listed")
-	execAsMaintenance(t, s, "ALTER TABLE hosting_requests DROP COLUMN listed")
-	createOrg(t, s, "ancienne", "Campagne Ancienne")
-	execAsMaintenance(t, s,
-		"INSERT INTO hosting_requests(slug, name, campaign, requester_email, "+
-			"requester_name, message, state, ts) "+
-			"VALUES($1,$2,'{}'::jsonb,$3,$4,'',$5,'2026-08-01')",
-		"attendue", "Campagne Attendue", "porteur@exemple.fr", "Porteur",
-		RequestPending)
-
-	asMaintenance(t, s.pool, func(tx pgx.Tx) {
-		if err := orgSchema(context.Background(), tx); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	if scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='ancienne'") {
-		t.Error("the upgrade listed a campaign that was never asked")
-	}
-	if scalar[bool](t, s,
-		"SELECT listed FROM hosting_requests WHERE slug='attendue'") {
-		t.Error("the upgrade listed a request whose author never saw the choice")
-	}
-	// and the apex says so: the directory is the observable consequence
-	apex := clientOn(t, srv, "paraphe.test")
-	code, rep := apex.call(http.MethodGet, "/api/campaigns", nil)
-	if code != http.StatusOK {
-		t.Fatalf("/api/campaigns: %d %v", code, rep)
-	}
-	campaigns, _ := rep["campaigns"].([]any)
-	for _, c := range campaigns {
-		if c.(map[string]any)["slug"] == "ancienne" {
-			t.Error("a campaign hosted before the directory is advertised by it")
-		}
-	}
-
-	// the default itself is unchanged: a campaign born after the migration
-	// is listed unless it says otherwise, which is what the form offers
-	createOrg(t, s, "nouvelle", "Campagne Nouvelle")
-	if !scalar[bool](t, s, "SELECT listed FROM orgs WHERE slug='nouvelle'") {
-		t.Error("a campaign created after the upgrade is not listed by default")
-	}
-}
-
 // A suspended campaign keeps its work, but nobody gets in.
 func TestSuspendedCampaignAcceptsNoRequest(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")

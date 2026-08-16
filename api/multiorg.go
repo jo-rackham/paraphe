@@ -41,7 +41,20 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			campaign JSONB NOT NULL DEFAULT '{}'::jsonb,
 			batch_size INTEGER NOT NULL DEFAULT 10,
 			state TEXT NOT NULL DEFAULT 'active',
-			created_at TEXT)`,
+			created_at TEXT,
+			-- Whether the apex directory lists the campaign: chosen on the
+			-- hosting request, carried onto the organisation at approval, and
+			-- adjustable later by its coordination — discretion is strategic
+			-- for a campaign preparing its announcement.
+			listed BOOLEAN NOT NULL DEFAULT TRUE,
+			-- The campaign's logo, as a POINTER into the object store: no
+			-- bytes, only which object should exist and what it is. That
+			-- pointer is the only way an orphan — or a bucket restored from an
+			-- older copy — is ever noticed. The key ENDS in a digest of the
+			-- content, so a column for the digest would be the same fact
+			-- written twice.
+			logo_key TEXT NOT NULL DEFAULT '',
+			logo_type TEXT NOT NULL DEFAULT '')`,
 		// The form is public: without moderation, the first abuse is
 		// squatting a candidate's name. A request therefore creates
 		// nothing — it waits for an instance administrator to approve it.
@@ -55,6 +68,9 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			message TEXT NOT NULL DEFAULT '',
 			state TEXT NOT NULL DEFAULT 'pending',
 			reason TEXT NOT NULL DEFAULT '',
+			-- the choice the requester makes on the form, carried onto the
+			-- organisation at approval
+			listed BOOLEAN NOT NULL DEFAULT TRUE,
 			ts TEXT, decided_at TEXT, decided_by TEXT)`,
 		`CREATE INDEX IF NOT EXISTS hosting_requests_state ON hosting_requests(state, id DESC)`,
 		// One pending request per address, enforced by the DATABASE. The
@@ -66,28 +82,6 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		// it the 409 it already has a message for.
 		`CREATE UNIQUE INDEX IF NOT EXISTS hosting_requests_pending_slug ` +
 			`ON hosting_requests(slug) WHERE state='pending'`,
-		// Whether the apex directory lists the campaign: chosen on the
-		// hosting request, carried onto the organisation at approval, and
-		// adjustable later by its coordination — discretion is strategic
-		// for a campaign preparing its announcement.
-		//
-		// The column arrives FALSE and only then defaults to TRUE. Rows that
-		// predate it were never shown the question, and NOT NULL DEFAULT TRUE
-		// answers it for them: a campaign hosted before the directory existed
-		// would be published by the very restart that upgrades the instance,
-		// without a word to it. Rows written afterwards still default to
-		// listed — both doors carry the choice.
-		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
-		`ALTER TABLE orgs ALTER COLUMN listed SET DEFAULT TRUE`,
-		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
-		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
-		// The campaign's logo, as a POINTER into the object store: no bytes,
-		// only which object should exist and what it is. That pointer is the
-		// only way an orphan — or a bucket restored from an older copy — is
-		// ever noticed. The key ENDS in a digest of the content, so a column
-		// for the digest would be the same fact written twice.
-		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
 		// The work columns move out of `mayors`: they are the only ones that
 		// belong to an organisation, hence the only ones walled.
 		`CREATE TABLE IF NOT EXISTS assignments(
