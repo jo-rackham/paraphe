@@ -801,6 +801,17 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   Work lives in `assignments`, so a free card has NO row to lock: the
   assignment IS the insert, with `ON CONFLICT (org_id, insee_code) DO UPDATE
   … WHERE volunteer IS NULL`. PostgreSQL lets exactly one through.
+- **Writing a status TELLS, it does not TAKE.** Reserving is a deliberate
+  act and it has one door, `/api/batch`. Recording a status used to claim
+  the card on the way past — volunteer and `team_id` stamped — so a note
+  taken in passing removed the mayor from everyone else's list for good,
+  with no screen able to give it back. What keeps two volunteers off the
+  same person is the status being SEEN: whoever opens the card next reads
+  « refusé » and moves on. **Assumed limit**, and it is the whole trade:
+  two people looking at the same free card in the same moment can both
+  call, where the lock made the second lose the race and be told so. A card
+  somebody HAS reserved is still theirs, and a write over it is still
+  refused.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit

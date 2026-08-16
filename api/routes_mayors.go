@@ -371,19 +371,28 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	// Without team_id, the card would stay in the shared pool and
-	// another team could read its notes and overwrite its status. The team
-	// wall is not enough: two volunteers of the SAME team can aim at the
-	// same card, and duplicate contact is what is prevented here.
+	// Writing a status RECORDS something; it does not take the card.
+	//
+	// It used to claim it — volunteer and team_id stamped on the way past —
+	// so a note taken in passing removed the mayor from everyone else's
+	// list, permanently, with no way back short of an operator's UPDATE. The
+	// intent was to stop two volunteers contacting the same person, and what
+	// stops that is the status being SEEN: whoever opens the card next reads
+	// « refusé » and moves on. Reserving is a deliberate act and it has its
+	// own door, `/api/batch`, which is where a volunteer takes cards to work
+	// on. The known limit of trading the lock for the information: two
+	// people looking at the same free card at the same moment can still both
+	// call, where the lock made the second one lose the race and be told so.
+	//
+	// The reservation itself is untouched: a card someone HAS taken is still
+	// theirs, and the guard below still refuses a write over it.
 	tag, err := s.tx(r).Exec(ctx,
-		"INSERT INTO assignments(org_id, insee_code, team_id, volunteer, status, updated_at) "+
-			"VALUES($1,$2,$3,$4,$5,$6) "+
+		"INSERT INTO assignments(org_id, insee_code, status, updated_at) "+
+			"VALUES($1,$2,$3,$4) "+
 			"ON CONFLICT (org_id, insee_code) DO UPDATE SET "+
-			"status=excluded.status, updated_at=excluded.updated_at, "+
-			"volunteer=COALESCE(assignments.volunteer, excluded.volunteer), "+
-			"team_id=COALESCE(assignments.team_id, excluded.team_id) "+
-			"WHERE assignments.volunteer IS NULL OR assignments.volunteer=excluded.volunteer",
-		orgOf(r).ID, insee, c.MyTeam(), c.Email, d.Status, shortTimestamp())
+			"status=excluded.status, updated_at=excluded.updated_at "+
+			"WHERE assignments.volunteer IS NULL OR assignments.volunteer=$5",
+		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.Email)
 	if err != nil {
 		s.failure(w, err)
 		return

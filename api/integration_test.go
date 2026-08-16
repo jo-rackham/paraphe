@@ -581,7 +581,15 @@ func TestBatchNeverGivesSameMayorTwice(t *testing.T) {
 
 // Two volunteers of the SAME team can aim at the same card: the team wall
 // is not enough, the condition on volunteer is required.
-func TestStatusRefusesAnotherVolunteersCard(t *testing.T) {
+// Writing a status TELLS, it does not TAKE — and a reservation still holds.
+//
+// The two halves are one decision. Recording a status used to claim the card
+// on the way past, so a note taken in passing removed the mayor from
+// everyone else's list for good; what stops two volunteers contacting the
+// same person is now the status being visible to the next one who opens the
+// card. Reserving stays a deliberate act, through /api/batch, and a card
+// somebody HAS taken is still refused to anyone else.
+func TestAStatusTellsWithoutTakingAndAReservationStillHolds(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 3, "02")
 	gid := createTeam(t, s, "Ain", "02")
@@ -592,15 +600,45 @@ func TestStatusRefusesAnotherVolunteersCard(t *testing.T) {
 	ca.signIn("a@exemple.fr", pwA)
 	cb.signIn("b@exemple.fr", pwB)
 
-	code, _ := ca.call(http.MethodPost, "/api/mayors/02000/status",
-		map[string]string{"status": "email_sent", "note": "écrit"})
-	if code != http.StatusOK {
-		t.Fatalf("status refused for the first volunteer: %d", code)
+	if code, rep := ca.call(http.MethodPost, "/api/mayors/02000/status",
+		map[string]string{"status": "email_sent", "note": "écrit"}); code != http.StatusOK {
+		t.Fatalf("status refused for the first volunteer: %d %v", code, rep)
 	}
-	code, rep := cb.call(http.MethodPost, "/api/mayors/02000/status",
-		map[string]string{"status": "refused", "note": "doublon"})
-	if code != http.StatusConflict {
-		t.Errorf("second volunteer accepted on the same card: %d %v", code, rep)
+	// the card belongs to nobody, so the second volunteer may write on it…
+	if v := scalar[*string](t, s,
+		"SELECT volunteer FROM assignments WHERE org_id=$1 AND insee_code=$2",
+		orgID(t, s, testSlug), "02000"); v != nil {
+		t.Errorf("writing a status took the card for %q: it leaves everyone "+
+			"else's list and no screen gives it back", *v)
+	}
+	// …and sees what the first one recorded before doing anything
+	code, rep := cb.call(http.MethodGet, "/api/mayors/02000", nil)
+	if code != http.StatusOK {
+		t.Fatalf("the card is unreadable to the second volunteer: %d %v", code, rep)
+	}
+	card, _ := rep["mayor"].(map[string]any)
+	if card["status"] != "email_sent" {
+		t.Errorf("the second volunteer does not see what the first recorded "+
+			"(%v): the information is what replaces the lock", card["status"])
+	}
+	if code, rep := cb.call(http.MethodPost, "/api/mayors/02000/status",
+		map[string]string{"status": "refused", "note": "vu, je complète"}); code != http.StatusOK {
+		t.Errorf("a card nobody has taken was refused to a second writer: "+
+			"%d %v", code, rep)
+	}
+
+	// …but a card someone RESERVED is theirs: that door is untouched.
+	if code, rep := ca.call(http.MethodPost, "/api/batch",
+		map[string]any{}); code != http.StatusOK {
+		t.Fatalf("batch refused: %d %v", code, rep)
+	}
+	taken := scalar[string](t, s,
+		"SELECT insee_code FROM assignments WHERE org_id=$1 AND volunteer=$2 "+
+			"LIMIT 1", orgID(t, s, testSlug), "a@exemple.fr")
+	if code, rep := cb.call(http.MethodPost, "/api/mayors/"+taken+"/status",
+		map[string]string{"status": "refused", "note": "doublon"}); code != http.StatusConflict {
+		t.Errorf("a reserved card was written over by somebody else: %d %v",
+			code, rep)
 	}
 }
 
