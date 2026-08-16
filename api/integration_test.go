@@ -621,10 +621,19 @@ func TestAStatusTellsWithoutTakingAndAReservationStillHolds(t *testing.T) {
 		t.Errorf("the second volunteer does not see what the first recorded "+
 			"(%v): the information is what replaces the lock", card["status"])
 	}
+	// …and writes on it, announcing what it was showing. Announcing nothing
+	// is refused on purpose: that is a screen which has not read this card
+	// since somebody recorded on it.
 	if code, rep := cb.call(http.MethodPost, "/api/mayors/02000/status",
-		map[string]string{"status": "refused", "note": "vu, je complète"}); code != http.StatusOK {
-		t.Errorf("a card nobody has taken was refused to a second writer: "+
-			"%d %v", code, rep)
+		map[string]string{"status": "refused", "note": "doublon"}); code != http.StatusConflict {
+		t.Errorf("a write that announced no reading was accepted over a "+
+			"status somebody recorded: %d %v", code, rep)
+	}
+	if code, rep := cb.call(http.MethodPost, "/api/mayors/02000/status",
+		map[string]string{"status": "refused", "note": "vu, je complète",
+			"seen": "email_sent"}); code != http.StatusOK {
+		t.Errorf("a card nobody has taken was refused to a second writer "+
+			"who had read it: %d %v", code, rep)
 	}
 
 	// …but a card someone RESERVED is theirs: that door is untouched.
@@ -1787,7 +1796,11 @@ func TestOversizedNameAndEmailAreRefused(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Errorf("255-rune email: %d %v — over the announced bound", code, body)
 	}
-	// and the bounds still accept what a real campaign types
+	// and the bounds still accept what a real campaign types. The department
+	// is one the seeded mayors bear: this door reads a perimeter like every
+	// other now, so a label nobody carries is refused here too — which is
+	// what the test below asserts on purpose.
+	seedMayors(t, s, 2, "71")
 	code, body = c.call(http.MethodPost, "/api/team/group", map[string]any{
 		"name": "Équipe Saône-et-Loire — secteur nord", "departments": []string{"71"},
 	})

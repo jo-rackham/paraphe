@@ -24,8 +24,13 @@ type Status struct {
 	Colour string `json:"colour"`
 }
 
+// StatusToContact: the state of a card nobody has written on. Spelt out
+// because it is also the DEFAULT the reads coalesce to and the value a write
+// compares against when the caller sends none.
+const StatusToContact = "to_contact"
+
 var Statuses = []Status{
-	{"to_contact", "À contacter", "#e2e8f0"},
+	{StatusToContact, "À contacter", "#e2e8f0"},
 	{"email_sent", "Email envoyé", "#bfdbfe"},
 	{"letter_sent", "Courrier envoyé", "#c7d2fe"},
 	{"to_call_back", "À rappeler", "#fde68a"},

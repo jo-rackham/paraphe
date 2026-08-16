@@ -398,19 +398,25 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		perimeter := splitDepartments(departments)
-		if d.Departments != nil {
-			corrected, unknown, err := s.knownDepartments(r, d.Departments)
-			if err != nil {
-				s.failure(w, err)
-				return
-			}
-			if unknown != "" {
-				errorJSON(w, http.StatusBadRequest,
-					"« %s » ne correspond à aucun département de la liste.", unknown)
-				return
-			}
-			perimeter = corrected
+		// The perimeter that will be WRITTEN is read, whether coordination
+		// edited it or accepted the stored one. Checking only the edit left
+		// the stored labels of a row filed before this guard existed — or
+		// before a department left the list — to open a team that draws zero
+		// cards for ever, on a screen that said nothing.
+		wanted := d.Departments
+		if wanted == nil {
+			wanted = splitDepartments(departments)
+		}
+		perimeter, unknown, err := s.knownDepartments(r, wanted)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+		if unknown != "" {
+			errorJSON(w, http.StatusBadRequest,
+				"« %s » ne correspond à aucun département de la liste. "+
+					"Corrigez le périmètre avant d'accepter.", unknown)
+			return
 		}
 		// An account already exists under this address: it has a role and a
 		// team of its own, and silently making it the lead of a new one would

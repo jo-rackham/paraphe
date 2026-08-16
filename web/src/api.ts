@@ -294,14 +294,19 @@ export interface Card {
 
 export const card = (insee: string): Promise<Card> =>
   call(`mayors/${encodeURIComponent(insee)}`);
+/** `seen` is the status the card was SHOWING — what the writer read before
+ *  deciding. The server refuses the write if the stored one has moved since,
+ *  which is what keeps a tab left open all morning from silently erasing a
+ *  status somebody recorded in between. */
 export const setStatus = (
   insee: string,
   status: string,
   note: string,
+  seen: string,
 ): Promise<Card> =>
   call(`mayors/${encodeURIComponent(insee)}/status`, {
     method: "POST",
-    body: { status, note },
+    body: { status, note, seen },
   });
 export const takeBatch = ({
   department,
