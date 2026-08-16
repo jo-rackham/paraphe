@@ -137,6 +137,16 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
+		// Who wrote the status that is on the card.
+		//
+		// A status is read by every team of the campaign — that is what keeps
+		// two of them off the same mayor — but it stopped being ATTRIBUTABLE
+		// when writing one stopped claiming the card: `volunteer` stays null,
+		// and the note that explains it is filtered to its own team. Team A
+		// watched « signé » become « refusé » with no way to ask whom. This
+		// says who, and nothing more: it grants no ownership and locks
+		// nothing.
+		`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS updated_by TEXT`,
 		// assignments.team_id stays NULLABLE, and the null is not an
 		// accident: `UPDATE assignments SET volunteer=NULL, team_id=NULL`
 		// is how an operator puts a stuck card back in the shared pool, and

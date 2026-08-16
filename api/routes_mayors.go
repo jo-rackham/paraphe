@@ -34,8 +34,13 @@ const maxBatchRounds = 8
 // what the application exists to prevent. The readable name comes from the
 // join.
 const (
+	// updated_by travels with the status because the status travels: every
+	// team of the campaign reads a status written on a card nobody reserved,
+	// and until this column it could ask nobody who wrote it — `volunteer` is
+	// null on such a card, and the note that explains it belongs to its own
+	// team. It says who, and grants nothing.
 	mayorSelection = "m.*, t.volunteer, COALESCE(t.status,'to_contact') AS status, " +
-		"t.updated_at, t.team_id, c.name AS volunteer_name"
+		"t.updated_at, t.updated_by, t.team_id, c.name AS volunteer_name"
 	// mayors is the common, read-only list: it carries no org_id. The work
 	// rows do, and the campaign is named in the JOIN CONDITION, never in a
 	// WHERE: `WHERE t.org_id = …` would turn these outer joins into inner
@@ -406,10 +411,11 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 		seen = StatusToContact
 	}
 	tag, err := s.tx(r).Exec(ctx,
-		"INSERT INTO assignments(org_id, insee_code, status, updated_at) "+
-			"VALUES($1,$2,$3,$4) "+
+		"INSERT INTO assignments(org_id, insee_code, status, updated_at, updated_by) "+
+			"VALUES($1,$2,$3,$4,$5) "+
 			"ON CONFLICT (org_id, insee_code) DO UPDATE SET "+
-			"status=excluded.status, updated_at=excluded.updated_at "+
+			"status=excluded.status, updated_at=excluded.updated_at, "+
+			"updated_by=excluded.updated_by "+
 			"WHERE (assignments.volunteer IS NULL OR assignments.volunteer=$5) "+
 			"AND assignments.status=$6",
 		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.Email, seen)

@@ -26,6 +26,11 @@ export interface MayorCard extends Mayor {
   volunteer?: string | null;
   volunteer_name?: string | null;
   status?: string | null;
+  /** Who last wrote the status. A status is read by every team of the
+   *  campaign; `volunteer` is null on a card nobody reserved, and the note
+   *  explaining it belongs to its own team — so this is the only thing that
+   *  answers « qui ». It grants no ownership. */
+  updated_by?: string | null;
 }
 
 export interface Note {

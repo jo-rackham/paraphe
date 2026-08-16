@@ -418,9 +418,17 @@ function Coquille({
         </main>
       </RenderGuard>
       <PiedDePage sourceUrl={cfg.source_url}>
+        {/* The three used to be one sentence because they had one scope.
+            They no longer do: a status written on a card nobody reserved
+            leaves it unclaimed, so every team of the campaign reads it —
+            which is what keeps two of them off the same mayor. The notes and
+            the reservations did not move. */}
         <p>
-          Le travail de l'équipe (statuts, notes, réservations) est enregistré
-          sur le serveur de la campagne et partagé avec votre équipe locale.
+          Vos notes et vos réservations sont enregistrées sur le serveur de la
+          campagne et partagées avec votre équipe locale. Les statuts (« email
+          envoyé », « refus »…) sont visibles par toute la campagne, avec le nom
+          de qui les a enregistrés : c'est ce qui évite que deux équipes
+          contactent le même maire.
         </p>
       </PiedDePage>
     </>
@@ -499,6 +507,13 @@ function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
         Fiche libre. Enregistrer un statut le note pour toute l'équipe, sans
         vous réserver la fiche : pour cela, prenez un lot depuis « Mon tableau
         ».
+        {/* A status is read campaign-wide and, until it was recorded, was
+            attributable to nobody: this card has no volunteer, and the note
+            explaining the status belongs to whoever wrote it. Naming the
+            writer is what lets a team ask. */}
+        {mayor.updated_by && mayor.updated_by !== me.email && (
+          <> Dernier statut enregistré par {mayor.updated_by}.</>
+        )}
       </p>
     );
   }
