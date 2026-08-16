@@ -416,11 +416,15 @@ jobs:
         run: |
           # the default path is not enough: ingress, autoscaling, existing
           # secret and external database are never rendered otherwise
+          # 64 bytes, like a real one: the chart refuses a session key under
+          # 32 exactly as the application does, so a one-letter placeholder
+          # renders a chart nothing could ever start from.
+          CLE=$(printf 'c%.0s' $(seq 64))
           rendre() {
             nom=$1; shift
             helm template paraphe chart/paraphe \
               --set image.tag=ci --set secrets.adminPassword=x \
-              --set secrets.secretKey=y --set secrets.valkeyPassword=w \
+              --set "secrets.secretKey=$CLE" --set secrets.valkeyPassword=w \
               --set postgres.cnpg.backup.acknowledgedDisabled=true \
               "$@" > "/tmp/$nom.yaml"
             test -s "/tmp/$nom.yaml"
@@ -485,12 +489,30 @@ jobs:
           # could be deleted and nothing here would notice.
           for manque in mail.from=contact@exemple.fr mail.publicUrl=https://p.exemple.fr; do
             if helm template paraphe chart/paraphe \
-              --set secrets.adminPassword=x --set secrets.secretKey=y \
+              --set secrets.adminPassword=x --set "secrets.secretKey=$CLE" \
               --set secrets.valkeyPassword=w \
               --set postgres.cnpg.backup.acknowledgedDisabled=true \
               --set mail.url=smtp://envoi@relais.exemple.fr:587 \
               --set "$manque" > /dev/null 2>&1; then
               echo "::error::mail.url renders with only $manque beside it"
+              exit 1
+            fi
+          done
+          # …and a value the APPLICATION refuses at startup is refused HERE,
+          # where the person who typed it is looking. Each one separately:
+          # asserting on one leaves the others free to disappear.
+          for faute in secrets.secretKey=trop-court \
+            mail.publicUrl=https://p.exemple.fr/chemin?x=1 \
+            "media.publicUrl=* ; script-src *"; do
+            if helm template paraphe chart/paraphe \
+              --set secrets.adminPassword=x --set "secrets.secretKey=$CLE" \
+              --set secrets.valkeyPassword=w \
+              --set postgres.cnpg.backup.acknowledgedDisabled=true \
+              --set mail.url=smtp://envoi@relais.exemple.fr:587 \
+              --set mail.from=contact@exemple.fr \
+              --set mail.publicUrl=https://p.exemple.fr \
+              --set "$faute" > /dev/null 2>&1; then
+              echo "::error::the chart renders $faute, which the app refuses"
               exit 1
             fi
           done

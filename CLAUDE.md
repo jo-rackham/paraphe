@@ -471,6 +471,14 @@ works when the relay is down, and still bootstraps the instance.
   ArgoCD stuck on « Progressing ». CI renders the mail block too: it is off
   by default, so no other case exercises those twenty-eight lines, and
   `helm lint` parses a branch without executing it.
+  **Presence was not the whole promise: a value the application refuses at
+  STARTUP is refused at RENDER too.** The chart checked that the settings
+  were there and never what they said, so a session key of five bytes, a
+  `mail.publicUrl` carrying a path and a query, and a `media.publicUrl`
+  carrying the semicolon that closes a Content-Security-Policy source all
+  rendered — and produced exactly the CrashLoopBackOff this doctrine exists
+  to prevent. CI drives each refusal separately, and its own renders used a
+  one-letter key until the guard said so.
 - **Stored as a plain SHA-256, deliberately.** The token is 256 bits of
   `crypto/rand`: there is nothing to search, so a memory-hard hash buys
   nothing and would put a 32 MiB derivation behind `hashGate` on a PUBLIC
