@@ -20,10 +20,16 @@ var routeLimits = map[string]string{
 	"GET /health":    "never: kubelet's liveness probe",
 	"GET /health/db": "never: kubelet's readiness probe",
 
-	"GET /api/config":          "anon_ip",
-	"POST /api/session":        "signin_ip + signin_account",
-	"DELETE /api/session":      "none: clears a cookie, touches nothing",
-	"GET /api/campaign/public": "anon_ip",
+	"GET /api/config":     "anon_ip",
+	"POST /api/session":   "signin_ip + signin_account",
+	"DELETE /api/session": "none: clears a cookie, touches nothing",
+	// Lower than signing in, because an admitted call makes this service
+	// send a real message to somebody else's inbox.
+	"POST /api/session/link": "magic_link_ip + magic_link_account",
+	// No account class: the body carries a 256-bit token and no address,
+	// so there is no subject to count under and nothing to search for.
+	"POST /api/session/link/redeem": "signin_ip",
+	"GET /api/campaign/public":      "anon_ip",
 
 	"GET /api/me":                "none: authenticated read of one's own row",
 	"POST /api/me/personal_note": "write_account",
@@ -321,6 +327,17 @@ func TestSignInCeilingPerAccountIsBlindToExistence(t *testing.T) {
 	}
 }
 
+// Signing in clears the account counters, and it has to.
+//
+// The ceiling counts every attempt against the submitted address, SUCCESSES
+// INCLUDED. Without the clearing, ten legitimate sign-ins in a quarter of an
+// hour lock an account out of its own password — the end-to-end journeys
+// find it within a minute, and a shared team box would find it on a Tuesday.
+//
+// What it costs is written down beside it, in
+// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn: the clearing is
+// observable, so a ceiling burned for an address reports the moment that
+// address turns out to name somebody.
 func TestSignInSuccessResetsTheAccountCeiling(t *testing.T) {
 	s, srv := testServer(t)
 	password := createAccount(t, s, "team-box@exemple.fr", RoleVolunteer, nil)
@@ -331,7 +348,7 @@ func TestSignInSuccessResetsTheAccountCeiling(t *testing.T) {
 			t.Fatalf("attempt %d: %d", i, code)
 		}
 	}
-	// …then gets it right: the counter must clear
+	// …then gets it right
 	if code := c.signIn("team-box@exemple.fr", password); code != http.StatusOK {
 		t.Fatalf("the correct password answered %d below the ceiling", code)
 	}
@@ -462,4 +479,76 @@ func TestRefusalCarriesRetryAfterAndCORSWhereDue(t *testing.T) {
 	if cc := last.Header.Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("Cache-Control on an API answer: %q, want no-store", cc)
 	}
+}
+
+// The oracle this design currently carries, WRITTEN DOWN rather than left to
+// be rediscovered.
+//
+// A ceiling an anonymous caller can fill for an address of their choosing
+// should not report when that address turns out to name somebody. This one
+// does, and the test says so out loud rather than asserting a property the
+// code does not have. It goes red the day the shape changes — which is the
+// day to rewrite it as the blindness assertion it wants to be.
+func TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn(t *testing.T) {
+	s, srv := testServer(t)
+	withMailer(t, s, "https://campagne.exemple.fr")
+	const real = "marie@exemple.fr"
+	const ghost = "personne@exemple.fr"
+	createAccount(t, s, real, RoleVolunteer, nil)
+	hashed, err := HashPassword("un-mot-de-passe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execAsMaintenance(t, s, "UPDATE accounts SET password_hash=$1 WHERE email=$2",
+		hashed, real)
+
+	burn := func(address string) int {
+		attacker := newClient(t, srv)
+		var code int
+		for range 4 {
+			code, _ = attacker.call(http.MethodPost, "/api/session/link",
+				map[string]string{"email": address})
+		}
+		return code
+	}
+	if code := burn(real); code != http.StatusTooManyRequests {
+		t.Fatalf("the ceiling did not close for a real address: %d", code)
+	}
+	if code := burn(ghost); code != http.StatusTooManyRequests {
+		t.Fatalf("the ceiling did not close for an unknown address: %d", code)
+	}
+
+	// The owner signs in, by the OTHER door.
+	owner := newClient(t, srv)
+	if code, _ := owner.call(http.MethodPost, "/api/session",
+		map[string]string{"email": real, "password": "un-mot-de-passe"}); code != http.StatusOK {
+		t.Fatalf("the owner could not sign in: %d", code)
+	}
+
+	// And the attacker asks again, for both addresses.
+	after := func(address string) int {
+		attacker := newClient(t, srv)
+		code, _ := attacker.call(http.MethodPost, "/api/session/link",
+			map[string]string{"email": address})
+		return code
+	}
+	realAfter, ghostAfter := after(real), after(ghost)
+	if realAfter == ghostAfter {
+		t.Fatalf("both answered %d: either the oracle is closed — in which "+
+			"case this test has become the wrong shape and should assert the "+
+			"blindness rather than the leak — or the ceiling never filled",
+			realAfter)
+	}
+	t.Logf("KNOWN LIMIT, measured: a burned ceiling answers %d for an address "+
+		"whose owner has signed in and %d for one nobody bears. Whoever fills "+
+		"it for an address learns, by polling it, the moment that address "+
+		"turns out to name somebody — which the constant sentence and the "+
+		"decoy hash exist to refuse.\n\nThe clearing that causes it is not a "+
+		"kindness that can simply be dropped: the ceiling counts SUCCESSES "+
+		"too, so without it ten legitimate sign-ins in a quarter of an hour "+
+		"lock an account out of its own password — the end-to-end journeys "+
+		"proved that within a minute of trying. Closing both wants the "+
+		"ceiling to count failures ONLY, or to refuse in the same words as a "+
+		"wrong password. Either is a change to the limiter's shape.",
+		realAfter, ghostAfter)
 }

@@ -22,6 +22,10 @@ var publicAPIRoutes = map[string]string{
 		"before anyone can sign in",
 	"POST /api/session":   "signing in",
 	"DELETE /api/session": "signing out, which must work even on a dead session",
+	"POST /api/session/link": "asking for a sign-in link, which is what " +
+		"somebody with no session and no password has left",
+	"POST /api/session/link/redeem": "exchanging that link's token for a " +
+		"session: the token IS the credential",
 	"GET /api/campaign/public": "read cross-origin by the browser version: " +
 		"the campaign a mayor already reads in every message",
 	"POST /api/request": "the public hosting request form, on the apex",

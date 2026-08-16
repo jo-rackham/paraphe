@@ -3,13 +3,209 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/unicode/norm"
 )
+
+// A relay answers refusals in its own spelling, and plenty of them quote the
+// recipient back: `550 5.1.1 <marie@EXEMPLE.FR>: user unknown`. Logged as
+// received, that sentence puts in the log exactly what this file's subject —
+// day-scoped pseudonyms — exists to keep out of it, and by a path no test
+// that fakes the mailer can reach.
+func TestARelayCannotPutAnAddressInTheLog(t *testing.T) {
+	s, _ := testServer(t)
+	const email = "marie@exemple.fr"
+	for _, answer := range []string{
+		"SMTP RCPT TO: 550 5.1.1 <marie@exemple.fr>: user unknown",
+		"SMTP RCPT TO: 550 5.1.1 <marie@EXEMPLE.FR>: user unknown",
+		"SMTP RCPT TO: 550 5.1.1 <MARIE@Exemple.Fr>: mailbox unavailable",
+		"550 marie@exemple.fr rejected; 550 marie@EXEMPLE.fr rejected twice",
+	} {
+		got := s.withoutAddress(errors.New(answer), email)
+		if strings.Contains(strings.ToLower(got), email) {
+			t.Errorf("the address survived into the log line:\n\tfrom: %s\n\tgot:  %s",
+				answer, got)
+		}
+		if !strings.Contains(got, s.accountPseudonym(email)) {
+			t.Errorf("nothing identifies the account any more: %s", got)
+		}
+	}
+}
+
+// A relay that names the recipient WITHOUT its domain says as much: the
+// local part is the identifying half, the domain is the campaign's own and
+// names nobody. `recipient "marie.dupont": user unknown` used to go into the
+// log verbatim, because the pattern asked for the whole address.
+func TestARelayNamingOnlyTheLocalPartSaysNoMore(t *testing.T) {
+	s, _ := testServer(t)
+	const email = "marie.dupont@exemple.fr"
+	for _, answer := range []string{
+		`550 recipient "marie.dupont": user unknown`,
+		`550 5.1.1 MARIE.DUPONT: no such mailbox`,
+		"550 <marie.dupont@exemple.fr> unknown; retry as marie.dupont",
+	} {
+		got := s.withoutAddress(errors.New(answer), email)
+		if strings.Contains(strings.ToLower(got), "marie.dupont") {
+			t.Errorf("the recipient's name survived into the log line:"+
+				"\n\tfrom: %s\n\tgot:  %s", answer, got)
+		}
+		if !strings.Contains(got, s.accountPseudonym(email)) {
+			t.Errorf("nothing identifies the account any more: %s", got)
+		}
+	}
+
+	// …and the whole address still wins where both could match, so no
+	// orphaned `@domain` is left standing beside a pseudonym.
+	got := s.withoutAddress(
+		errors.New("550 <marie.dupont@exemple.fr> unknown"), email)
+	if strings.Contains(got, "@exemple.fr") {
+		t.Errorf("the local part was redacted out of the middle of the "+
+			"address, leaving its domain behind: %s", got)
+	}
+}
+
+// Go's `\b` is ASCII-only — `\w` is `[0-9A-Za-z_]` — so `\bhervé\b` has no
+// boundary to find after the `é` and never matches. In a French campaign
+// that is not an edge case, it is most of the volunteers: the accented name
+// the redaction exists for went into the log verbatim, while the ASCII one
+// beside it was scrubbed.
+func TestAnAccentedNameIsRedactedLikeAnyOther(t *testing.T) {
+	s, _ := testServer(t)
+	for _, c := range []struct{ email, answer, leaks string }{
+		{"hervé@exemple.fr", `550 5.1.1 recipient "hervé": user unknown`, "hervé"},
+		{"chloé@exemple.fr", "550 recipient chloé: no such mailbox", "chloé"},
+		{"élise@exemple.fr", "550 <élise> unknown", "élise"},
+		{"françois@exemple.fr", "550 françois, mailbox full", "françois"},
+		// twice in one answer, and the second must go too: consuming the
+		// character that bounds the first is how the second stays
+		{"hervé@exemple.fr", "550 hervé rejected; hervé rejected twice", "hervé"},
+	} {
+		got := s.withoutAddress(errors.New(c.answer), c.email)
+		if strings.Contains(strings.ToLower(got), c.leaks) {
+			t.Errorf("the recipient's name survived into the log line:"+
+				"\n\tfrom: %s\n\tgot:  %s", c.answer, got)
+		}
+	}
+
+	// The short-local threshold sits AFTER the normalisation, so it does not
+	// move with the spelling: an address stored one way and quoted the other
+	// gets the same treatment, on either side of the line.
+	//
+	// Built with norm.NFD rather than typed: two literals meant to differ in
+	// normalisation are two literals an editor is free to make identical, and
+	// a test comparing a string with itself passes whatever the code does.
+	for _, address := range []string{
+		"é@exemple.fr",   // one character: below the line, left alone
+		"héo@exemple.fr", // three: above it, redacted
+	} {
+		composed, decomposed := norm.NFC.String(address), norm.NFD.String(address)
+		if composed == decomposed {
+			t.Fatalf("%q is the same in both forms, so it proves nothing", address)
+		}
+		// Not compared byte for byte: the pseudonym is derived from the
+		// address AS STORED, so the two forms carry two pseudonyms, and that
+		// is correct — a stored address has one spelling, and its pseudonym
+		// is stable for it. What must hold either way is that the address
+		// does not survive.
+		answer := "550 recipient <" + composed + "> unknown"
+		for _, stored := range []string{composed, decomposed} {
+			got := s.withoutAddress(errors.New(answer), stored)
+			if strings.Contains(got, "@exemple.fr") {
+				t.Errorf("the address survived when it was stored %s:"+
+					"\n\tfrom: %s\n\tgot:  %s",
+					map[bool]string{true: "composed", false: "decomposed"}[stored == composed],
+					answer, got)
+			}
+		}
+	}
+
+	// A whole word, still: a local part is not redacted out of the middle of
+	// a longer one, or `connect@` would turn `connection reset` into nonsense
+	// and take the operator's only clue with it.
+	got := s.withoutAddress(
+		errors.New("550 the connection was reset"), "connect@exemple.fr")
+	if !strings.Contains(got, "connection was reset") {
+		t.Errorf("an ordinary word was eaten from inside another: %s", got)
+	}
+}
+
+// The same name written the other way round in Unicode.
+//
+// `é` is one rune (U+00E9) or two (`e` + U+0301), and the two spell the same
+// address without sharing a byte. The stored one and the one a relay quotes
+// back need not agree — this project already knows the shape, which is why
+// the template check normalises before comparing: a `é` pasted from a PDF
+// arrives decomposed. Byte against byte, neither pass matched and the WHOLE
+// address went into the log, domain included.
+func TestTheTwoWaysOfSpellingAnAccentAreTheSameAddress(t *testing.T) {
+	s, _ := testServer(t)
+	const composed = "hervé@exemple.fr"    // é as one rune
+	const decomposed = "hervé@exemple.fr" // e + combining acute
+	if composed == decomposed {
+		t.Fatal("these are the same bytes, so this test proves nothing")
+	}
+	for _, c := range []struct{ stored, quoted string }{
+		{composed, decomposed},
+		{decomposed, composed},
+		{composed, composed},
+		{decomposed, decomposed},
+	} {
+		answer := "550 5.1.1 <" + c.quoted + ">: user unknown"
+		got := s.withoutAddress(errors.New(answer), c.stored)
+		if strings.Contains(got, "@exemple.fr") {
+			t.Errorf("the address survived because it was spelled the other "+
+				"way:\n\tstored: %q\n\tquoted: %q\n\tgot:    %s",
+				c.stored, c.quoted, got)
+		}
+	}
+}
+
+// Lowercasing changes byte LENGTH for some characters — `Ⱦ` is two bytes and
+// `ⱦ` is three — so an offset found in a lowercased copy does not address
+// the same place in the original. Matching on the copy and slicing the
+// original left half an address in the log, and past the end of the string
+// it PANICKED — in a detached goroutine, where a panic takes the process
+// with it.
+func TestARelayAnswerInAnyAlphabetIsSafeToRedact(t *testing.T) {
+	s, _ := testServer(t)
+	for _, c := range []struct{ answer, email string }{
+		// Ⱦ (U+023E, 2 bytes) lowercases to ⱦ (U+2C66, 3 bytes)
+		{"Ⱦ user@a.b", "user@a.b"},
+		{"at Ⱦ: <user@abc.com> unknown", "user@abc.com"},
+		{"ȺȾȺȾ 550 <MARIE@EXEMPLE.FR> rejected", "marie@exemple.fr"},
+		{"550 rejected", ""},
+		{"İ 550 <a@b.c>", "a@b.c"},
+		{strings.Repeat("Ⱦ<a@b.c> ", 50), "a@b.c"},
+		// Bytes that are not UTF-8 at all, on both sides. A relay answers
+		// whatever it answers, and this runs in a detached goroutine where a
+		// panic takes the process with it — normalising and slicing must both
+		// survive a truncated sequence and a bare continuation byte.
+		{"550 \xff\xfe <a@b.c> unknown", "a@b.c"},
+		{"550 \xc3 <a@b.c>", "a@b.c"},
+		{"550 <a@b.c> \xe2\x82", "a@b.c"},
+		{"550 rejected", "\xffbad@b.c"},
+	} {
+		got := s.withoutAddress(errors.New(c.answer), c.email)
+		if c.email != "" && strings.Contains(strings.ToLower(got), c.email) {
+			t.Errorf("the address survived:\n\tfrom: %q\n\tgot:  %q",
+				c.answer, got)
+		}
+		// and a fragment of it must not survive either: the "before" part of
+		// the text is where a misaligned offset used to leave one
+		if local, _, _ := strings.Cut(c.email, "@"); local != "" &&
+			strings.Contains(strings.ToLower(got), local+"@") {
+			t.Errorf("part of the address survived:\n\tfrom: %q\n\tgot:  %q",
+				c.answer, got)
+		}
+	}
+}
 
 // An operator asking for `log_level=warn` is following what the deployment
 // guide tells them to do, and that is exactly the setting under which the

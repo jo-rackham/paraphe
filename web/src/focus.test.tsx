@@ -12,7 +12,6 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import App from "./App.tsx";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
@@ -20,7 +19,8 @@ import { Alerte, RenderGuard, resetViewMemory } from "./common.tsx";
 import * as DB from "./db.ts";
 import Instance from "./Instance.tsx";
 import Team from "./Team.tsx";
-import type { InstanceConfig, Message, ServerConfig } from "./types.ts";
+import { instanceConfig, teamConfig } from "./testing/fixtures.ts";
+import type { Message } from "./types.ts";
 
 vi.mock("./db.ts", { spy: true });
 
@@ -28,25 +28,8 @@ vi.mock("./api.ts", { spy: true });
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-const CONFIG: ServerConfig = {
-  mode: "team",
-  departments: [],
-  campaign: Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, `valeur ${k}`])),
-  batch_size: 10,
-  unfilled: [],
-  source_url: "",
-  logo: null,
-  statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
-  ranks: [{ key: "has_endorsed", label: "A parrainé" }],
-};
-
-const INSTANCE_CONFIG: InstanceConfig = {
-  mode: "instance",
-  base_domain: "paraphe.test",
-  source_url: "",
-  browser_version_url: "",
-  campaign_keys: CAMPAIGN_KEYS,
-};
+const CONFIG = teamConfig();
+const INSTANCE_CONFIG = instanceConfig({ base_domain: "paraphe.test" });
 
 let container: HTMLDivElement;
 let root: Root;

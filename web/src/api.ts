@@ -62,12 +62,12 @@ async function call<T>(path: string, options: Request = {}): Promise<T> {
     // signal, the application looked "signed in", every screen showed an
     // endless "Chargement…", and the volunteer could not understand.
     //
-    // Two calls are excluded, because they happen BEFORE any session: the
-    // sign-in itself, and "who am I?" at page load. Their 401 is a
-    // visitor's normal state, not an expiry — announced wrongly, it
-    // greeted every volunteer with "votre session a expiré" on a browser
-    // that never had one.
-    if (resp.status === 401 && path !== "session" && path !== "me") {
+    // The calls that OPEN a session are excluded, because they happen before
+    // there is one. Their 401 is a visitor's normal state, not an expiry —
+    // announced wrongly, it greeted every volunteer with "votre session a
+    // expiré" on a browser that never had one, and it drowned out the one
+    // sentence a spent sign-in link has to deliver.
+    if (resp.status === 401 && !BEFORE_ANY_SESSION.has(path)) {
       window.dispatchEvent(new CustomEvent(SESSION_LOST));
     }
     throw new APIError(
@@ -77,6 +77,15 @@ async function call<T>(path: string, options: Request = {}): Promise<T> {
   }
   return body as T;
 }
+
+/** The calls a visitor makes before holding a session: signing in, asking
+ *  for a link, redeeming one, and "who am I?" at page load. */
+const BEFORE_ANY_SESSION = new Set([
+  "session",
+  "session/link",
+  "session/link/redeem",
+  "me",
+]);
 
 export const SESSION_LOST = "paraphe:session-lost";
 
@@ -149,6 +158,97 @@ export const signIn = (email: string, password: string): Promise<Me> =>
   call("session", { method: "POST", body: { email, password } });
 export const signOut = (): Promise<unknown> =>
   call("session", { method: "DELETE" });
+
+/**
+ * Ask for a sign-in link. The answer is the SAME whether or not an account
+ * bears this address — displaying it as-is is what keeps this screen from
+ * becoming a roster of the campaign's volunteers.
+ */
+export const requestLink = (email: string): Promise<{ message: string }> =>
+  call("session/link", { method: "POST", body: { email } });
+
+/**
+ * Exchange a link's token for a session. A POST, and the token in the BODY:
+ * it arrived in the URL's fragment, which no server ever sees, and putting
+ * it back in a path would write it into every access log on the way.
+ */
+export const redeemLink = (token: string): Promise<Me> =>
+  call("session/link/redeem", { method: "POST", body: { token } });
+
+/**
+ * The token a sign-in link left in the address bar, taken and ERASED.
+ *
+ * Called ONCE, at boot (main.tsx), before anything decides which mode to
+ * render: erasing it inside the screen that consumes it left it in the URL
+ * on every path that never reaches that screen.
+ *
+ * Erased whenever the key is there, whatever its value, and a reload must
+ * not replay a token that opens exactly one session. What ELSE the fragment
+ * carried is put back: this application uses no other fragment parameter
+ * today, and eating one silently is how the next one would be lost.
+ *
+ * Every path sets `pending`, the one that finds nothing included: leaving it
+ * as it was makes a second call hand back the token of the first.
+ */
+export function takeLinkToken(): string | null {
+  pending = null;
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  if (!params.has("jeton")) return null;
+  const token = params.get("jeton");
+  params.delete("jeton");
+  const url = new URL(window.location.href);
+  url.hash = params.toString();
+  try {
+    window.history.replaceState({}, "", url);
+  } catch {
+    // A history that refuses does not take the page down with it — the same
+    // line the theme's storage holds. The token is handed over anyway: it is
+    // about to be spent, so the choice is between one spent token left in an
+    // address bar and a blank page with a LIVE one still in it.
+  }
+  pending = token || null;
+  takenAt = Date.now();
+  return pending;
+}
+
+/**
+ * The token, handed over EXACTLY ONCE.
+ *
+ * It is held here rather than in a prop, and that is the whole point: a prop
+ * lives as long as the tab. Somebody who lands on the outage screen with a
+ * link, walks away, and leaves the tab open hands their session to whoever
+ * presses « Réessayer » next — Team mounts afresh with the same prop and
+ * redeems it. React's StrictMode does the same thing twice in development,
+ * for the same reason.
+ *
+ * Once consumed it is gone, so a second mount asks the server for nothing
+ * and the link has to be clicked again.
+ *
+ * And it is good for THIS VISIT, which is what the age bound says. Dropping
+ * it per screen means naming every screen that cannot use it, and the list
+ * was short by one: the LOADING screen, where the mode is not known yet, is
+ * not a screen that cannot use the token — it is a screen that does not know
+ * — so it was not on the list, and a page that hangs there holds a live
+ * token for as long as it hangs. Somebody walks away, somebody else sits
+ * down, the campaign answers at last, and the session opens for the second
+ * person.
+ *
+ * Two minutes, which no load reaches: one that slow has already failed to
+ * the outage screen. The cost of being wrong is one click on a link that is
+ * still in its owner's inbox.
+ */
+let pending: string | null = null;
+let takenAt = 0;
+
+const VISIT = 2 * 60 * 1000;
+
+export function consumeLinkToken(): string | null {
+  const token = pending;
+  pending = null;
+  if (token === null || Date.now() - takenAt > VISIT) return null;
+  return token;
+}
+
 export const savePersonalNote = (
   personalNote: string,
 ): Promise<{ personal_note: string }> =>
@@ -230,8 +330,15 @@ export interface NewAccount {
 
 export const createAccount = (
   account: NewAccount,
-): Promise<{ email: string; name: string; role: string; password: string }> =>
-  call("team/account", { method: "POST", body: account });
+): Promise<{
+  email: string;
+  name: string;
+  role: string;
+  password: string;
+  /** L'invitation est partie (envoi synchrone : le résultat est connu). */
+  invitation_sent: boolean;
+  invitation_error?: string;
+}> => call("team/account", { method: "POST", body: account });
 export const toggleAccount = (
   email: string,
 ): Promise<{ email: string; active: boolean }> =>
@@ -328,6 +435,8 @@ export const decideRequest = (
   address?: string;
   coordination?: string;
   password?: string;
+  invitation_sent?: boolean;
+  invitation_error?: string;
 }> =>
   call(`admin/requests/${id}`, { method: "POST", body: { decision, reason } });
 
@@ -348,4 +457,6 @@ export const createCampaign = (creation: {
   address: string;
   coordination: string;
   password: string;
+  invitation_sent: boolean;
+  invitation_error?: string;
 }> => call("admin/campaigns", { method: "POST", body: creation });

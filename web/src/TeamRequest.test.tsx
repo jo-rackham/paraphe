@@ -33,6 +33,7 @@ const CONFIG: ServerConfig = {
   batch_size: 10,
   unfilled: [],
   source_url: "",
+  magic_link: false,
   logo: null,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
   ranks: [{ key: "has_endorsed", label: "A parrainé" }],

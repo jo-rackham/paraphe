@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import * as API from "./api.ts";
+import { FormulaireConnexion } from "./Connexion.tsx";
 import {
   Alerte,
   type CardDraft,
@@ -18,7 +19,6 @@ import {
   RenderGuard,
   SkipLink,
   ThemeToggle,
-  useSubmitGuard,
   useViewFocus,
 } from "./common.tsx";
 import { GestionEquipe } from "./TeamAdmin.tsx";
@@ -72,16 +72,45 @@ export default function Team({ config }: { config: ServerConfig }) {
   const [message, setMessage] = useState<Message | null>(null);
   const [ready, setReady] = useState(false);
 
-  const report = useCallback((e: unknown) => {
+  const report = useCallback((e: unknown, whatNext?: string) => {
+    const said = e instanceof Error ? e.message : String(e);
     setMessage({
       tone: "erreur",
-      text: e instanceof Error ? e.message : String(e),
+      text: whatNext ? `${said} ${whatNext}` : said,
     });
   }, []);
 
   useEffect(() => {
     (async () => {
+      // The link's own refusal outranks whatever the cookie's turn says
+      // next. Written the other way round, a 502 or a dropped connection on
+      // /api/me overwrote « ce lien n'est plus valable » with a network
+      // error, and the reader went back to their inbox to click the same
+      // dead link again.
+      let linkSaidWhy = false;
       try {
+        // The token a sign-in link carried, already out of the address bar
+        // (main.tsx) and handed over exactly once: a second mount — the
+        // outage screen recovering, StrictMode in development — gets
+        // nothing, and asks the server for nothing.
+        const token = API.consumeLinkToken();
+        if (token) {
+          try {
+            const opened = await API.redeemLink(token);
+            lastAccount.current = opened.account.email;
+            setMe(opened);
+            return;
+          } catch (e) {
+            // The API's own sentence — expired, already used, or naming an
+            // account that is no longer active, one refusal for all three —
+            // and what to do next, which its own words do not carry when
+            // the failure was a network one: the token has been taken out
+            // of the address bar by now, so the link in the inbox is the
+            // only way back.
+            report(e, "Rouvrez le lien reçu par email pour réessayer.");
+            linkSaidWhy = true;
+          }
+        }
         const restored = await API.me();
         // seeded HERE too, not only on sign-in: the scenario the guard
         // exists for — shared computer, session lost overnight, someone
@@ -92,7 +121,9 @@ export default function Team({ config }: { config: ServerConfig }) {
       } catch (e) {
         // 401 on /api/me = not signed in yet: the normal state at first
         // load, not an outage
-        if (!(e instanceof API.APIError) || e.code !== 401) report(e);
+        if (!linkSaidWhy && (!(e instanceof API.APIError) || e.code !== 401)) {
+          report(e);
+        }
       } finally {
         setReady(true);
       }
@@ -158,6 +189,11 @@ export default function Team({ config }: { config: ServerConfig }) {
       <Coquille cfg={cfg} message={message} onMessage={setMessage}>
         <Connexion
           cfg={cfg}
+          // a new attempt starts: whatever the SHELL was still saying — a
+          // spent link, an expired session — is behind us, and leaving it
+          // beside the form's own answer puts two live regions on screen
+          // contradicting each other
+          onAttempt={() => setMessage(null)}
           onSignedIn={async (m: Me) => {
             // Not the same person as before: their drafts are not yours.
             // signOut clears too, but a lost session skips signOut — and the
@@ -388,32 +424,15 @@ function Coquille({
 function Connexion({
   cfg,
   onSignedIn,
+  onAttempt,
 }: {
   cfg: ServerConfig;
   onSignedIn: (m: Me) => void;
+  onAttempt: () => void;
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  // the disclosure that opens the public team-request form, below the
+  // sign-in: whoever wants to gather a team around them has no account yet
   const [asking, setAsking] = useState(false);
-  const [busy, done] = useSubmitGuard();
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy()) return; // a REF: state is a render behind
-    setError(null);
-    setSending(true);
-    try {
-      onSignedIn(await API.signIn(email.trim(), password));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      done();
-      setSending(false);
-    }
-  };
-
   return (
     <>
       {/* The campaign's mark on the one page a volunteer reaches before the
@@ -425,41 +444,22 @@ function Connexion({
         <LogoCampagne logo={cfg.logo} className="grand" />
       </p>
       <h1>Connexion</h1>
-      <form className="carte etroite" onSubmit={submit}>
-        <Alerte message={error ? { tone: "erreur", text: error } : null} />
-        <p>
-          <label>
-            Adresse email
-            <input
-              type="text"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            Mot de passe
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-        </p>
-        <button type="submit" aria-disabled={sending || undefined}>
-          {sending ? "Connexion…" : "Se connecter"}
-        </button>
+      <FormulaireConnexion
+        magicLink={cfg.magic_link}
+        onSignedIn={onSignedIn}
+        onAttempt={onAttempt}
+      >
         <p className="gris">
-          Votre référent vous a communiqué un accès. Le mot de passe n'est
-          affiché qu'une fois à sa création : s'il est perdu, il faut en
-          regénérer un.
+          Votre référent vous a communiqué un accès.
+          {!cfg.magic_link && (
+            <>
+              {" "}
+              Le mot de passe n'est affiché qu'une fois à sa création : s'il est
+              perdu, il faut en regénérer un.
+            </>
+          )}
         </p>
-      </form>
+      </FormulaireConnexion>
       {/* The toggle SURVIVES the form it opens: a disclosure that unmounts
           itself would drop focus to <body> on the way in and on the way
           back out. */}

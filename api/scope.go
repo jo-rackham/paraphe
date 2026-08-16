@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,6 +40,9 @@ type Scope struct {
 	// a commit performed afterwards by the wrapper could no longer tell the
 	// client anything.
 	committed bool
+	// released: the connection has already gone back to the pool, and
+	// inScope's deferred close must not release it a second time.
+	released bool
 }
 
 func scopeOf(r *http.Request) *Scope {
@@ -85,13 +90,76 @@ func (s *Server) commit(r *http.Request) error {
 }
 
 func (p *Scope) close(ctx context.Context) {
+	if p.released {
+		return
+	}
 	if !p.committed {
 		// read-only, or interrupted write: rolling back is the right default
 		if err := p.Tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 			slog.Warn("transaction not rolled back", "error", err)
 		}
 	}
+	p.released = true
 	p.conn.Release()
+}
+
+// renew commits what the request has written so far and opens a fresh
+// transaction ON THE SAME CONNECTION.
+//
+// One route needs it, and the reason is worth stating because both obvious
+// alternatives are wrong. Spending a sign-in token must be FINAL the instant
+// the token is read — everything after it can fail, and a failure that rolls
+// the DELETE back hands a live link to whoever presented it. But the answer
+// still needs the account and its departments, so the request still needs a
+// transaction afterwards.
+//
+// Committing late was the first shape, and a failed commit undid the spend.
+// Taking a SECOND connection from the pool was the second, and it deadlocks:
+// the request already holds one, so enough simultaneous redemptions all wait
+// for a connection that none of them will release — measured, eight
+// concurrent redemptions against a pool of four hung until they timed out.
+// This costs nothing: the connection is already ours.
+//
+// The commit does NOT run under the request's context. Cancelling it is the
+// one failure the caller controls: closing the connection between the DELETE
+// and the commit cancels the commit, PostgreSQL rolls the DELETE back, and
+// the link just presented is live again — a replay obtained on demand, and
+// then kept for the day the account it was refused against is reactivated.
+// Detached from the cancellation, bounded on its own so a connection that
+// died for real cannot pin the transaction.
+func (s *Server) renew(r *http.Request) error {
+	p := scopeOf(r)
+	ctx, cancel := context.WithTimeout(
+		context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err := p.Tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing before continuing: %w", err)
+	}
+	tx, err := p.conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("reopening a transaction: %w", err)
+	}
+	p.Tx = tx
+	return nil
+}
+
+// release hands the connection back BEFORE the handler has finished.
+//
+// It exists for one shape: a route that has committed and then does slow
+// work with the outside world — sending an invitation through an SMTP relay,
+// bounded at 30 s. Held until the handler returns, that connection is idle
+// in the pool for the whole exchange, and pgx opens max(4, NumCPU) of them:
+// a lead opening accounts one after another while a relay drags would pin
+// them one by one, and every authenticated request would queue behind. The
+// same failure jsonOnly already describes for a dribbled request body.
+//
+// After it, s.tx(r) hands back a closed transaction — which is the point:
+// there is nothing left to query, and a query written after this should
+// fail loudly rather than half-work.
+func (s *Server) release(r *http.Request) {
+	if p := scopeOf(r); p != nil {
+		p.close(r.Context())
+	}
 }
 
 // inScope resolves the campaign and opens the transaction. Routes depending

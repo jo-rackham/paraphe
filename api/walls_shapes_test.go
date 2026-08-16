@@ -148,6 +148,189 @@ func unwalled() { run("SELECT email" + scopedFilter("anything")) }
 	}
 }
 
+// The verbs no predicate can bound, with the table NAMED and with the table
+// replaced by a marker, must both be findings.
+//
+// Three rounds running produced a critical of the same shape: a table
+// position one rule knew and its neighbour did not. `TABLE t` reached
+// sqlVerb and tableRef and not unreadableTable; a comma reached tableRef and
+// not unreadableTable; and destructiveRef knew seven verbs of which
+// unreadableTable knew none — so `"TRUNCATE "+t` and `"GRANT SELECT ON "+t`
+// read as statements touching no walled table at all.
+//
+// Both patterns are built from destructiveVerbs, and this walks that list:
+// adding a verb to the guard without teaching it its unreadable form goes
+// red here, rather than three months later in a round nobody ran.
+func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
+	for _, verb := range strings.Split(destructiveVerbs, "|") {
+		named := verb + " ACCOUNTS"
+		if !destructiveRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("destructiveRef does not know %q, so nothing refuses "+
+				"it with the table named:\n\t%s", verb, named)
+		}
+		// …and the same statement with the name taken out
+		for _, unreadable := range []string{verb + " %S", verb + " $?"} {
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("%q names a table nobody can read and no rule says "+
+					"so — the statement reads as touching no walled table:"+
+					"\n\t%s", verb, unreadable)
+			}
+		}
+	}
+	// The privilege and object-governing shapes, which name their table after
+	// an ON rather than after the verb.
+	for _, unreadable := range []string{
+		`GRANT SELECT ON %S TO PUBLIC`,
+		`REVOKE ALL ON $? FROM PARAPHE`,
+		`CREATE POLICY P ON %S USING $SUB0`,
+		`DROP POLICY P ON $?`,
+		`CREATE TRIGGER T AFTER DELETE ON %S FOR EACH ROW EXECUTE F$SUB0`,
+	} {
+		if _, found := unreadablePosition(unreadable, true); !found {
+			t.Errorf("the table this governs cannot be read and no rule says "+
+				"so:\n\t%s", unreadable)
+		}
+	}
+	// And what must NOT be a finding: a message is not a statement. `sqlVerb`
+	// lets error text through on purpose — a query hidden in a helper is
+	// still a query — and a marker is something format strings are full of,
+	// where a table NAME is not. These two are real messages from db.go, and
+	// refusing them is a false positive, which in a guard that BLOCKS costs
+	// what a hole costs.
+	for _, message := range []string{
+		`LOCK %D UNAVAILABLE AFTER %S: ANOTHER INSTANCE HOLDS IT`,
+		`TAKING LOCK %D: %W`,
+		`COPY OF THE LIST REFUSED AFTER %D ROWS`,
+	} {
+		if seen, found := unreadablePosition(message, false); found {
+			t.Errorf("an error message was refused as a statement, on %q:"+
+				"\n\t%s", seen, message)
+		}
+	}
+}
+
+// Every place a table can stand, read by BOTH rules.
+//
+// tableRef looks for a NAME there; unreadablePosition looks for a MARKER.
+// Four rounds running found a place one of them knew and the other did not —
+// the TABLE shorthand, the comma, the destructive verbs, and the ONLY
+// modifier — and each time the fix taught the one rule and each time the next
+// round found the next square of the same grid.
+//
+// So the grid is walked here. tablePositions and tableModifier are the lists
+// both rules are built from; adding a keyword or a modifier to one of them
+// without teaching the other goes red on this test, in the round that adds
+// it.
+func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
+	modifiers := []string{"", "ONLY "}
+	// The dotted prefixes a name may carry. The fifth round of this class was
+	// exactly this axis: the grid walked keyword × modifier, both rules
+	// agreed, and both were blind — `FROM public.`+t named a walled table
+	// nothing looked at, and a three-part LITERAL name escaped even the rule
+	// that reads names. A grid missing an axis certifies an agreement.
+	schemas := []string{"", "PUBLIC.", `"PUBLIC".`, "PARAPHE.PUBLIC."}
+	for _, keyword := range strings.Split(tablePositions, "|") {
+		for _, modifier := range modifiers {
+			for _, schema := range schemas {
+				named := "SELECT X " + keyword + " " + modifier + schema + "ACCOUNTS"
+				if !tableRef("ACCOUNTS").MatchString(named) {
+					t.Errorf("tableRef does not read a table after %q, so a "+
+						"walled table written there is invisible to every rule "+
+						"built on it:\n\t%s", keyword, named)
+				}
+				unreadable := "SELECT X " + keyword + " " + modifier + schema + "%S"
+				if _, found := unreadablePosition(unreadable, true); !found {
+					t.Errorf("a marker after %q is a table nobody can read and "+
+						"no rule says so:\n\t%s", keyword, unreadable)
+				}
+			}
+		}
+	}
+	// UPDATE stands apart in unreadableTable — `FOR UPDATE` ends a statement
+	// and is a locking clause, not a table position — so it is walked here
+	// rather than left out of the grid.
+	for _, modifier := range modifiers {
+		named := "UPDATE " + modifier + "ACCOUNTS SET X=1"
+		if !tableRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("tableRef does not read the table of %q", named)
+		}
+		unreadable := "UPDATE " + modifier + "%S SET X=1"
+		if _, found := unreadablePosition(unreadable, true); !found {
+			t.Errorf("a marker after UPDATE %sis a table nobody can read and "+
+				"no rule says so:\n\t%s", modifier, unreadable)
+		}
+	}
+	// …and the comma position, which tableRef has read since the day a second
+	// table hid behind one.
+	for _, modifier := range modifiers {
+		named := "SELECT X FROM TEAMS G, " + modifier + "ACCOUNTS C"
+		if !tableRef("ACCOUNTS").MatchString(named) {
+			t.Errorf("tableRef does not read the table of %q", named)
+		}
+		unreadable := "SELECT X FROM TEAMS G, " + modifier + "%S"
+		if _, found := unreadablePosition(unreadable, true); !found {
+			t.Errorf("a marker after a comma %sis a table nobody can read "+
+				"and no rule says so:\n\t%s", modifier, unreadable)
+		}
+	}
+}
+
+// A text seen at two call sites is recorded by the STRICTEST of them.
+//
+// The destructive rule judges only statements something RUNS — telling
+// `"TRUNCATE "+t` from `lock %d in progress` by their words cannot be done,
+// and whether anything executes them can. The recording deduplicates by
+// text, and it kept the FIRST call visited: one line logging the statement
+// before the line that runs it — `fmt.Errorf("about to run: %s", sql)` — and
+// the rule never ran on a TRUNCATE PostgreSQL then ran.
+//
+// On a fixture rather than on the package, because the shape has to be
+// written down to be tested and it must not ship.
+func TestATextThatIsLoggedAndThenRunCountsAsRun(t *testing.T) {
+	const src = `package main
+
+func logsThenRuns(ctx C, tx T, table string) {
+	sql := "TRUNCATE " + table
+	_ = errorf("about to run: %s", sql)
+	tx.Exec(ctx, sql)
+}
+
+func runsThenLogs(ctx C, tx T, table string) {
+	sql := "TRUNCATE " + table
+	tx.Exec(ctx, sql)
+	_ = errorf("just ran: %s", sql)
+}
+
+func onlyLogs(table string) {
+	_ = errorf("would run: %s", "TRUNCATE "+table)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	executed := map[string]bool{}
+	for _, st := range statementsIn(map[string]*ast.File{"fixture.go": file}) {
+		if strings.Contains(st.SQL, "TRUNCATE") {
+			executed[st.Func] = executed[st.Func] || st.Executed
+		}
+	}
+	for _, fn := range []string{"logsThenRuns", "runsThenLogs"} {
+		if !executed[fn] {
+			t.Errorf("%s runs the statement and it was recorded as not run: "+
+				"the rule that judges executed statements never sees it", fn)
+		}
+	}
+	// …and the other direction, or the gate would be no gate: a text nothing
+	// runs stays unexecuted, which is what keeps five ordinary error messages
+	// from being refused as SQL.
+	if executed["onlyLogs"] {
+		t.Error("a text that is only ever logged was recorded as run: the " +
+			"gate is open, and prose goes back to being refused as SQL")
+	}
+}
+
 // A rule that never runs guards nothing, and it passes its own unit test
 // while doing it. The main test drops any statement `sqlVerb` does not
 // recognise, BEFORE consulting the destructive rules — so the three verbs
@@ -225,6 +408,25 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`DELETE FROM T USING %S`,
 		`UPDATE %S SET X=1`,
 		`SELECT EMAIL FROM`, // the text ends where the table should be
+		// PostgreSQL's `TABLE t` shorthand is a table position like FROM,
+		// and it reached sqlVerb and tableRef before it reached this rule:
+		// recognised as SQL, its table unresolvable, matching nothing — the
+		// silence this whole rule exists to break, on all five walled tables
+		// at once.
+		`TABLE %S`,
+		`TABLE $?`,
+		`TABLE ,`,
+		`TABLE`,
+		`WITH X AS (TABLE $?) SELECT * FROM X`,
+		// The SECOND position of a comma list is a table position too —
+		// tableRef reads it for literals, and this rule did not check it for
+		// markers. `FROM accounts a, `+t cross-joins every campaign.
+		`SELECT X FROM ACCOUNTS A, %S N WHERE A.ORG_ID=$1`,
+		`SELECT X FROM ACCOUNTS , %S`,
+		`SELECT X FROM ACCOUNTS A, $? N`,
+		`SELECT X FROM ACCOUNTS A,`,
+		`DELETE FROM T USING ACCOUNTS A, %S`,
+		`SELECT X FROM PUBLIC.ACCOUNTS AS A, TEAMS G, %S`,
 	} {
 		if !unreadableTable.MatchString(sql) {
 			t.Errorf("the canary cannot say which table this touches, and "+
@@ -242,6 +444,27 @@ func TestAnUnreadableTableIsAFinding(t *testing.T) {
 		`SELECT A.X FROM ACCOUNTS A JOIN TEAMS T USING $SUB0`,
 		`SELECT EMAIL FROM ACCOUNTS WHERE ORG_ID=$1`,
 		`SELECT X FROM TEAMS G, ACCOUNTS C WHERE G.ORG_ID=$1 AND C.ORG_ID=$1`,
+		// TABLE followed by a name IS readable, and the DDL spellings that
+		// merely contain the word are not table positions at all. Listing
+		// TABLE among the unreadable positions must not turn the schema this
+		// application creates at startup into a finding.
+		`TABLE ACCOUNTS`,
+		`CREATE TABLE IF NOT EXISTS LOGIN_TOKENS $SUB0`,
+		`ALTER TABLE ONLY PUBLIC.ACCOUNTS ADD COLUMN X INT`,
+		`DROP TABLE IF EXISTS ACCOUNTS`,
+		`REINDEX TABLE ACCOUNTS`,
+		`GRANT SELECT ON TABLE ACCOUNTS TO SOMEONE`,
+		`ALTER DEFAULT PRIVILEGES IN SCHEMA PUBLIC GRANT SELECT ON TABLES TO PUBLIC`,
+		// A comma that is NOT in a table list. The rule walks the FROM list
+		// one reference at a time for exactly this reason: a wildcard between
+		// FROM and the comma would swallow every dynamic column in the query
+		// and refuse ordinary SQL — which sends the next author around the
+		// canary, and costs what a hole costs.
+		`SELECT ID, %S FROM T WHERE ORG_ID=$1`,
+		`SELECT X FROM ACCOUNTS ORDER BY NAME, %S`,
+		`SELECT X FROM ACCOUNTS A GROUP BY A.NAME, %S`,
+		`SELECT X FROM ACCOUNTS WHERE ORG_ID=$1 ORDER BY A, B, %S LIMIT %S`,
+		`SELECT COALESCE(A, %S) FROM ACCOUNTS WHERE ORG_ID=$1`,
 	} {
 		if loc := unreadableTable.FindStringIndex(sql); loc != nil {
 			t.Errorf("ordinary SQL refused, on %q:\n\t%s",

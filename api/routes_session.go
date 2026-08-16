@@ -31,6 +31,10 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 	if browserURL == "" && s.browserDir != "" {
 		browserURL = "/navigateur/"
 	}
+	// Whether this instance can send an email at all. Without it the screen
+	// would offer "receive a link" on an instance with no relay, and the
+	// button would refuse every time it was pressed.
+	magicLink := s.mailer != nil
 	org := orgOf(r)
 	if org == nil {
 		replyJSON(w, http.StatusOK, map[string]any{
@@ -39,6 +43,7 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 			"source_url":          s.cfg.SourceURL,
 			"browser_version_url": browserURL,
 			"campaign_keys":       CampaignKeys,
+			"magic_link":          magicLink,
 		})
 		return
 	}
@@ -66,7 +71,8 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		"departments": departments,
 		// null when the campaign has none, or when the instance has no
 		// object store: either way the header shows the hexagon alone.
-		"logo": s.logoOf(org),
+		"logo":       s.logoOf(org),
+		"magic_link": magicLink,
 		"organisation": map[string]any{
 			"slug": org.Slug, "name": org.Name,
 			// the toggle "Mon équipe" shows needs the current state
@@ -179,18 +185,52 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
-	if err := s.sessions.Set(w, email, currentOrg(r), s.now()); err != nil {
+	s.openSession(w, r, c, departments, "signin_succeeded")
+}
+
+// openSession is what happens once a caller has PROVED who they are, by
+// whichever door: the cookie, the counters, the event, the answer.
+//
+// One implementation, because the two doors must not drift. They already
+// did in the writing: the link route forgot its own attempt counter until
+// this was pulled together, and a volunteer who fumbled a password before
+// asking for a link would have carried those failures into the next window.
+//
+// The account and its departments are read by the CALLER, before it
+// commits — the transaction closes with that commit, and everything this
+// answer needs must already be in hand.
+func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
+	c *Account, departments []string, event string, extra ...any) {
+	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
 		return
 	}
-	// The attempt counter served its purpose: a signed-in account starts
+	// The attempt counters served their purpose: a signed-in account starts
 	// its next window clean, so a shared team box that fumbles a few times
-	// and then succeeds is not carrying failures towards the ceiling.
-	if subject, ok := s.signInSubjectFor(r, email); ok {
+	// and then succeeds is not carrying failures towards the ceiling. BOTH
+	// classes, whichever door was used — the two count the same subject.
+	//
+	// KNOWN LIMIT, measured and left standing on purpose: this clearing is
+	// observable. The account-keyed ceiling is one an anonymous caller can
+	// fill for an address of their choosing just by submitting it, so burning
+	// it and then polling it turns its reopening into "somebody just signed
+	// in as this address" — which names one, and the constant sentence and
+	// the decoy hash exist to refuse exactly that.
+	// TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn walks it.
+	//
+	// Removing the clearing closes the oracle and opens something worse: the
+	// ceiling counts every attempt, SUCCESSES INCLUDED, so ten legitimate
+	// sign-ins in a quarter of an hour would lock the account out of its own
+	// password. The end-to-end journeys found that within a minute. Closing
+	// both needs the ceiling to count failures only, or to refuse in the same
+	// words as a wrong password — a change to the shape of the limiter, not
+	// to this line, and one to decide rather than improvise.
+	if subject, ok := s.signInSubjectFor(r, c.Email); ok {
 		s.limiter.forget(r.Context(), limitSignInAccount, subject)
+		s.limiter.forget(r.Context(), limitMagicLinkAccount, subject)
 	}
-	s.securityEvent(r, slog.LevelInfo, "signin_succeeded",
-		"account", s.accountPseudonym(email))
+	s.securityEvent(r, slog.LevelInfo, event,
+		append([]any{"account", s.accountPseudonym(c.Email)}, extra...)...)
 	replyJSON(w, http.StatusOK, map[string]any{
 		"account":     c,
 		"departments": departments,

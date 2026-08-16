@@ -6,12 +6,14 @@ import {
   label,
   ORG_STATES,
   REQUEST_STATES,
+  useSubmitGuard,
 } from "./common.tsx";
 import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
 
 export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [deciding, decisionMade] = useSubmitGuard();
   const [reasons, setReasons] = useState<Record<number, string>>({});
   // The coordination password is returned only ONCE: it does not go back
   // to the database in the clear, and there is no way to retrieve it
@@ -20,6 +22,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     address: string;
     coordination: string;
     password: string;
+    invitation_sent?: boolean;
+    invitation_error?: string;
   } | null>(null);
 
   const load = async () => {
@@ -38,7 +42,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   }, []);
 
   const decide = async (d: QueuedRequest, decision: "accepted" | "refused") => {
-    if (busy !== null) return; // aria-disabled keeps the pair focusable
+    // A REF, because `busy` is a render behind: two clicks in the same tick
+    // run two handlers built by the same render, both read it as null, and
+    // both approve. Two campaigns open, two coordination passwords returned,
+    // and `setOpened` keeps the LAST — so the first coordinator's password,
+    // shown once and stored nowhere, is gone from the only screen it existed
+    // on. `aria-disabled` is what the pair shows; this is what guards it.
+    if (deciding()) return;
     setBusy(d.id);
     // captured BEFORE the round trip: the card leaves the queue when the
     // reload lands, not when the decision answers
@@ -50,6 +60,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           address: rep.address,
           coordination: rep.coordination,
           password: rep.password,
+          invitation_sent: rep.invitation_sent,
+          invitation_error: rep.invitation_error,
         });
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
@@ -58,6 +70,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     } catch (e) {
       onMessage({ tone: "erreur", text: (e as Error).message });
     } finally {
+      decisionMade();
       setBusy(null);
       // the decided card unmounts with the very button that decided it —
       // and it does so when `load()` above lands, which is why the focus is
@@ -74,6 +87,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
       address: rep.address,
       coordination: rep.coordination,
       password: rep.password,
+      invitation_sent: rep.invitation_sent,
+      invitation_error: rep.invitation_error,
     });
     await load();
   };
@@ -93,17 +108,39 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
         {opened
-          ? `La campagne ${opened.address} vient d'être ouverte. Le mot de ` +
-            "passe de coordination est affiché à l'écran."
+          ? `La campagne ${opened.address} vient d'être ouverte. ` +
+            (opened.invitation_sent
+              ? `Une invitation est partie à ${opened.coordination}. `
+              : "") +
+            // an invitation that did not leave changes what the
+            // administrator has to do next, sighted or not
+            (opened.invitation_error ? `${opened.invitation_error} ` : "") +
+            "Le mot de passe de coordination est affiché à l'écran."
           : ""}
       </span>
       {opened && (
         <div className="carte">
           <h2>Campagne ouverte : {opened.address}</h2>
+          {opened.invitation_sent ? (
+            <p>
+              Une invitation vient de partir à {opened.coordination} : le lien
+              qu'elle contient ouvre l'accès, sans que vous ayez à transmettre
+              quoi que ce soit.
+            </p>
+          ) : (
+            <p>
+              Transmettez ces accès à {opened.coordination}.
+              {opened.invitation_error && (
+                <>
+                  {" "}
+                  <strong>{opened.invitation_error}</strong>
+                </>
+              )}
+            </p>
+          )}
           <p>
-            Transmettez ces accès à {opened.coordination}. Le mot de passe n'est
-            affiché <strong>qu'une seule fois</strong> — il n'est stocké nulle
-            part en clair.
+            Le mot de passe n'est affiché <strong>qu'une seule fois</strong> —
+            il n'est stocké nulle part en clair.
           </p>
           <p>
             <code>{opened.password}</code>
@@ -243,10 +280,14 @@ function Creation({
   const [coordination, setCoordination] = useState("");
   const [listed, setListed] = useState(true);
   const [sending, setSending] = useState(false);
+  const [creating, created] = useSubmitGuard();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
+    // A REF: `sending` is a render behind, and this form OPENS A CAMPAIGN.
+    // Two presses in one tick create two, and the password card keeps the
+    // last of them.
+    if (creating()) return;
     setSending(true);
     try {
       await onCreate({
@@ -263,6 +304,7 @@ function Creation({
     } catch (err) {
       onMessage({ tone: "erreur", text: (err as Error).message });
     } finally {
+      created();
       setSending(false);
     }
   };

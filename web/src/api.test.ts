@@ -6,20 +6,10 @@
 // their nominative work would stay on the computer after they sign out.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dashboard, detectMode, me, SESSION_LOST } from "./api.ts";
-import type { ServerConfig } from "./types.ts";
+import { dashboard, detectMode, me, redeemLink, SESSION_LOST } from "./api.ts";
+import { instanceConfig, teamConfig } from "./testing/fixtures.ts";
 
-const CONFIG: ServerConfig = {
-  mode: "team",
-  departments: [],
-  campaign: { candidat: "Camille" },
-  batch_size: 10,
-  unfilled: [],
-  source_url: "",
-  logo: null,
-  statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
-  ranks: [{ key: "has_endorsed", label: "A déjà parrainé" }],
-};
+const CONFIG = teamConfig({ campaign: { candidat: "Camille" } });
 
 const mark = (value: string | null) => {
   document.head.innerHTML =
@@ -105,6 +95,15 @@ describe("the lost-session signal", () => {
     expect(await watch(me)).toBe(false);
   });
 
+  // Redeeming a sign-in link is asked before any session too, and its 401
+  // carries the ONE sentence a spent link has to deliver — « ce lien n'est
+  // plus valable ». Announced as an expiry, it was overwritten by « votre
+  // session a expiré », which sends the reader looking for a session they
+  // never had.
+  it("stays silent on the 401 of a spent sign-in link", async () => {
+    expect(await watch(() => redeemLink("perime"))).toBe(false);
+  });
+
   // any call that assumes an open session, however, must bring back the
   // form: without it, the screen stayed on an endless "Chargement…"
   it("signals the 401 of a call that assumes a session", async () => {
@@ -113,13 +112,7 @@ describe("the lost-session signal", () => {
 });
 
 describe("the apex of a multi-campaign instance", () => {
-  const INSTANCE = {
-    mode: "instance",
-    base_domain: "paraphe.fr",
-    source_url: "",
-    logo: null,
-    campaign_keys: ["candidat"],
-  };
+  const INSTANCE = instanceConfig({ campaign_keys: ["candidat"] });
 
   it("serves the instance landing page, not a campaign", async () => {
     mark("team");

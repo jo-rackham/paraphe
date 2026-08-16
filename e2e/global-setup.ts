@@ -17,6 +17,9 @@ import {
   MEDIA,
   mediaConfigured,
   ROOT,
+  SINK_ORIGIN,
+  SINK_PORT,
+  SMTP_PORT,
   STATIC_ORIGIN,
   STATIC_PORT,
   WORK_DIR,
@@ -169,6 +172,17 @@ export default async function globalSetup() {
 
   await refuseOccupiedPort(API_PORT, "API");
   await refuseOccupiedPort(STATIC_PORT, "static server");
+  await refuseOccupiedPort(SMTP_PORT, "SMTP sink");
+  await refuseOccupiedPort(SINK_PORT, "SMTP sink");
+
+  // Started BEFORE the API: the application checks its relay's settings at
+  // startup, and a journey that has to retry a send is a journey that hides
+  // which of the two is broken.
+  const sink = spawn(
+    "node",
+    [join(ROOT, "e2e", "smtp-sink.mjs"), String(SMTP_PORT), String(SINK_PORT)],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
 
   const api = spawn(apiBinary, [], {
     cwd: ROOT,
@@ -199,6 +213,15 @@ export default async function globalSetup() {
             PARAPHE_MEDIA_PUBLIC_URL: MEDIA.publicUrl,
           }
         : {}),
+      // No user in the URL: the sink asks for no authentication, and Go's
+      // PlainAuth would rightly refuse to hand a password to a connection
+      // with no TLS on it.
+      PARAPHE_SMTP_URL: `smtp://127.0.0.1:${SMTP_PORT}`,
+      PARAPHE_MAIL_FROM: "Paraphe <envoi@localhost>",
+      // The apex. Each campaign's subdomain is prefixed to it — which is
+      // what the journey follows, and it is a SETTING precisely so that no
+      // Host header can choose it.
+      PARAPHE_PUBLIC_URL: API_ORIGIN,
     },
   });
   const log: string[] = [];
@@ -222,7 +245,8 @@ export default async function globalSetup() {
     { stdio: ["ignore", "pipe", "pipe"] },
   );
 
-  record({ api, statics });
+  record({ api, statics, sink });
   await waitFor(`${API_ORIGIN}/health/db`, "the API");
   await waitFor(`${STATIC_ORIGIN}/index.html`, "the static server");
+  await waitFor(SINK_ORIGIN, "the SMTP sink");
 }

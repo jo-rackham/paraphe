@@ -137,7 +137,7 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 	me := accountOf(r)
 	email := normalizeEmail(d.Email)
 	name := strings.TrimSpace(d.Name)
-	if email == "" || !strings.Contains(email, "@") || name == "" {
+	if email == "" || !storableEmail(email) || name == "" {
 		errorJSON(w, http.StatusBadRequest, "Nom et adresse email sont requis.")
 		return
 	}
@@ -147,6 +147,16 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(email) > maxEmailRunes {
 		errorJSON(w, http.StatusBadRequest,
 			"Cette adresse email est trop longue (254 caractères maximum).")
+		return
+	}
+	// The name is bounded like every other name this application stores — a
+	// team's, a campaign's, a requester's. This route was the one that was
+	// not, and it is the one that WRITES A PERSON: 128 KiB of body per
+	// request against a ceiling of 120 writes a minute puts megabytes into an
+	// unindexed column, and no other ceiling stands between.
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom ne doit pas dépasser 200 caractères.")
 		return
 	}
 
@@ -198,12 +208,37 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// Minted in the SAME transaction as the account: an invitation whose
+	// account rolled back opens nothing, and an account whose token vanished
+	// is a volunteer nobody wrote to.
+	token, err := s.mintInvitation(r.Context(), s.tx(r), scopeOrg(r), email)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
 	}
-	replyJSON(w, http.StatusCreated, map[string]any{
-		"email": email, "name": name, "role": role, "password": password})
+	// The database is done with; the relay may take thirty seconds, and a
+	// pool connection has no business waiting on it.
+	s.release(r)
+	// Sent once the account exists, and its outcome is told: the caller is
+	// authenticated and created this account, so there is no existence left
+	// to protect here. The password stays in the answer either way — relay
+	// down, the lead reads it out as they always have.
+	sent, warning := s.sendInvitation(invitation{
+		email: email, name: name, by: me.Name, campaign: campaignName(r),
+		slug: campaignSlug(r), token: token,
+	})
+	reply := map[string]any{
+		"email": email, "name": name, "role": role, "password": password,
+		"invitation_sent": sent,
+	}
+	if warning != "" {
+		reply["invitation_error"] = warning
+	}
+	replyJSON(w, http.StatusCreated, reply)
 }
 
 // POST /api/team/account/{email}/active — activates or deactivates an
