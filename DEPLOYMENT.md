@@ -131,8 +131,13 @@ the others.
   the key ending in a digest of the content — so a bucket restored from an
   older copy is detectable rather than silent. Putting the copy back is
   `task restore-media DOSSIER=media-2026-08-15`, which ADDS and never
-  deletes: the keys carry a digest, so a copy from yesterday cannot
-  overwrite a logo uploaded since. In Docker:
+  deletes: the keys are unique, so a copy from yesterday cannot overwrite a
+  logo uploaded since. **Restore with that task and not with a plain
+  `rclone copy`**: an object is not only its bytes, and the copy carries
+  neither the `Content-Disposition: attachment` an SVG is stored with — the
+  header that stops a hostile one from being a page on the media origin —
+  nor its `Cache-Control`. The task puts both back, which is why it makes
+  two passes. In Docker:
   `docker compose exec postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql`
   In Kubernetes, enable `postgres.cnpg.backup.*`: the chart then sets up WAL
   archiving **and** a daily `ScheduledBackup`. Both are needed — WAL archiving

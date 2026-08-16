@@ -120,14 +120,33 @@ tasks:
       - |
         set -eu
         dest="media-$(date +%F)"
-        docker run --rm --network paraphe_default \
+        # Task ne lit pas .env — compose le fait, Task non. Sans ça rclone
+        # signe avec une clé vide et Garage répond « anonymous access », ce
+        # qui se lit comme un stockage mal configuré plutôt que comme un
+        # secret que la tâche n'a pas vu. Même forme que `task deploy` :
+        # l'environnement l'emporte, .env comble.
+        acces="${PARAPHE_MEDIA_ACCESS_KEY:-}"
+        secret="${PARAPHE_MEDIA_SECRET_KEY:-}"
+        if [ -f .env ]; then
+          [ -n "$acces" ] || acces=$(grep -E '^PARAPHE_MEDIA_ACCESS_KEY=.+' .env | tail -1 | cut -d= -f2- || true)
+          [ -n "$secret" ] || secret=$(grep -E '^PARAPHE_MEDIA_SECRET_KEY=.+' .env | tail -1 | cut -d= -f2- || true)
+        fi
+        if [ -z "$acces" ] || [ -z "$secret" ]; then
+          echo "PARAPHE_MEDIA_ACCESS_KEY et PARAPHE_MEDIA_SECRET_KEY sont introuvables," >&2
+          echo "ni dans l'environnement ni dans .env : le stockage refuserait la copie." >&2
+          exit 1
+        fi
+        # Le nom du réseau suit le nom du projet compose, qui suit le nom du
+        # dossier : cloné dans paraphe-prod, `paraphe_default` n'existe pas
+        # et la tâche échoue sur un message qui parle de réseau docker.
+        docker run --rm --network "${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}_default" \
           -v "$PWD/$dest:/sortie" \
           -e RCLONE_CONFIG_S3_TYPE=s3 \
           -e RCLONE_CONFIG_S3_PROVIDER=Other \
           -e RCLONE_CONFIG_S3_REGION="${PARAPHE_MEDIA_REGION:-garage}" \
           -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
-          -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="${PARAPHE_MEDIA_ACCESS_KEY:-}" \
-          -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="${PARAPHE_MEDIA_SECRET_KEY:-}" \
+          -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="$acces" \
+          -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="$secret" \
           rclone/rclone:1.71 copy "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}" /sortie
         echo "logos copiés dans $dest/"
 
@@ -138,22 +157,66 @@ tasks:
     #
     # `copy` et non `sync` : sync SUPPRIME dans le seau tout ce que la copie
     # n'a pas, donc restaurer une copie d'hier effacerait les logos
-    # téléversés depuis. Les clés portent un condensé du contenu, elles ne
-    # se télescopent pas — ajouter suffit.
+    # téléversés depuis. Les clés sont uniques, elles ne se télescopent
+    # pas — ajouter suffit.
+    #
+    # DEUX PASSES, parce qu'un objet n'est pas que des octets. L'application
+    # écrit ses SVG avec `Content-Disposition: attachment`, et c'est ce qui
+    # ferme la classe « un SVG passé au travers du validateur est une page
+    # sur l'origine média ». Une copie ne transporte pas cet en-tête :
+    # mesuré, l'objet restauré revient avec son seul Content-Type, et la
+    # navigation directe l'OUVRE. `--metadata` n'y change rien — rclone ne
+    # garde que le type dans un attribut étendu, et encore, quand le système
+    # de fichiers en porte. Les en-têtes sont donc REPOSÉS ici, et
+    # l'extension suffit à savoir lesquels : elle est écrite par le serveur
+    # à partir des octets qu'il a validés.
     cmds:
       - |
         set -eu
         : "${DOSSIER:?donnez le dossier à restaurer, par exemple DOSSIER=media-2026-08-16}"
+        # Task ne lit pas .env — compose le fait, Task non. Sans ça rclone
+        # signe avec une clé vide et Garage répond « anonymous access », ce
+        # qui se lit comme un stockage mal configuré plutôt que comme un
+        # secret que la tâche n'a pas vu. Même forme que `task deploy` :
+        # l'environnement l'emporte, .env comble.
+        acces="${PARAPHE_MEDIA_ACCESS_KEY:-}"
+        secret="${PARAPHE_MEDIA_SECRET_KEY:-}"
+        if [ -f .env ]; then
+          [ -n "$acces" ] || acces=$(grep -E '^PARAPHE_MEDIA_ACCESS_KEY=.+' .env | tail -1 | cut -d= -f2- || true)
+          [ -n "$secret" ] || secret=$(grep -E '^PARAPHE_MEDIA_SECRET_KEY=.+' .env | tail -1 | cut -d= -f2- || true)
+        fi
+        if [ -z "$acces" ] || [ -z "$secret" ]; then
+          echo "PARAPHE_MEDIA_ACCESS_KEY et PARAPHE_MEDIA_SECRET_KEY sont introuvables," >&2
+          echo "ni dans l'environnement ni dans .env : le stockage refuserait la copie." >&2
+          exit 1
+        fi
         test -d "$DOSSIER" || { echo "$DOSSIER n'existe pas" >&2; exit 1; }
-        docker run --rm --network paraphe_default \
-          -v "$PWD/$DOSSIER:/source:ro" \
-          -e RCLONE_CONFIG_S3_TYPE=s3 \
-          -e RCLONE_CONFIG_S3_PROVIDER=Other \
-          -e RCLONE_CONFIG_S3_REGION="${PARAPHE_MEDIA_REGION:-garage}" \
-          -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
-          -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="${PARAPHE_MEDIA_ACCESS_KEY:-}" \
-          -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="${PARAPHE_MEDIA_SECRET_KEY:-}" \
-          rclone/rclone:1.71 copy /source "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}"
+        # Une copie des logos porte un dossier logos/. Sans ce contrôle, un
+        # dossier vide ou le mauvais chemin rendait 0 et annonçait « logos
+        # restaurés » — le pire retour possible pendant un incident.
+        test -d "$DOSSIER/logos" || {
+          echo "$DOSSIER ne ressemble pas à une sauvegarde des logos :" \
+            "il n'y a pas de dossier logos/ dedans" >&2
+          exit 1
+        }
+        reseau="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}_default"
+        remettre () {
+          docker run --rm --network "$reseau" \
+            -v "$PWD/$DOSSIER:/source:ro" \
+            -e RCLONE_CONFIG_S3_TYPE=s3 \
+            -e RCLONE_CONFIG_S3_PROVIDER=Other \
+            -e RCLONE_CONFIG_S3_REGION="${PARAPHE_MEDIA_REGION:-garage}" \
+            -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
+            -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="$acces" \
+            -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="$secret" \
+            rclone/rclone:1.71 copy /source \
+            "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}" \
+            --header-upload 'Cache-Control: public, max-age=31536000, immutable' \
+            "$@"
+        }
+        remettre --exclude '*.svg'
+        remettre --include '*.svg' \
+          --header-upload 'Content-Disposition: attachment'
         echo "logos restaurés depuis $DOSSIER/"
 
   restore:
