@@ -328,18 +328,44 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	response := map[string]any{"id": id, "decision": d.Decision}
+	var invitationToken string
 	if d.Decision == RequestAccepted {
+		// The row was written by a public form and is read back HERE to open
+		// an account from it. Hardening that form does not harden what is
+		// already in the table, and rows filed before it are still pending on
+		// a live instance: one can carry an address that renders as somebody
+		// else's, which then becomes a primary key nobody can correct. This
+		// is the last place it can be caught, and refusing the request is
+		// still open to the coordination.
+		if !storableEmail(requesterEmail) || !legible(requesterEmail) ||
+			!visible(requesterName) || !legible(requesterName) {
+			errorJSON(w, http.StatusConflict,
+				"Cette demande a été enregistrée avant que la saisie ne soit "+
+					"durcie : son adresse ou son nom ne peuvent pas ouvrir de "+
+					"compte. Refusez-la en l'expliquant.")
+			return
+		}
 		if d.Name != nil {
-			if name = strings.TrimSpace(*d.Name); name == "" {
-				errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
-				return
-			}
+			name = strings.TrimSpace(*d.Name)
 			if utf8.RuneCountInString(name) > maxNameRunes {
 				errorJSON(w, http.StatusBadRequest,
 					"Le nom de l'équipe ne doit pas dépasser 200 caractères.")
 				return
 			}
 		}
+		// Whether it was edited here or read from the row, this name becomes
+		// `teams.name` and every volunteer of the campaign reads it.
+		if !visible(name) {
+			errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
+			return
+		}
+		if !legible(name) {
+			errorJSON(w, http.StatusBadRequest,
+				"Le nom de l'équipe ne doit contenir ni retour à la ligne ni "+
+					"caractère invisible.")
+			return
+		}
+
 		perimeter := splitDepartments(departments)
 		if d.Departments != nil {
 			corrected, unknown, err := s.knownDepartments(r, d.Departments)
@@ -395,6 +421,19 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 			s.failure(w, err)
 			return
 		}
+		// Minted in the SAME transaction as the account: an invitation whose
+		// account rolled back opens nothing, and an account whose token
+		// vanished is a lead nobody wrote to. Without it, the password shown
+		// once in this answer was the ONLY way in — a closed tab and the team
+		// had a lead who could never sign in. The direct creation of an
+		// access and the hosting approval both send one; this door did not,
+		// because it was written before there was a relay to send with.
+		invitationToken, err = s.mintInvitation(ctx, s.tx(r), scopeOrg(r),
+			requesterEmail)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
 		response["team"] = teamID
 		response["name"] = name
 		response["departments"] = perimeter
@@ -417,6 +456,23 @@ func (s *Server) routeDecideTeamRequest(w http.ResponseWriter, r *http.Request) 
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
+	}
+	if invitationToken != "" {
+		// The database is done with; the relay may take thirty seconds, and a
+		// pool connection has no business waiting on it.
+		s.release(r)
+		// Sent once the account exists, and its outcome is told. The password
+		// stays in the answer either way — relay down, the coordination reads
+		// it out as it always has.
+		sent, warning := s.sendInvitation(invitation{
+			email: requesterEmail, name: requesterName, by: me.Name,
+			campaign: campaignName(r), slug: campaignSlug(r),
+			token: invitationToken,
+		})
+		response["invitation_sent"] = sent
+		if warning != "" {
+			response["invitation_error"] = warning
+		}
 	}
 	// the team name is the campaign's own vocabulary, not a person; the
 	// requester and the moderator are pseudonyms, like every account in

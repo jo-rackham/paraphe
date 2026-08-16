@@ -539,6 +539,134 @@ func TestTheTeamRequestQueueIsTheCoordinationsAlone(t *testing.T) {
 
 // Accepting: the team AND its lead, in one stroke, under the name and the
 // perimeter the coordination settled on — not necessarily the ones asked for.
+// Accepting a request opens an account, and an account nobody can be told
+// about is an account nobody enters. The password comes back ONCE, in this
+// answer: a closed tab was the whole story, and the coordination's only
+// recourse was to open the access again. The direct creation of an access and
+// the hosting approval both send an invitation; this door was written before
+// there was a relay to send with, and it did not.
+func TestAcceptingATeamRequestInvitesTheLeadItJustOpened(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	mails := withMailer(t, s, "https://campagne.exemple.fr")
+	org := orgID(t, s, testSlug)
+	password := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+
+	if code, body := newClient(t, srv).call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe du 01", "01")); code != http.StatusCreated {
+		t.Fatalf("the public form: %d %v", code, body)
+	}
+	id := scalar[int64](t, s, "SELECT id FROM team_requests WHERE org_id=$1", org)
+
+	coord := newClient(t, srv)
+	if code := coord.signIn("coord@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	code, body := coord.call(http.MethodPost, fmt.Sprintf("/api/team/requests/%d", id),
+		map[string]any{"decision": RequestAccepted})
+	if code != http.StatusOK {
+		t.Fatalf("accepting: %d %v", code, body)
+	}
+	if body["invitation_sent"] != true {
+		t.Errorf("invitation_sent = %v: the lead was opened and never written to",
+			body["invitation_sent"])
+	}
+	// and the password stays, deliberately: the relay may be down tomorrow,
+	// and reading it out is the path that has always worked
+	if p, _ := body["password"].(string); p == "" {
+		t.Error("the one-time password left the answer")
+	}
+
+	sent := mails.only(t)
+	if sent.to != requesterAddress {
+		t.Fatalf("the invitation went to %q, not to the person who asked", sent.to)
+	}
+	if !strings.Contains(sent.body, "/connexion#jeton=") {
+		t.Errorf("the invitation carries no link:\n%s", sent.body)
+	}
+}
+
+// Hardening the FORM hardens what it writes from now on, and nothing that is
+// already in the table. Rows filed before it are still pending on a live
+// instance, and this is the only place left to catch one: the address becomes
+// the account's primary key, so a moderator who accepts it opens a login
+// nobody can ever type. Refusing the request stays open.
+func TestAcceptingARowFiledBeforeTheGuardsRefusesRatherThanOpensIt(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	password := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+
+	// written straight to the table, as the form used to allow: the address
+	// reads as « ancienne@exemple.fr » and is stored as something else
+	execAsMaintenance(t, s,
+		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+
+			"requester_name, message, state, ts) "+
+			"VALUES($1,'Équipe ancienne','01',$2,'Qui','','pending','2026-01-01T00:00')",
+		org, "ancienne\u200b@exemple.fr")
+	id := scalar[int64](t, s, "SELECT id FROM team_requests WHERE org_id=$1", org)
+
+	coord := newClient(t, srv)
+	if code := coord.signIn("coord@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	code, body := coord.call(http.MethodPost, fmt.Sprintf("/api/team/requests/%d", id),
+		map[string]any{"decision": RequestAccepted})
+	if code != http.StatusConflict {
+		t.Fatalf("accepting a row written before the guards: %d %v, want 409",
+			code, body)
+	}
+	// asserted on the CODE first: a handler answering 409 writes nothing, and
+	// « no account exists » would hold for that reason alone
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM accounts WHERE org_id=$1 AND "+
+		"email LIKE 'ancienne%'", org); n != 0 {
+		t.Errorf("%d account(s) opened on an address nobody can type", n)
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM teams WHERE org_id=$1", org); n != 0 {
+		t.Errorf("%d team(s) opened for a request that was refused", n)
+	}
+	// and the request is untouched, so the coordination can still refuse it
+	if st := scalar[string](t, s, "SELECT state FROM team_requests WHERE id=$1",
+		id); st != RequestPending {
+		t.Errorf("the request is %q: it must stay refusable", st)
+	}
+}
+
+// The coordination EDITS the name as it accepts, and that name becomes
+// `teams.name`, read by every volunteer of the campaign. The public form
+// checks it; this door did not.
+func TestTheEditedTeamNameIsReadLikeTheSubmittedOne(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	password := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+
+	if code, body := newClient(t, srv).call(http.MethodPost, "/api/team/request",
+		teamRequestBody("Équipe du 01", "01")); code != http.StatusCreated {
+		t.Fatalf("the public form: %d %v", code, body)
+	}
+	id := scalar[int64](t, s, "SELECT id FROM team_requests WHERE org_id=$1", org)
+
+	coord := newClient(t, srv)
+	if code := coord.signIn("coord@exemple.fr", password); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	for _, probe := range []struct{ what, name string }{
+		{"a right-to-left override", "Équipe\u202edroN ud"},
+		{"nothing visible at all", "\u200b\u2060"},
+	} {
+		code, body := coord.call(http.MethodPost,
+			fmt.Sprintf("/api/team/requests/%d", id),
+			map[string]any{"decision": RequestAccepted, "name": probe.name})
+		if code != http.StatusBadRequest {
+			t.Errorf("%s in the edited name: %d %v, want 400", probe.what, code, body)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM teams WHERE org_id=$1", org); n != 0 {
+		t.Fatalf("%d team(s) opened under a name the volunteers cannot read", n)
+	}
+}
+
 func TestAcceptingATeamRequestOpensTheTeamAndItsLead(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 3, "01")

@@ -385,6 +385,20 @@ func (s *Server) routeDecideHosting(w http.ResponseWriter, r *http.Request) {
 			s.failure(w, err)
 			return
 		}
+		// The row was written by a public form and is read back HERE to open a
+		// coordination account from it. Hardening that form does not harden what
+		// is already in the table, and rows filed before it are still pending on
+		// a live instance: one can carry an address that renders as somebody
+		// else's, which then becomes a primary key nobody can correct. Refusing
+		// the request stays open to the administrator.
+		if !storableEmail(requesterEmail) || !legible(requesterEmail) ||
+			!visible(requesterName) || !legible(requesterName) {
+			errorJSON(w, http.StatusConflict,
+				"Cette demande a été enregistrée avant que la saisie ne soit "+
+					"durcie : son adresse ou son nom ne peuvent pas ouvrir de "+
+					"compte. Refusez-la en l'expliquant.")
+			return
+		}
 		// EMPTY, whatever the request carried: what the administrator
 		// approved is a name and an address, not an identity. Reading the
 		// submitted values back here would open a campaign under a candidate
@@ -477,10 +491,18 @@ func (s *Server) routeCreateCampaign(w http.ResponseWriter, r *http.Request) {
 				"chiffres et tirets, et ne pas être un nom réservé : %q.", slug)
 		return
 	}
-	if name == "" || coordination == "" || !storableEmail(email) {
+	if !visible(name) || !visible(coordination) || !storableEmail(email) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom de la campagne, ainsi que le nom et l'adresse email du "+
 				"compte de coordination, sont requis.")
+		return
+	}
+	// the campaign name goes on the apex's PUBLIC directory, and the
+	// coordination's name on its own screens: same reading as the form above
+	if !legible(name) || !legible(coordination) || !legible(email) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de la campagne, votre nom et l'adresse email ne doivent "+
+				"contenir ni retour à la ligne ni caractère invisible.")
 		return
 	}
 	if utf8.RuneCountInString(email) > maxEmailRunes {
