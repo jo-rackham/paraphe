@@ -708,13 +708,26 @@ var queryCalls = map[string]bool{
 func localScopeVariants(
 	values map[string]string, fn *ast.FuncDecl,
 ) []map[string]string {
-	assigns := func(n ast.Node) bool {
+	// A branch BINDS a name — by assigning it, or by declaring one that
+	// shadows it. The THIRD pass that has to know about declarations, and the
+	// one the round that taught the other two forgot: a branch shadowing with
+	// `const sql = "…walled…"` produced no variant at all, so no
+	// branch-not-taken was read, and the sequential pass — ast.Inspect visits
+	// in source order and knows no block scope — overwrote the outer text
+	// with the branch's. The canary then judged the statement the driver runs
+	// by a decoy it never runs, in both directions: an unbounded outer passed
+	// behind a bounded decoy, and a bounded outer was refused behind a dead
+	// unbounded one. The same shape written `sql = "…"` was caught throughout.
+	binds := func(n ast.Node) bool {
 		found := false
 		ast.Inspect(n, func(x ast.Node) bool {
 			if a, ok := x.(*ast.AssignStmt); ok && len(a.Lhs) == 1 {
 				if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
 					found = true
 				}
+			}
+			if len(declaredNames(x)) > 0 {
+				found = true
 			}
 			return true
 		})
@@ -769,7 +782,7 @@ func localScopeVariants(
 		}
 		var assigning []ast.Node
 		for _, b := range branches {
-			if assigns(b) {
+			if binds(b) {
 				assigning = append(assigning, b)
 			}
 		}

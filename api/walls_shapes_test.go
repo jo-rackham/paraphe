@@ -419,6 +419,60 @@ func shadowsThePackage() {
 	}
 }
 
+// A branch that DECLARES is a path of its own, like a branch that assigns.
+//
+// localScopeVariants enumerates one reading per path, so a wall added inside
+// a branch cannot vouch for the path that skips it. It counted ASSIGNMENTS
+// only — and the round that taught the reader about declarations taught the
+// forgetting pass and the learning pass, not this third one. A branch
+// shadowing with `const sql = "…org_id = $1…"` produced no variant at all, so
+// no branch-not-taken was read; the sequential pass, which visits in source
+// order and knows no block scope, then overwrote the outer text with the
+// branch's. The canary judged the statement the driver runs by a decoy it
+// never runs, and an unbounded outer passed behind a bounded one. Written
+// `sql = "…"`, the same shape was caught throughout.
+func TestABranchThatDeclaresIsAPathOfItsOwn(t *testing.T) {
+	const src = `package main
+
+func shadowsInABranch(cond bool) {
+	sql := "SELECT id, note FROM notes"
+	if cond {
+		const sql = "SELECT id, note FROM notes WHERE org_id = $1"
+		_ = sql
+	}
+	run(sql)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the fixture: %v", err)
+	}
+	files := map[string]*ast.File{"fixture.go": file}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("no function in the fixture")
+	}
+	// the reading the driver executes when the branch is not taken must be
+	// among the variants, or nothing ever judges it
+	var read []string
+	for _, scope := range localScopeVariants(stringValues(files), fn) {
+		sql := strings.ToUpper(scope["sql"])
+		read = append(read, sql)
+		if strings.Contains(sql, "NOTES") && !strings.Contains(sql, "ORG_ID") {
+			return
+		}
+	}
+	t.Errorf("no variant reads the statement the driver runs when the branch "+
+		"is skipped, so a declaration inside it vouched for the path that "+
+		"never executes it; what was read: %q", read)
+}
+
 // A procedural body is refused whatever leads it.
 //
 // `DO $$…$$` is the one shape no rule after it can read: stripDollarQuoted

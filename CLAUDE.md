@@ -326,9 +326,21 @@ One instance can host several campaigns, one per subdomain.
   direction: a local `const` hiding a package binding made the canary judge a
   DIFFERENT statement than the one that runs. A `const` holding half a
   statement is this package's own idiom. Whoever teaches the reader a new way
-  a name gets its value teaches BOTH the forgetting pass and the learning
-  pass; `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var and
-  the shadow.
+  a name gets its value teaches **all THREE passes** — the one that forgets,
+  the one that learns back, and the one that ENUMERATES THE PATHS. The round
+  that taught the first two left the third counting assignments only, so a
+  branch shadowing with `const sql = "…org_id = $1…"` produced no variant, no
+  branch-not-taken was ever read, and the sequential pass — which visits in
+  source order and knows no block scope — overwrote the outer text with the
+  branch's: the canary judged the statement the driver runs by a decoy it
+  never runs, and an unbounded outer passed behind a bounded one. Written
+  `sql = "…"`, that shape was caught throughout.
+  **Assumed, and the safe direction**: a nested declaration shadowing an
+  outer SQL name is read on BOTH paths, so a dead unbounded decoy beside a
+  bounded statement is refused. The canary cannot tell inside a block from
+  outside it; refusing loudly beats passing in silence, and the remedy is to
+  rename. `TestAStatementBuiltFromALocalDeclarationIsRead` walks const, var
+  and the shadow; `TestABranchThatDeclaresIsAPathOfItsOwn` walks the branch.
   `walledTables` does not verify itself: `TestEveryPerCampaignTableIsWalled`
   asks the database which tables carry an `org_id` column and requires the
   list to match.
