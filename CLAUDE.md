@@ -294,6 +294,14 @@ One instance can host several campaigns, one per subdomain.
   statements. What separates them is not their text, it is whether anything
   runs them. `readsNoWalledTable` is still EMPTY, and keeping it so is the
   measure of whether these rules judge statements or prose.
+  **A statement starts after a SEMICOLON as well as at the beginning**, and
+  the rule refusing a procedural body knew only the second: `SELECT 1; DO $$
+  BEGIN TRUNCATE notes; END $$` walked past it, past `sqlVerb` — which
+  searches anywhere and found the SELECT — and past every rule after, because
+  `stripDollarQuoted` had already emptied the body and left no TRUNCATE to
+  see. pgx runs it: measured, two campaigns' rows to none. Anchored `(?:^|;)`
+  like the destructive rule, and `TestAProceduralBodyIsRefusedWhateverLeadsIt`
+  walks every verb `sqlVerb` knows in front of one.
   **A FOURTH round found the fourth square of the same grid** — the `ONLY`
   modifier, which `tableRef` read and `unreadableTable` did not. So the grid
   itself is now the guard: `tablePositions` and `tableModifier` are declared
