@@ -44,3 +44,21 @@ export const INSTANCE_ADMIN = {
 export const DB_NAME = "paraphe_e2e";
 export const DB_ROLE = "paraphe_e2e_app";
 export const DB_PASSWORD = "paraphe_e2e";
+
+/**
+ * The object store holding the campaign logos, when one was given —
+ * `task garage` prints exactly these, prefixed PARAPHE_TEST_MEDIA_*.
+ *
+ * Absent, the API runs WITHOUT a store, which is a supported state and the
+ * one most of this suite wants: the logo spec then skips, out loud. Same
+ * shape as the database, which also comes from the environment.
+ */
+export const MEDIA = {
+  endpoint: (process.env.PARAPHE_TEST_MEDIA_ENDPOINT ?? "").trim(),
+  bucket: (process.env.PARAPHE_TEST_MEDIA_BUCKET ?? "").trim(),
+  accessKey: (process.env.PARAPHE_TEST_MEDIA_ACCESS_KEY ?? "").trim(),
+  secretKey: (process.env.PARAPHE_TEST_MEDIA_SECRET_KEY ?? "").trim(),
+  publicUrl: (process.env.PARAPHE_TEST_MEDIA_PUBLIC_URL ?? "").trim(),
+};
+
+export const mediaConfigured = () => MEDIA.endpoint !== "";

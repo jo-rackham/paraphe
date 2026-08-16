@@ -376,6 +376,34 @@ describe("the deployment files", () => {
     ]) {
       expect(go, `${header} is no longer set`).toContain(header);
     }
+
+    // The images directive moved OUT of the literal the day the campaign
+    // logos began being served by the object store's own origin: it is
+    // assembled at startup from PARAPHE_MEDIA_PUBLIC_URL. So the literal no
+    // longer carries it, and this is what still says it exists.
+    expect(
+      go,
+      "img-src is no longer declared: the policy above passes without it, " +
+        "and every campaign logo would be refused by the browser",
+    ).toContain("img-src 'self' data:");
+
+    // …and the media origin reaches THAT directive and no other. Widened
+    // into default-src or script-src it stops being a place images come
+    // from and becomes a place code can.
+    const assembled =
+      /func contentSecurityPolicy\(media string\) string \{([\s\S]*?)\n\}/.exec(
+        go,
+      );
+    expect(
+      assembled,
+      "contentSecurityPolicy is no longer where this test " + "reads it",
+    ).toBeTruthy();
+    const uses = [...assembled![1].matchAll(/\bmedia\b/g)].length;
+    expect(
+      uses,
+      "the media origin is read more than once in the policy: it belongs to " +
+        "img-src alone",
+    ).toBe(2); // the `if media != ""` guard, and the append beside it
   });
 
   // The interface picks its mode at load: an API answers /api/config → team

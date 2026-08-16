@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as API from "./api.ts";
 import {
+  ChampLogo,
   ChampsCampagne,
   campaignLabel,
   focusContenu,
@@ -30,6 +31,7 @@ function ConfigurationCampagne({
   const [batchSize, setBatchSize] = useState(String(cfg.batch_size));
   const [listed, setListed] = useState(cfg.organisation?.listed ?? true);
   const [sending, setSending] = useState(false);
+  const [logoSending, setLogoSending] = useState(false);
   const [busy, done] = useSubmitGuard();
 
   const save = async (e: React.FormEvent) => {
@@ -77,6 +79,39 @@ function ConfigurationCampagne({
         values={values}
         groupe="h3"
         onEdit={(key, value) => setValues({ ...values, [key]: value })}
+      />
+      {/* Sent on its own, the moment a file is chosen, and NOT with the
+          form: the campaign body already fills most of what a request may
+          carry, and a volunteer who picks a logo then leaves the page
+          without pressing "Enregistrer" has still chosen one. */}
+      <ChampLogo
+        logo={cfg.logo?.url ?? ""}
+        occupe={logoSending}
+        onErreur={(text) => onMessage({ tone: "erreur", text })}
+        onChoisi={async (dataUri) => {
+          setLogoSending(true);
+          try {
+            const r = await API.uploadLogo(dataUri);
+            onCfg({ ...cfg, logo: r.logo });
+            onMessage({ tone: "ok", text: "Logo enregistré." });
+          } catch (err) {
+            onError(err);
+          } finally {
+            setLogoSending(false);
+          }
+        }}
+        onRetire={async () => {
+          setLogoSending(true);
+          try {
+            await API.removeLogo();
+            onCfg({ ...cfg, logo: null });
+            onMessage({ tone: "ok", text: "Logo retiré." });
+          } catch (err) {
+            onError(err);
+          } finally {
+            setLogoSending(false);
+          }
+        }}
       />
       <p>
         <label>

@@ -14,6 +14,8 @@ import {
   DB_ROLE,
   FIRST_CAMPAIGN,
   INSTANCE_ADMIN,
+  MEDIA,
+  mediaConfigured,
   ROOT,
   STATIC_ORIGIN,
   STATIC_PORT,
@@ -185,6 +187,18 @@ export default async function globalSetup() {
       PARAPHE_INSTANCE_ADMIN_EMAIL: INSTANCE_ADMIN.email,
       PARAPHE_INSTANCE_ADMIN_PASSWORD: INSTANCE_ADMIN.password,
       PARAPHE_SECRET_KEY: "e2e-session-key-0123456789abcdef0123456789abcdef",
+      // Passed through only when the run was given a store. Half of these
+      // would fail the API's start, which is the point of that refusal —
+      // so it is all five or none, exactly as an operator faces it.
+      ...(mediaConfigured()
+        ? {
+            PARAPHE_MEDIA_ENDPOINT: MEDIA.endpoint,
+            PARAPHE_MEDIA_BUCKET: MEDIA.bucket,
+            PARAPHE_MEDIA_ACCESS_KEY: MEDIA.accessKey,
+            PARAPHE_MEDIA_SECRET_KEY: MEDIA.secretKey,
+            PARAPHE_MEDIA_PUBLIC_URL: MEDIA.publicUrl,
+          }
+        : {}),
     },
   });
   const log: string[] = [];

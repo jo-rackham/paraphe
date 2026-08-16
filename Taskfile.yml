@@ -103,6 +103,32 @@ tasks:
       - test -s backup-$(date +%F).sql.partiel
       - mv backup-$(date +%F).sql.partiel backup-$(date +%F).sql
       - echo "écrit dans backup-$(date +%F).sql"
+      # Dit ici, pas dans un runbook : la base n'est plus la seule chose que
+      # l'instance porte depuis que les campagnes ont un logo.
+      - 'echo "les logos de campagne vivent dans le stockage objet : task backup-media"'
+
+  backup-media:
+    desc: Sauvegarde les logos de campagne (stockage objet)
+    # Beaucoup moins grave qu'un dump manqué : une campagne re-téléverse son
+    # logo en trente secondes. Mais la base n'est PLUS la seule donnée de
+    # l'instance, et une tâche qui n'existe pas est une tâche que personne
+    # ne lance.
+    #
+    # rclone plutôt que mc : un binaire, aucune configuration persistante,
+    # et il parle S3 à Garage comme à n'importe quel fournisseur.
+    cmds:
+      - |
+        set -eu
+        dest="media-$(date +%F)"
+        docker run --rm --network paraphe_default \
+          -v "$PWD/$dest:/sortie" \
+          -e RCLONE_CONFIG_S3_TYPE=s3 \
+          -e RCLONE_CONFIG_S3_PROVIDER=Other \
+          -e RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 \
+          -e RCLONE_CONFIG_S3_ACCESS_KEY_ID="${PARAPHE_MEDIA_ACCESS_KEY:-}" \
+          -e RCLONE_CONFIG_S3_SECRET_ACCESS_KEY="${PARAPHE_MEDIA_SECRET_KEY:-}" \
+          rclone/rclone:1.71 copy "s3:${PARAPHE_MEDIA_BUCKET:-paraphe-media}" /sortie
+        echo "logos copiés dans $dest/"
 
   restore:
     desc: 'Restaure la base depuis un dump — ex : task restore -- backup-2026-08-15.sql'
@@ -279,6 +305,45 @@ tasks:
       - 'if [ -f .env ]; then echo "base démarrée — DSN selon votre .env"; else echo "PARAPHE_DATABASE_URL=postgresql://paraphe:paraphe@127.0.0.1:5432/paraphe"; fi'
       - 'if [ -f .env ]; then echo "valkey démarré — mot de passe selon votre .env"; else echo "PARAPHE_VALKEY_URL=valkey://127.0.0.1:6379 (mot de passe local : paraphe)"; fi'
       - 'echo "tests d''intégration : PARAPHE_TEST_VALKEY_URL=valkey://127.0.0.1:6379 (+ PARAPHE_TEST_VALKEY_PASSWORD)"'
+
+  garage:
+    desc: 'Stockage objet local (logos de campagne), et imprime ses variables'
+    # Le nœud, puis son amorçage — la disposition d'un cluster Garage est
+    # impérative, il n'existe pas de forme déclarative de « ce nœud porte
+    # des données ». Idempotent : relancer ne casse rien.
+    cmds:
+      # Chaque variable manquante reçoit une valeur locale connue, une par
+      # une — et non « .env ou rien ». Le cas réel est un .env écrit avant
+      # que cette pile existe : tout ou rien y répond « conteneur en mauvaise
+      # santé », ce qui ne dit à personne quelle ligne ajouter.
+      - |
+        set -eu
+        posee() { [ -f .env ] && grep -qE "^$1=.+" .env; }
+        # 64 caractères hexadécimaux, écrits en clair : Garage exige
+        # exactement 32 octets, et ces valeurs-ci ne servent qu'en local.
+        posee PARAPHE_GARAGE_RPC_SECRET \
+          || export PARAPHE_GARAGE_RPC_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+        posee PARAPHE_GARAGE_ADMIN_TOKEN \
+          || export PARAPHE_GARAGE_ADMIN_TOKEN=2222222222222222222222222222222222222222222222222222222222222222
+        posee PARAPHE_MEDIA_ACCESS_KEY \
+          || export PARAPHE_MEDIA_ACCESS_KEY=GKparaphelocal0000000000
+        posee PARAPHE_MEDIA_SECRET_KEY \
+          || export PARAPHE_MEDIA_SECRET_KEY=1111111111111111111111111111111111111111111111111111111111111111
+        docker compose up -d --wait garage
+        docker compose up garage-init
+        echo
+        echo "stockage objet prêt. Pour \`task api\` hors Docker :"
+        echo "  PARAPHE_MEDIA_ENDPOINT=http://127.0.0.1:3900"
+        echo "  PARAPHE_MEDIA_BUCKET=paraphe-media"
+        echo "  PARAPHE_MEDIA_REGION=garage"
+        if posee PARAPHE_MEDIA_ACCESS_KEY; then
+          echo "  PARAPHE_MEDIA_ACCESS_KEY / _SECRET_KEY : selon votre .env"
+        else
+          echo "  PARAPHE_MEDIA_ACCESS_KEY=$PARAPHE_MEDIA_ACCESS_KEY"
+          echo "  PARAPHE_MEDIA_SECRET_KEY=$PARAPHE_MEDIA_SECRET_KEY"
+        fi
+        echo "  PARAPHE_MEDIA_PUBLIC_URL=http://paraphe-media.media.localhost:3902"
+        echo "tests d'intégration : les mêmes, préfixées PARAPHE_TEST_MEDIA_*"
 
   valkey-drill:
     desc: 'Bascule Sentinel en local : compteurs écrits, primaire tué, compteurs de nouveau'

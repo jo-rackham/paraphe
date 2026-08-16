@@ -155,6 +155,31 @@ spec:
                   name: {{ include "paraphe.nomSecret" . }}
                   key: PARAPHE_INSTANCE_ADMIN_PASSWORD
             {{- end }}
+            {{- if .Values.media.enabled }}
+            # Two addresses for one bucket, and confusing them produces a
+            # logo the server stores and no page can display: the ENDPOINT
+            # is what this process writes to, the PUBLIC URL what the
+            # browser reads from — and the latter is what the
+            # Content-Security-Policy names.
+            - name: PARAPHE_MEDIA_ENDPOINT
+              value: {{ include "paraphe.endpointMedia" . | quote }}
+            - name: PARAPHE_MEDIA_PUBLIC_URL
+              value: {{ include "paraphe.urlPubliqueMedia" . | quote }}
+            - name: PARAPHE_MEDIA_BUCKET
+              value: {{ .Values.media.bucket | quote }}
+            - name: PARAPHE_MEDIA_REGION
+              value: {{ .Values.media.region | quote }}
+            - name: PARAPHE_MEDIA_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_MEDIA_ACCESS_KEY
+            - name: PARAPHE_MEDIA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_MEDIA_SECRET_KEY
+            {{- end }}
             - name: PARAPHE_SOURCE_URL
               value: {{ .Values.sourceUrl | quote }}
             - name: PARAPHE_BROWSER_VERSION_URL

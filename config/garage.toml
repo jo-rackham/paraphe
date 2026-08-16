@@ -1,0 +1,33 @@
+# Nœud Garage local (docker compose) — stockage des logos de campagne.
+#
+# UN nœud, comme le Valkey de ce compose : cette pile sert la forme « un
+# VPS », et c'est le chart qui porte la topologie HA (trois nœuds).
+# Fichier VERSIONNÉ : aucune valeur réelle ici. Le secret RPC arrive par
+# GARAGE_RPC_SECRET, depuis .env.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+
+# 1 et non 3 : à trois sur un seul nœud, aucune écriture n'atteint son
+# quorum et le stockage refuse tout, sans dire pourquoi.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+
+[s3_web]
+# L'endpoint public : c'est lui que le navigateur atteint, et il sert le
+# seau dont le nom correspond à l'hôte demandé — d'où
+# paraphe-media.media.localhost pour le seau « paraphe-media ».
+bind_addr = "[::]:3902"
+root_domain = ".media.localhost"
+index = "index.html"
+
+[admin]
+# Non publié : seul garage-init, sur le réseau du compose, l'appelle.
+# Le jeton arrive par GARAGE_ADMIN_TOKEN, depuis .env.
+api_bind_addr = "[::]:3903"

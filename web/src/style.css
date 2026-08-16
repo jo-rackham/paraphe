@@ -94,6 +94,25 @@ header .qui { margin-left: auto; font-size: .85rem; color: var(--entete-txt);
           color: var(--jaune-vif); }
 .marque .sous { font-weight: 400; font-size: .78rem; color: var(--entete-txt);
                 opacity: .8; }
+/* The campaign's logo, BESIDE the hexagon and never in its place. Bounded
+   on both axes and `contain`: a banner and a square both have to sit in a
+   header whose height everything else depends on. */
+.marque img.logo-campagne { max-height: 2rem; max-width: 8rem; width: auto;
+                            object-fit: contain; }
+/* the same mark on the sign-in page, where it has room to breathe. The
+   paragraph stays even with no logo: an empty one collapses to nothing. */
+.logo-connexion { margin: 1.2rem 0 0; }
+.logo-connexion img.grand { max-height: 4.5rem; max-width: 16rem;
+                            width: auto; object-fit: contain; }
+/* the preview under the file field: the image, then the way to drop it */
+.apercu-logo { display: flex; align-items: center; gap: .8rem;
+               flex-wrap: wrap; }
+.apercu-logo img { max-height: 3rem; max-width: 10rem; width: auto;
+                   object-fit: contain;
+                   /* a transparent PNG on a transparent card shows nothing:
+                      the border says where the image ends */
+                   border: 1px solid var(--trait); border-radius: .35rem;
+                   padding: .25rem; background: var(--fond); }
 /* the tab strip is a flex container of its own so the <nav> landmark does
    not disturb the header's layout */
 header nav { display: flex; flex-wrap: wrap; gap: .4rem .9rem;

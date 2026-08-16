@@ -11,6 +11,12 @@
 {{- $hotes = append $hotes (printf "*.%s" .Values.instance.baseDomain) }}
 {{- end }}
 {{- $hotes = concat $hotes .Values.ingress.hotesSupplementaires | uniq }}
+{{- /* L'hôte média a sa propre règle plus bas ; il rejoint la liste TLS
+       ici, car un certificat par hôte est ce que cert-manager attend. */}}
+{{- $hotesTls := $hotes }}
+{{- if and .Values.media.enabled .Values.garage.enabled }}
+{{- $hotesTls = append $hotesTls .Values.media.host | uniq }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -26,7 +32,7 @@ spec:
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts:
-        {{- range $hotes }}
+        {{- range $hotesTls }}
         - {{ . | quote }}
         {{- end }}
       secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" (include "paraphe.nomComplet" .)) }}
@@ -43,5 +49,26 @@ spec:
                 name: {{ include "paraphe.nomComplet" $ }}
                 port:
                   number: {{ $.Values.service.port }}
+    {{- end }}
+    {{- if and .Values.media.enabled .Values.garage.enabled }}
+    {{/*
+      L'origine média : son propre hôte, routé vers l'endpoint web de
+      Garage et non vers l'application. C'est tout l'arbitrage — le
+      navigateur télécharge les logos depuis le stockage, directement.
+
+      Un hôte à part et non un chemin : une origine distincte est ce qui
+      met un éventuel SVG hostile hors de portée du cookie de session, qui
+      est host-only. Sous /media/ du même hôte, il serait chez lui.
+    */}}
+    - host: {{ .Values.media.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "paraphe.nomGarage" . }}-web
+                port:
+                  number: 3902
     {{- end }}
 {{- end }}

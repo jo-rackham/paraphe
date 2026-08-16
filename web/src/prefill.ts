@@ -13,12 +13,51 @@
 // URL to fetch it from, would have exactly that hole.
 
 import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
+import { LOGO_MAX_BYTES } from "./common.tsx";
 import type { Campaign } from "./types.ts";
 
 export interface Offer {
   slug: string;
   name: string;
   campaign: Campaign;
+  /** the campaign's logo, as an absolute URL on the instance's media origin */
+  logo: string;
+}
+
+/**
+ * Downloads a logo and returns it as a data URI.
+ *
+ * This is the ONLY moment this mode fetches an image, and it happens
+ * because the volunteer pressed "reprendre cette campagne". What is stored
+ * afterwards is the bytes, never the address: keeping the URL would put a
+ * call to the instance in every single page load, and the promise this
+ * version makes — nothing leaves your browser, check the network tab — has
+ * to survive being checked.
+ *
+ * Bounded like the upload itself: a media origin that answers with a
+ * hundred megabytes must not fill this browser's storage.
+ */
+export async function inlineLogo(url: string): Promise<string> {
+  const response = await fetch(url, { credentials: "omit", mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Le logo n'a pas répondu (HTTP ${response.status}).`);
+  }
+  const blob = await response.blob();
+  if (blob.size > LOGO_MAX_BYTES) {
+    throw new Error(
+      `Le logo pèse ${Math.round(blob.size / 1024)} Ko, la limite est de ` +
+        `${LOGO_MAX_BYTES / 1024} Ko.`,
+    );
+  }
+  if (!blob.type.startsWith("image/")) {
+    throw new Error(`Ce n'est pas une image (${blob.type || "type absent"}).`);
+  }
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Logo illisible."));
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**
@@ -90,5 +129,17 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
         "s'est peut-être intercalé — ne l'utilisez pas.",
     );
   }
-  return { slug, name: String(body.name ?? slug), campaign };
+  // The logo is optional and its absence changes nothing. Checked all the
+  // same: `logo.url` is put into an <img>, and a captive portal answering
+  // this route can write whatever it likes there. Only an absolute http(s)
+  // URL is kept — a `javascript:` or `data:` value would be a string this
+  // campaign chose and this browser executed.
+  let logo = "";
+  const offered = body?.logo?.url;
+  if (typeof offered === "string" && offered !== "") {
+    if (/^https?:\/\//i.test(offered)) {
+      logo = offered;
+    }
+  }
+  return { slug, name: String(body.name ?? slug), campaign, logo };
 }

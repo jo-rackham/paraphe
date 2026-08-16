@@ -59,6 +59,10 @@ type Server struct {
 	// logKey derives the day-scoped pseudonyms the security events carry:
 	// no client address and no submitted email reaches a log line raw
 	logKey []byte
+	// media: the object store holding the campaign logos, nil when the
+	// instance has none — which is the normal state of a developer's
+	// instance and of every test that does not exercise a logo
+	media *MediaStore
 	// marked index.html: see markInterface
 	landingPage []byte
 	// the same page, gzipped once at startup: it is served on every load
@@ -263,6 +267,28 @@ func run() error {
 			return fmt.Errorf("compressing the landing page: %w", err)
 		}
 	}
+	// The object store, when there is one. Same rule again: configured and
+	// unreachable FAILS the start. A campaign discovering at upload time
+	// that the deployment was never finished, behind a probe that has been
+	// green for a week, is the failure this application refuses everywhere
+	// it can. Configured NOWHERE is a state, said out loud: no logo.
+	media, err := NewMediaStore()
+	if err != nil {
+		return err
+	}
+	if media == nil {
+		slog.Info("no object store configured: campaigns have no logo")
+	} else {
+		if err := media.CheckBucket(ctx); err != nil {
+			return fmt.Errorf("object store: %w\n"+
+				"Set the five PARAPHE_MEDIA_* together, or none of them to "+
+				"run without campaign logos", err)
+		}
+		slog.Info("object store ready", "bucket", Get("media_bucket"),
+			"public", Get("media_public_url"))
+	}
+	s.media = media
+
 	// Same rule for the browser version: set and unreadable is a broken
 	// image, not a deployment shape. Its index must NOT carry the mode
 	// marker — the absence is what lets it fall into browser mode.

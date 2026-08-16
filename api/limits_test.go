@@ -34,6 +34,13 @@ import (
 // ceilings accounted for in the arithmetic of
 // TestTheBodyCeilingHoldsBothEdges. A ceiling missing from that sum makes
 // maxBodySize silently too small for a request the application invites.
+//
+// TEXT ceilings only, counted in runes. `maxLogoBytes` is deliberately
+// absent: it bounds an image with len(), in bytes, and listing it here
+// would make the rule below — "a rune ceiling applied to bytes refuses
+// fewer characters than its message promises" — fire on the one place
+// where bytes are the honest unit. Its own arithmetic sits beside this
+// one, in TestTheBodyCeilingHoldsBothEdges.
 var accountedCeilings = map[string]bool{
 	"maxNoteRunes": true, "maxCampaignRunes": true,
 	"maxNameRunes": true, "maxEmailRunes": true,

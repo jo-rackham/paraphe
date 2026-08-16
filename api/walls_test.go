@@ -37,9 +37,15 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	// in every message sent to a mayor.
 	const neighbourCandidate = "CANDIDATE DE LA CAMPAGNE B"
 	const neighbourBatch = 7
+	// B's logo, three more columns on `orgs` that the campaign screen writes.
+	// The key is what builds a public URL, so a leak here does not merely
+	// show a neighbour's picture: it publishes which campaigns this instance
+	// hosts, to a campaign that was told nothing of the sort.
+	const neighbourLogoKey = "logos/other/beefbeefbeefbeef.png"
 	execAsMaintenance(t, s,
 		"UPDATE orgs SET campaign=jsonb_build_object('candidat',$1::text), "+
-			"batch_size=$2 WHERE id=$3", neighbourCandidate, neighbourBatch, b)
+			"batch_size=$2, logo_key=$4, logo_type='image/png' WHERE id=$3",
+		neighbourCandidate, neighbourBatch, b, neighbourLogoKey)
 	execAsMaintenance(t, s,
 		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
 			"VALUES($1,'01001',$2,'signed')", b, neighbourVolunteer)
@@ -129,6 +135,7 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			neighbourOwnNote:   "personal note",
 			"Other campaign":   "name",
 			"other":            "slug",
+			"beefbeefbeefbeef": "logo",
 		} {
 			if strings.Contains(body, marker) {
 				t.Errorf("%s: the neighbouring campaign's %s appears", what, what2)
@@ -209,6 +216,25 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			"candidat": "Candidat de A"}}); code != http.StatusOK {
 		t.Fatalf("A can no longer write its own campaign: %d %v", code, rep)
 	}
+	// The logo, which writes three more columns of `orgs` — the same table
+	// and the same shape of WHERE clause, so the same thing to prove. Only
+	// when the suite was given an object store: without one the handler
+	// answers 501 and writes nothing, and "B is untouched" would then hold
+	// for a reason that has nothing to do with a wall.
+	if s.media != nil {
+		if code, rep := c.call(http.MethodPost, "/api/campaign/logo",
+			map[string]any{"data_uri": dataURI("image/png", rasterPNG(t, 12, 12))},
+		); code != http.StatusOK {
+			t.Fatalf("A can no longer set its own logo: %d %v", code, rep)
+		}
+		if code, rep := c.call(http.MethodDelete, "/api/campaign/logo",
+			map[string]any{}); code != http.StatusOK {
+			t.Fatalf("A can no longer remove its own logo: %d %v", code, rep)
+		}
+	} else {
+		t.Log("no object store configured: the logo routes were NOT exercised " +
+			"against the wall. Set PARAPHE_TEST_MEDIA_* (task garage) to cover them")
+	}
 	// And the personal note: an UPDATE on accounts that no test called. A
 	// mutation adding `OR EXISTS(SELECT 1 FROM orgs WHERE id <> $2)` to it
 	// overwrote the note of EVERY account of EVERY campaign, with all four
@@ -257,6 +283,7 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	// Counts move on INSERT and DELETE, never on UPDATE. What A could have
 	// overwritten in B is read back by value.
 	var bNote, bName, bCampaign string
+	var bLogoKey, bLogoType string
 	var bActive bool
 	var bBatch int
 	asMaintenance(t, s.pool, func(tx pgx.Tx) {
@@ -271,7 +298,18 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			Scan(&bName, &bCampaign, &bBatch); err != nil {
 			t.Fatal(err)
 		}
+		// …and the three the logo writes. A DELETE that lost its WHERE
+		// clause blanks these across every campaign, and no row count moves.
+		if err := tx.QueryRow(context.Background(),
+			"SELECT logo_key, logo_type FROM orgs WHERE id=$1", b).
+			Scan(&bLogoKey, &bLogoType); err != nil {
+			t.Fatal(err)
+		}
 	})
+	if bLogoKey != neighbourLogoKey || bLogoType != "image/png" {
+		t.Errorf("A's logo write reached B's row: key=%q type=%q",
+			bLogoKey, bLogoType)
+	}
 	if bNote != neighbourOwnNote {
 		t.Errorf("A's personal note reached B's account: %q", bNote)
 	}

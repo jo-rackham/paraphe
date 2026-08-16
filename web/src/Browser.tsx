@@ -12,7 +12,7 @@ import {
   Fiche,
   focusContenu,
   Guide,
-  Hexagone,
+  Marque,
   NavOnglets,
   PiedDePage,
   RenderGuard,
@@ -27,6 +27,7 @@ import { DEMO_SET } from "./demo.ts";
 import * as M from "./messages.ts";
 import {
   fetchCampaign,
+  inlineLogo,
   type Offer,
   requestedSlug,
   untouchedCampaign,
@@ -47,6 +48,13 @@ export default function Browser() {
   const [mayors, setMayors] = useState<Mayor[]>([]);
   const [tracking, setTracking] = useState<Record<string, Tracking>>({});
   const [cfg, setCfg] = useState<Campaign>(EMPTY_CFG);
+  // The logo as a DATA URI, never a URL. This mode promises that nothing
+  // leaves the browser, and a remote address in the header would make that
+  // false at every load — so a logo adopted from ?org= is downloaded once,
+  // at the moment the volunteer accepts, and kept in IndexedDB like the
+  // rest. A new key in an existing store: no VERSION bump, and the export
+  // carries it because it walks the settings.
+  const [logo, setLogo] = useState("");
   const [personalNote, setPersonalNote] = useState("");
   const [tab, setTab] = useState("liste");
   const [chosen, setChosen] = useState<Mayor | null>(null);
@@ -115,17 +123,19 @@ export default function Browser() {
 
   useEffect(() => {
     (async () => {
-      const [m, s, c, a, l] = await Promise.all([
+      const [m, s, c, a, g, l] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
+        DB.readSetting<string>("logo", ""),
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
+      setLogo(g);
       setDraft(c);
       setNoteDraft(a);
       setLoadedList(l);
@@ -297,11 +307,14 @@ export default function Browser() {
       const report = await DB.importAll(JSON.parse(await file.text()), {
         merge,
       });
-      const [m, s, c, a, l] = await Promise.all([
+      const [m, s, c, a, g, l] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
+        // the logo travels in the backup like every other setting, and
+        // « fusionner » protects the one you hold, key by key
+        DB.readSetting<string>("logo", ""),
         // the backup carries `liste` too, and not reading it back left the
         // banner offering to load "all 34 826" — which would replace the
         // list just imported
@@ -311,6 +324,7 @@ export default function Browser() {
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
+      setLogo(g);
       setDraft(c);
       setNoteDraft(a);
       setLoadedList(l);
@@ -359,14 +373,12 @@ export default function Browser() {
         <i />
       </div>
       <header>
-        <span className="marque">
-          <Hexagone />
-          <span>
-            paraphe
-            <br />
-            <span className="sous">version navigateur</span>
-          </span>
-        </span>
+        {/* the logo is a data URI held in IndexedDB: this mode fetches
+            nothing remote, and its whole promise rests on that */}
+        <Marque
+          logo={logo ? { url: logo, type: "" } : null}
+          sous="version navigateur"
+        />
         <NavOnglets
           tabs={[
             ["liste", "Les maires"],
@@ -447,6 +459,23 @@ export default function Browser() {
                       await DB.writeSetting("campagne", offer.campaign);
                       setCfg(offer.campaign);
                       setDraft(offer.campaign);
+                      // The logo is downloaded ONCE, here, and kept as a
+                      // data URI: this mode makes no request after this
+                      // one, and holding the campaign's URL would put a
+                      // call to the instance in every page load — which is
+                      // exactly what « aucune donnée ne quitte ce
+                      // navigateur » promises does not happen. A failure
+                      // costs the picture and nothing else, so it does not
+                      // undo an adoption the volunteer just made.
+                      if (offer.logo) {
+                        try {
+                          const inlined = await inlineLogo(offer.logo);
+                          await DB.writeSetting("logo", inlined);
+                          setLogo(inlined);
+                        } catch {
+                          setLogo("");
+                        }
+                      }
                       setOffer(null);
                       setMessage({
                         tone: "ok",
@@ -556,6 +585,7 @@ export default function Browser() {
                     setTracking({});
                     setCfg(EMPTY_CFG);
                     setPersonalNote("");
+                    setLogo("");
                     setDraft(EMPTY_CFG);
                     setNoteDraft("");
                     // the drafts carry notes about named mayors: erased means erased
@@ -574,8 +604,25 @@ export default function Browser() {
                   draft={draft}
                   note={noteDraft}
                   dirty={dirty}
+                  logo={logo}
                   onEdit={setDraft}
                   onNote={setNoteDraft}
+                  // Written straight away, not with the form: the file is
+                  // already in memory, and a picture chosen then lost to a
+                  // tab change is the kind of small betrayal that makes
+                  // someone stop trusting the screen. "" removes it.
+                  onLogo={async (dataUri) => {
+                    try {
+                      await DB.writeSetting("logo", dataUri);
+                      setLogo(dataUri);
+                    } catch (e) {
+                      setMessage({
+                        tone: "erreur",
+                        text: e instanceof Error ? e.message : String(e),
+                      });
+                    }
+                  }}
+                  onErreur={(text) => setMessage({ tone: "erreur", text })}
                   onSave={async (next, note) => {
                     try {
                       await DB.writeSetting("campagne", next);

@@ -41,6 +41,8 @@ var routeLimits = map[string]string{
 	"POST /api/team/account":                "write_account",
 	"POST /api/team/account/{email}/active": "write_account",
 	"POST /api/campaign":                    "write_account",
+	"POST /api/campaign/logo":               "write_account",
+	"DELETE /api/campaign/logo":             "write_account",
 	"POST /api/request":                     "hosting_ip",
 	"GET /api/admin/requests":               "none: authenticated read",
 	"POST /api/admin/requests/{id}":         "write_account",
@@ -125,6 +127,8 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 		"POST /api/team/account":                "/api/team/account",
 		"POST /api/team/account/{email}/active": "/api/team/account/qui@exemple.fr/active",
 		"POST /api/campaign":                    "/api/campaign",
+		"POST /api/campaign/logo":               "/api/campaign/logo",
+		"DELETE /api/campaign/logo":             "/api/campaign/logo",
 	}
 	for declared, class := range routeLimits {
 		if class != "write_account" || declared == "POST /api/me/personal_note" {
@@ -140,7 +144,11 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 				"ceiling nothing exercises is a ceiling nothing keeps", declared)
 			continue
 		}
-		if code, _ := c.call(http.MethodPost, path, map[string]any{}); code !=
+		// the METHOD the map declares, not POST: a route driven with the
+		// wrong verb answers 405 from the mux, before any limiter, and the
+		// case would then pass while exercising nothing
+		method, _, _ := strings.Cut(declared, " ")
+		if code, _ := c.call(method, path, map[string]any{}); code !=
 			http.StatusTooManyRequests {
 			t.Errorf("%s answered %d with the write_account bucket exhausted: "+
 				"it carries no ceiling any more", declared, code)

@@ -15,7 +15,13 @@
      confidentialité fausse. -->
 <!-- aucune ressource distante : ni police, ni CDN, ni mesure d'audience.
      La promesse « aucune donnée ne sort » (mode navigateur) doit être
-     vérifiable dans l'onglet réseau, pas seulement affirmée. -->
+     vérifiable dans l'onglet réseau, pas seulement affirmée.
+     Le mode navigateur ne fait AUCUNE requête sortante : le logo d'une
+     campagne reprise par ?org= est téléchargé une fois, à l'instant où le
+     bénévole accepte, et conservé en data URI dans IndexedDB.
+     Le mode ÉQUIPE en fait une, nommée : les logos sont servis par
+     l'origine média de l'instance (PARAPHE_MEDIA_PUBLIC_URL), la seule que
+     la Content-Security-Policy autorise en plus de la sienne. -->
 </head>
 <body>
 <noscript><p>Cette application fonctionne entièrement dans votre navigateur

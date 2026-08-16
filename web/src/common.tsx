@@ -10,7 +10,7 @@ import {
 } from "react";
 import GUIDE from "../../GUIDE.md?raw";
 import * as M from "./messages.ts";
-import type { Campaign, Mayor, Message, Note } from "./types.ts";
+import type { Campaign, Logo, Mayor, Message, Note } from "./types.ts";
 
 // Vocabulary and components shared by both modes. The card above all: it
 // is what calls the message engine, and the rank drives the template
@@ -412,6 +412,171 @@ export function Hexagone() {
       <rect x="11" y="12.2" width="4" height="3.6" fill="#ffffff" />
       <rect x="15" y="12.2" width="4" height="3.6" fill="#e1000f" />
     </svg>
+  );
+}
+
+/**
+ * A campaign's logo, wherever it is shown — and it renders NOTHING when the
+ * browser cannot fetch it.
+ *
+ * That fallback is the whole reason this is a component rather than an
+ * `<img>` written twice. The bytes come from another origin, which is
+ * another thing that can be down or misconfigured; every screen has to
+ * degrade to the mark alone rather than to the browser's broken-image
+ * glyph.
+ *
+ * `alt=""`: the campaign's name is beside it as text on every screen that
+ * shows it, so the image carries nothing a screen reader is missing, and
+ * naming it would announce the same campaign twice.
+ */
+export function LogoCampagne({
+  logo,
+  className,
+}: {
+  logo?: Logo | null;
+  className: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  const src = logo?.url ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a NEW url deserves a new attempt
+  useEffect(() => setBroken(false), [src]);
+  if (!src || broken) return null;
+  return (
+    <img
+      className={className}
+      src={src}
+      alt=""
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
+/**
+ * The header's brand block, written once for the three modes.
+ *
+ * The hexagon and the word stay whatever a campaign uploads. The style
+ * sheet says why in its first line — this identity is deliberately NOT the
+ * State's, and the site must never look official — and on an instance
+ * hosting several campaigns, one of them taking over the whole mark is the
+ * squat the moderation exists to prevent. The campaign's logo joins the
+ * mark; it does not replace it.
+ */
+export function Marque({
+  logo,
+  sous,
+}: {
+  logo?: Logo | null;
+  sous?: ReactNode;
+}) {
+  return (
+    <span className="marque">
+      <Hexagone />
+      <LogoCampagne logo={logo} className="logo-campagne" />
+      <span>
+        paraphe
+        <br />
+        <span className="sous">{sous}</span>
+      </span>
+    </span>
+  );
+}
+
+/** What a campaign may upload, in the two places that let it. */
+export const LOGO_TYPES = "image/png,image/jpeg,image/webp,image/svg+xml";
+/**
+ * The same ceiling as the API's maxLogoBytes (api/logo.go). Checked here
+ * too so that a 4 MB photograph is refused instantly, by the screen that
+ * knows the file, rather than after the upload of a body the server will
+ * answer 413 to.
+ */
+export const LOGO_MAX_BYTES = 64 * 1024;
+
+/** Reads a chosen file as the data URI both modes store and send. */
+export function lireFichier(blob: Blob, quoi = "Ce fichier"): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error(`${quoi} n'a pas pu être lu.`));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * The logo field, shared by the team screen and the browser one. It holds
+ * no state of its own: what it shows is what its owner stores, so a tab
+ * change cannot leave a preview disagreeing with what was saved.
+ */
+export function ChampLogo({
+  logo,
+  onChoisi,
+  onRetire,
+  onErreur,
+  occupe,
+}: {
+  /** the current logo: a URL in team mode, a data URI in browser mode */
+  logo: string;
+  onChoisi: (dataURI: string) => void;
+  onRetire: () => void;
+  onErreur: (message: string) => void;
+  occupe?: boolean;
+}) {
+  const champ = useRef<HTMLInputElement>(null);
+  return (
+    <div>
+      <p>
+        <label htmlFor="champ-logo">Logo de la campagne (facultatif)</label>
+        <input
+          id="champ-logo"
+          ref={champ}
+          type="file"
+          accept={LOGO_TYPES}
+          aria-describedby="champ-logo-aide"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            // Cleared whatever happens: without it, choosing the same file
+            // again after a refusal fires no change event at all.
+            e.target.value = "";
+            if (file.size > LOGO_MAX_BYTES) {
+              onErreur(
+                `Ce fichier pèse ${Math.round(file.size / 1024)} Ko, la ` +
+                  `limite est de ${LOGO_MAX_BYTES / 1024} Ko.`,
+              );
+              return;
+            }
+            try {
+              onChoisi(await lireFichier(file));
+            } catch (err) {
+              onErreur(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
+        <span className="gris aide" id="champ-logo-aide">
+          PNG, JPEG, WebP ou SVG, {LOGO_MAX_BYTES / 1024} Ko au plus. Il
+          s'affiche en haut de chaque page, à côté de la marque paraphe.
+        </span>
+      </p>
+      {logo && (
+        <p className="apercu-logo">
+          {/* decorative: the button beside it says what it is */}
+          <img src={logo} alt="" />
+          <button
+            type="button"
+            className="lien"
+            aria-disabled={occupe || undefined}
+            onClick={() => {
+              if (occupe) return;
+              // this button and the preview beside it are about to unmount:
+              // hand focus to the field that replaces them, never to <body>
+              champ.current?.focus();
+              onRetire();
+            }}
+          >
+            Retirer le logo
+          </button>
+        </p>
+      )}
+    </div>
   );
 }
 

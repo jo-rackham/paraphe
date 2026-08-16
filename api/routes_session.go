@@ -59,6 +59,9 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		"statuses":   Statuses,
 		"ranks":      Ranks,
 		"no_account": noAccount,
+		// null when the campaign has none, or when the instance has no
+		// object store: either way the header shows the hexagon alone.
+		"logo": s.logoOf(org),
 		"organisation": map[string]any{
 			"slug": org.Slug, "name": org.Name,
 			// the toggle "Mon équipe" shows needs the current state

@@ -109,7 +109,13 @@ the others.
 
 - The mayor list is **in the API image** (frozen at build time); the team's
   work (accounts, assignments, statuses, notes) is in PostgreSQL.
-  **That is the only irreplaceable data.** In Docker:
+  **That is the only IRREPLACEABLE data** — and, since campaigns may upload
+  a logo, no longer the only data. The logos live in the object store
+  (`task backup-media`), and losing one costs a campaign the thirty seconds
+  it takes to upload it again: worth copying, not worth an incident. What
+  PostgreSQL keeps is the POINTER — which object should exist, its type and
+  its digest — so a bucket restored from an older copy is detectable rather
+  than silent. In Docker:
   `docker compose exec postgres pg_dump -U paraphe paraphe > backup-$(date +%F).sql`
   In Kubernetes, enable `postgres.cnpg.backup.*`: the chart then sets up WAL
   archiving **and** a daily `ScheduledBackup`. Both are needed — WAL archiving
@@ -129,6 +135,41 @@ the others.
   re-imports as an UPSERT. Data (email, rank, score) is refreshed, work
   columns (volunteer, status, notes) are untouched. A target removed from the
   list is deleted if nobody worked on it, and flagged "RETIRÉ" otherwise.
+
+## The campaign logo (optional)
+
+A campaign may upload a logo — PNG, JPEG, WebP or SVG, 64 KiB at most — from
+"Mon équipe". It shows beside the paraphe mark in the header and on the
+campaign's sign-in page. Configure nothing and campaigns simply have none:
+the header keeps the hexagon and the screen says so.
+
+- **The browser fetches it from the object store, not from the
+  application.** That needs an origin of its own —
+  `PARAPHE_MEDIA_PUBLIC_URL`, typically `media.<your domain>` — and it is
+  the ONE remote origin the Content-Security-Policy allows. A wrong value
+  shows as an image that never appears, in the browser console and nowhere
+  else.
+- **A separate host, not a path under the application's.** The session
+  cookie is host-only, so a hostile SVG served from the media origin finds
+  neither the cookie nor the application's DOM. Under `/media/` of the same
+  host it would be at home. The uploads are validated too — the bytes decide
+  the format, and an SVG carrying a script, an event handler, a DOCTYPE or
+  an external reference is refused — but the origin is what makes that
+  validation the third line of defence rather than the only one.
+- **Five variables, all or nothing** (`PARAPHE_MEDIA_ENDPOINT`, `_BUCKET`,
+  `_ACCESS_KEY`, `_SECRET_KEY`, `_PUBLIC_URL`). Half of them refuses to
+  start: a campaign that can upload a logo nobody can fetch is worse than no
+  logo. Configured and unreachable also refuses to start — the alternative
+  is a coordination discovering at upload time that the deployment was never
+  finished, behind a probe that has been green for a week.
+- **In Docker**, the compose file runs one Garage node and bootstraps it.
+  **In Kubernetes**, the chart runs three (`media.enabled=true`), one per
+  machine, replication 3 — the loss of a node costs nothing. A Job lays the
+  cluster out at every install and upgrade, because a Garage layout is
+  imperative and has no declarative form.
+- **On a cloud**, run no storage at all: `garage.enabled=false` and
+  `media.endpoint` pointing at the provider's object store (OVH, Scaleway,
+  R2). The application only ever speaks S3.
 
 ## Several campaigns on one instance
 

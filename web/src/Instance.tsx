@@ -3,7 +3,7 @@ import * as API from "./api.ts";
 import {
   Alerte,
   CompteurResultats,
-  Hexagone,
+  Marque,
   PiedDePage,
   RenderGuard,
   SkipLink,
@@ -78,14 +78,8 @@ export default function Instance({ config }: { config: InstanceConfig }) {
         <i />
       </div>
       <header>
-        <span className="marque">
-          <Hexagone />
-          <span>
-            paraphe
-            <br />
-            <span className="sous">{config.base_domain}</span>
-          </span>
-        </span>
+        {/* the apex serves no campaign, so it carries no campaign's mark */}
+        <Marque sous={config.base_domain} />
         {me && (
           <span className="qui">
             {me.account.name}

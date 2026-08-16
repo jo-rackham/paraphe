@@ -11,6 +11,7 @@ import type {
   Dashboard,
   Facets,
   InstanceConfig,
+  Logo,
   MayorCard,
   MayorsPage,
   Me,
@@ -257,6 +258,15 @@ export const updateCampaign = (
     method: "POST",
     body: { campaign, batch_size: batchSize, listed },
   });
+
+// The logo is its own call: an image does not fit in what a campaign body
+// leaves under the request ceiling, and replacing one should not require
+// resaving nine fields.
+export const uploadLogo = (dataUri: string): Promise<{ logo: Logo }> =>
+  call("campaign/logo", { method: "POST", body: { data_uri: dataUri } });
+
+export const removeLogo = (): Promise<{ logo: null }> =>
+  call("campaign/logo", { method: "DELETE" });
 
 // -- Instance landing page (apex) -------------------------------------------
 

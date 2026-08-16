@@ -237,6 +237,21 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 		limiter: newRateLimiter([]byte("test key"), nil, time.Now),
 		logKey:  deriveKey([]byte("test key"), "paraphe:log-pseudonyms:v1"),
 	}
+	// The object store when the suite was given one, nil otherwise — which
+	// is exactly the shape of an instance whose operator configured none,
+	// and the shape most of these tests want. The routes that need it say
+	// so themselves (mediaUnavailable), so nothing here has to pretend.
+	if os.Getenv("PARAPHE_TEST_MEDIA_ENDPOINT") != "" {
+		for _, v := range []string{"ENDPOINT", "BUCKET", "ACCESS_KEY",
+			"SECRET_KEY", "PUBLIC_URL"} {
+			t.Setenv("PARAPHE_MEDIA_"+v, os.Getenv("PARAPHE_TEST_MEDIA_"+v))
+		}
+		media, err := NewMediaStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.media = media
+	}
 	// TLS, because the session cookie is Secure and Go's cookie jar applies
 	// RFC 6265 to the letter: it will not send such a cookie over http://,
 	// with none of the browser's exception for localhost. Over plain HTTP
@@ -1982,6 +1997,18 @@ func TestTheBodyCeilingHoldsBothEdges(t *testing.T) {
 		t.Errorf("the route's own ceilings add up to %d bytes, over a body "+
 			"limit of %d: a request this application invites cannot be sent",
 			widest, maxBodySize)
+	}
+	// The logo route, whose ceiling is counted in BYTES and whose body is
+	// the image in base64. Its own arithmetic, because it is its own
+	// request: the campaign form and the upload are two calls precisely
+	// because their sum does not fit.
+	base64Grows := (maxLogoBytes + 2) / 3 * 4
+	envelope := len(`{"data_uri":"data:image/svg+xml;base64,"}`)
+	if widestLogo := base64Grows + envelope; widestLogo >= maxBodySize {
+		t.Errorf("a logo at maxLogoBytes (%d) travels as %d bytes of base64 "+
+			"plus %d of envelope, over a body limit of %d: the largest logo "+
+			"the application invites answers 413",
+			maxLogoBytes, base64Grows, envelope, maxBodySize)
 	}
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	_, srv := testServer(t)

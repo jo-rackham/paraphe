@@ -16,6 +16,7 @@ const CONFIG: ServerConfig = {
   unfilled: [],
   source_url: "",
   no_account: false,
+  logo: null,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
   ranks: [{ key: "has_endorsed", label: "A déjà parrainé" }],
 };
@@ -117,6 +118,7 @@ describe("the apex of a multi-campaign instance", () => {
     base_domain: "paraphe.fr",
     source_url: "",
     no_account: false,
+    logo: null,
     campaign_keys: ["candidat"],
   };
 

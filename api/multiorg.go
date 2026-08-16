@@ -81,6 +81,13 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE orgs ALTER COLUMN listed SET DEFAULT TRUE`,
 		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
+		// The campaign's logo, as a POINTER into the object store: no bytes,
+		// only which object should exist and what it is. That pointer is the
+		// only way an orphan — or a bucket restored from an older copy — is
+		// ever noticed. The key ENDS in a digest of the content, so a column
+		// for the digest would be the same fact written twice.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
 		// The work columns move out of `mayors`: they are the only ones that
 		// belong to an organisation, hence the only ones walled.
 		`CREATE TABLE IF NOT EXISTS assignments(
@@ -168,9 +175,11 @@ func (s *Server) ReadOrg(ctx context.Context, q interface {
 	var o Org
 	var campaign []byte
 	err := q.QueryRow(ctx,
-		"SELECT id, slug, name, campaign::text, batch_size, state, COALESCE(created_at,''), listed "+
+		"SELECT id, slug, name, campaign::text, batch_size, state, COALESCE(created_at,''), listed, "+
+			"logo_key, logo_type "+
 			"FROM orgs WHERE slug=$1", slug).
-		Scan(&o.ID, &o.Slug, &o.Name, &campaign, &o.BatchSize, &o.State, &o.CreatedAt, &o.Listed)
+		Scan(&o.ID, &o.Slug, &o.Name, &campaign, &o.BatchSize, &o.State, &o.CreatedAt, &o.Listed,
+			&o.LogoKey, &o.LogoType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

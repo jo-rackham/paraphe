@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -119,6 +120,209 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type logoRequest struct {
+	DataURI string `json:"data_uri"`
+}
+
+// logoOf: what /api/config and /api/campaign/public say about a campaign's
+// logo — an absolute URL the browser can use, or nothing. The URL is built
+// HERE and not in the interface: the key layout is this file's business, and
+// the origin is a deployment setting the page cannot know.
+func (s *Server) logoOf(org *Org) map[string]string {
+	if org == nil || org.LogoKey == "" || s.media == nil {
+		return nil
+	}
+	return map[string]string{
+		"url":  s.media.URL(org.LogoKey),
+		"type": org.LogoType,
+	}
+}
+
+// mediaUnavailable answers the one case a coordination can hit through no
+// fault of its own: an instance whose operator configured no object store.
+// Said plainly, because the alternative is a button that fails with "erreur
+// interne" and a volunteer who retries.
+func (s *Server) mediaUnavailable(w http.ResponseWriter) bool {
+	if s.media != nil {
+		return false
+	}
+	errorJSON(w, http.StatusNotImplemented,
+		"Cette instance n'a pas de stockage d'images configuré : le logo "+
+			"n'est pas disponible. C'est à l'opérateur de l'instance de le "+
+			"mettre en place.")
+	return true
+}
+
+// POST /api/campaign/logo — coordination uploads or replaces the logo.
+//
+// The image travels as a data URI in JSON rather than as multipart, so
+// `jsonOnly` — the second anti-CSRF barrier behind SameSite=Lax — keeps
+// covering every write route without an exception carved for this one.
+func (s *Server) routeUploadLogo(w http.ResponseWriter, r *http.Request) {
+	if s.mediaUnavailable(w) {
+		return
+	}
+	var d logoRequest
+	if !readBody(w, r, &d) {
+		return
+	}
+	org := orgOf(r)
+	logo, code, refusal := readLogo(org.Slug, d.DataURI)
+	if logo == nil {
+		errorJSON(w, code, "%s", refusal)
+		return
+	}
+
+	// The campaign's row is LOCKED before anything reaches the store, and
+	// `previous` is read back under that lock rather than trusted from the
+	// scope. Everything that removes an object takes the same lock, which is
+	// what makes the check on the other side mean something — see forgetLogo.
+	previous, ok := s.lockLogo(w, r)
+	if !ok {
+		return
+	}
+
+	// The object goes in BEFORE the pointer: the other order publishes a URL
+	// that answers 404 for as long as the write takes, and for ever if it
+	// fails. An object nobody points at is invisible; a pointer to nothing
+	// is a broken image on every screen.
+	if err := s.media.Put(r.Context(), logo.Key, logo.ContentType, logo.Raw); err != nil {
+		slog.Error("logo not stored", "slug", org.Slug, "error", err)
+		errorJSON(w, http.StatusBadGateway,
+			"Le stockage d'images n'a pas accepté le fichier. "+
+				"Réessayez ; si cela persiste, prévenez l'opérateur de l'instance.")
+		return
+	}
+
+	req := scoped(r)
+	if _, err := s.tx(r).Exec(r.Context(),
+		"UPDATE orgs SET logo_key="+req.p(logo.Key)+", "+
+			"logo_type="+req.p(logo.ContentType)+" WHERE id=$1",
+		req.args...); err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+
+	// Only once the pointer has MOVED, and never blocking the answer: a
+	// leftover object costs a few kilobytes, a deletion racing a rollback
+	// costs the campaign its logo.
+	s.forgetLogo(org.ID, previous, logo.Key)
+	replyJSON(w, http.StatusOK, map[string]any{
+		"logo": map[string]string{
+			"url": s.media.URL(logo.Key), "type": logo.ContentType,
+		},
+	})
+}
+
+// DELETE /api/campaign/logo — coordination removes it.
+//
+// No jsonOnly here, and for the same reason DELETE /api/session has none: a
+// cross-site DELETE cannot be issued by a form, only by fetch, which needs a
+// CORS preflight this API does not answer.
+func (s *Server) routeDeleteLogo(w http.ResponseWriter, r *http.Request) {
+	if s.mediaUnavailable(w) {
+		return
+	}
+	org := orgOf(r)
+	previous, ok := s.lockLogo(w, r)
+	if !ok {
+		return
+	}
+	req := scoped(r)
+	if _, err := s.tx(r).Exec(r.Context(),
+		"UPDATE orgs SET logo_key='', logo_type='' "+
+			"WHERE id=$1", req.args...); err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.forgetLogo(org.ID, previous, "")
+	replyJSON(w, http.StatusOK, map[string]any{"logo": nil})
+}
+
+// lockLogo takes the campaign's row for the rest of the transaction and
+// returns the key it currently points at.
+//
+// The LOCK is the whole point. Reading `org.LogoKey` off the scope is a
+// value from before this request's transaction, and checking it against the
+// store afterwards is a check on a fact that may already have moved. Every
+// path that writes or removes an object goes through here first, so the
+// upload of an image and the deletion of the one it replaces cannot
+// interleave — which they did, and the loser destroyed an object every
+// screen still named.
+func (s *Server) lockLogo(w http.ResponseWriter, r *http.Request) (string, bool) {
+	req := scoped(r)
+	var key string
+	if err := s.tx(r).QueryRow(r.Context(),
+		"SELECT logo_key FROM orgs WHERE id=$1 FOR UPDATE",
+		req.args...).Scan(&key); err != nil {
+		s.failure(w, err)
+		return "", false
+	}
+	return key, true
+}
+
+// forgetLogo drops an object the database no longer points at.
+//
+// DETACHED, and with a context of its own. The request's context is
+// cancelled the moment the response goes out, so a deletion carried on it
+// would be cut off half the time; carried BEFORE the response, it puts a
+// round-trip — up to mediaTimeout of one — between a coordination's click
+// and their answer, for a few kilobytes of housekeeping.
+//
+// And the pointer is read again UNDER THE SAME LOCK the writers take,
+// immediately before the deletion. A key is a digest of the CONTENT, so
+// removing a logo and putting the same image back produces the very key
+// this was about to delete. Detached without the lock, two overlapping
+// requests — a second tab, a double click — had the stale deletion land
+// after the fresh write and destroy an object every screen still named: 14
+// rounds out of 15 against a store on the same machine, and the window only
+// widens with the distance to it. A check without the lock narrows that
+// window; it does not close it, because the writer commits after the read.
+func (s *Server) forgetLogo(org int, previous, kept string) {
+	if s.media == nil || previous == "" || previous == kept {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), mediaTimeout)
+		defer cancel()
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			// Unverified means not deleted: an orphan costs a few kilobytes,
+			// deleting an object still in use costs a campaign its logo.
+			slog.Warn("logo pointer not re-read; the object is left in place",
+				"key", previous, "error", err)
+			return
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck // read-only
+		var current string
+		if err := tx.QueryRow(ctx,
+			"SELECT logo_key FROM orgs WHERE id=$1 FOR UPDATE", org).
+			Scan(&current); err != nil {
+			slog.Warn("logo pointer not re-read; the object is left in place",
+				"key", previous, "error", err)
+			return
+		}
+		if current == previous {
+			return // written again while this was in flight
+		}
+		if err := s.media.Delete(ctx, previous); err != nil {
+			// Said, not raised: the campaign's logo is already correct, and
+			// the only cost is an orphan the next `task backup-media`
+			// copies for nothing.
+			slog.Warn("previous logo not removed from the store",
+				"key", previous, "error", err)
+		}
+	}()
+}
+
 // GET /api/campaign/public — the campaign, and nothing else.
 //
 // It exists for the browser version, which is published on another origin
@@ -157,6 +361,12 @@ func (s *Server) routePublicCampaign(w http.ResponseWriter, r *http.Request) {
 	for _, k := range CampaignKeys {
 		campaign[k] = org.Campaign[k]
 	}
+	// The logo travels here too, so a volunteer opening the browser version
+	// with ?org=<slug> gets the campaign's mark along with its nine fields.
+	// That build then downloads it ONCE and keeps a data URI: it promises
+	// that nothing leaves the browser, and a remote URL in its header would
+	// make that false at every load.
 	replyJSON(w, http.StatusOK, map[string]any{
-		"slug": org.Slug, "name": org.Name, "campaign": campaign})
+		"slug": org.Slug, "name": org.Name, "campaign": campaign,
+		"logo": s.logoOf(org)})
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -141,6 +142,16 @@ func (s *Server) router() chi.Router {
 		r.With(guard(s.coordinationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/campaign", s.routeUpdateCampaign)
+		// The logo is its own route, not a tenth campaign field: a campaign
+		// body at every one of its ceilings already weighs 94 616 bytes of
+		// the 131 072 a body may carry, and an image does not fit in what
+		// is left.
+		r.With(guard(s.coordinationOnly),
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+			Post("/campaign/logo", s.routeUploadLogo)
+		r.With(guard(s.coordinationOnly),
+			guard(s.limitAccount(limitWriteAccount))).
+			Delete("/campaign/logo", s.routeDeleteLogo)
 
 		// The instance landing page: requesting a campaign, moderating.
 		// The public form is the narrowest ceiling of all: each request is
@@ -276,16 +287,16 @@ func answerOnPanic(next http.Handler) http.Handler {
 }
 
 // securityHeaders: the application needs nothing external — no font, no
-// script, no remote image. The policy says so, so that injecting third-
-// party content fails instead of executing.
+// script, no analytics. The policy says so, so that injecting third-party
+// content fails instead of executing.
+//
+// ONE exception, and it is named rather than opened: the campaign logos,
+// which are served by the object store's own origin. That origin is a
+// deployment setting, so the policy is assembled once at startup instead of
+// being a constant. Left unset, nothing is added and the policy is what it
+// always was.
 func securityHeaders(next http.Handler) http.Handler {
-	const policy = "default-src 'self'; " +
-		"style-src 'self' 'unsafe-inline'; " + // React sets style attributes
-		"img-src 'self' data:; " +
-		"connect-src 'self'; " +
-		"form-action 'self'; " +
-		"base-uri 'none'; " +
-		"frame-ancestors 'none'"
+	policy := contentSecurityPolicy(mediaOrigin())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", policy)
@@ -302,6 +313,43 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// contentSecurityPolicy assembles the policy. Split out from the middleware
+// so that it can be read at one glance and tested for what it lets through.
+func contentSecurityPolicy(media string) string {
+	images := "img-src 'self' data:"
+	if media != "" {
+		images += " " + media
+	}
+	const policy = "default-src 'self'; " +
+		"style-src 'self' 'unsafe-inline'; " + // React sets style attributes
+		"%s; " +
+		"connect-src 'self'; " +
+		"form-action 'self'; " +
+		"base-uri 'none'; " +
+		"frame-ancestors 'none'"
+	return fmt.Sprintf(policy, images)
+}
+
+// mediaOrigin: the object store's public origin, or nothing.
+//
+// A REFUSED value yields nothing at all. Forwarding it — which an earlier
+// version did, so that this and the startup check could not disagree — is
+// how an operator's `* ; script-src *` became a policy allowing scripts
+// from anywhere, on a process that started clean. The two agree by calling
+// the SAME function (MediaOrigin, api/media.go), not by echoing the same
+// unchecked string; and this side fails closed, since a policy without the
+// media origin costs a picture while a widened one costs everything.
+func mediaOrigin() string {
+	origin, err := MediaOrigin(Get("media_public_url"))
+	if err != nil {
+		slog.Error("the media origin is refused and left out of the "+
+			"Content-Security-Policy: campaign logos will not load",
+			"error", err)
+		return ""
+	}
+	return origin
 }
 
 // publicToEveryOrigin marks a route readable from any origin, BEFORE the

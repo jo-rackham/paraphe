@@ -114,6 +114,27 @@ var Settings = []Setting{
 	{Key: "trusted_proxies", Env: "PARAPHE_TRUSTED_PROXIES", Flag: "trusted-proxies",
 		Help: "CIDRs whose X-Forwarded-For is believed (the TLS proxy, the " +
 			"ingress); empty attributes every request to its TCP peer"},
+	// The object store holding the campaign logos. All six empty is the
+	// normal state of a developer's instance and of the test suite: the
+	// logo feature then says it is unavailable instead of failing.
+	{Key: "media_endpoint", Env: "PARAPHE_MEDIA_ENDPOINT", Flag: "media-endpoint",
+		Help: "S3 API of the object store holding the campaign logos: " +
+			"http://garage:3900, or a provider's endpoint; empty offers no logo"},
+	{Key: "media_bucket", Env: "PARAPHE_MEDIA_BUCKET", Flag: "media-bucket",
+		Help: "bucket the logos are written to"},
+	{Key: "media_region", Env: "PARAPHE_MEDIA_REGION", Flag: "media-region",
+		Default: "garage", Help: "S3 region of that endpoint"},
+	{Key: "media_access_key", Env: "PARAPHE_MEDIA_ACCESS_KEY",
+		Flag: "media-access-key", Help: "S3 access key"},
+	{Key: "media_secret_key", Env: "PARAPHE_MEDIA_SECRET_KEY",
+		Flag: "media-secret-key", Help: "S3 secret key"},
+	// The origin the BROWSER fetches a logo from — not the endpoint the
+	// application writes to. It is what the Content-Security-Policy has to
+	// name, so a wrong value here shows as an image the browser refuses to
+	// load, in the console, and nowhere else.
+	{Key: "media_public_url", Env: "PARAPHE_MEDIA_PUBLIC_URL",
+		Flag: "media-public-url",
+		Help: "public origin serving the bucket, e.g. https://media.paraphe.org"},
 }
 
 // fromFile: the `server:` block, read once at startup. Empty until then, so

@@ -11,7 +11,8 @@ import {
   type CardDraft,
   Fiche,
   Guide,
-  Hexagone,
+  LogoCampagne,
+  Marque,
   NavOnglets,
   PiedDePage,
   RenderGuard,
@@ -347,14 +348,7 @@ function Coquille({
         <i />
       </div>
       <header>
-        <span className="marque">
-          <Hexagone />
-          <span>
-            paraphe
-            <br />
-            <span className="sous">{cfg.campaign?.candidat}</span>
-          </span>
-        </span>
+        <Marque logo={cfg.logo} sous={cfg.campaign?.candidat} />
         {me && setTab && (
           <NavOnglets tabs={tabs} tab={tab ?? ""} onTab={setTab} />
         )}
@@ -420,6 +414,14 @@ function Connexion({
 
   return (
     <>
+      {/* The campaign's mark on the one page a volunteer reaches before the
+          header carries anything of their own — and through the SAME
+          component, so a media outage degrades here the way it degrades
+          everywhere else instead of showing a broken image to a first-time
+          visitor. */}
+      <p className="logo-connexion">
+        <LogoCampagne logo={cfg.logo} className="grand" />
+      </p>
       <h1>Connexion</h1>
       {cfg.no_account && (
         <p className="alerte erreur">

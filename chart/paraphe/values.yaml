@@ -140,6 +140,23 @@ secrets:
   # mot de passe de Valkey (compteurs du rate-limiting) — obligatoire dès
   # que valkey.enabled, pour la même raison.
   valkeyPassword: ""
+  # Identifiants S3 avec lesquels l'application écrit les logos —
+  # obligatoires dès que media.enabled, pour la même raison. L'ID commence
+  # par GK : Garage le veut ainsi. openssl rand -hex 12 / -hex 32
+  #
+  # ROTATION : changer le SEUL secret ne sert à rien. Garage ne sait pas
+  # changer le secret d'une clé existante, et refuse qu'un ID supprimé
+  # revienne — l'amorçage le détecte désormais et REFUSE le déploiement
+  # plutôt que de passer au vert sur un changement sans effet. Après une
+  # fuite, changer les DEUX : l'ancienne clé perd alors ses droits sur le
+  # seau, ce que l'amorçage fait lui-même.
+  mediaAccessKey: ""
+  mediaSecretKey: ""
+  # Entre les nœuds Garage (RPC) et pour l'amorçage (admin) — obligatoires
+  # dès que garage.enabled. Le RPC fait EXACTEMENT 64 caractères
+  # hexadécimaux : Garage refuse toute autre longueur. openssl rand -hex 32
+  garageRpcSecret: ""
+  garageAdminToken: ""
   # Nom d'un Secret existant. Il doit porter les clés suivantes — le chart
   # ne peut pas lire son contenu, et une clé manquante ne se voit qu'en
   # CreateContainerConfigError, aucun pod ne devenant jamais prêt :
@@ -147,6 +164,10 @@ secrets:
   #   PARAPHE_SECRET_KEY               (toujours)
   #   PARAPHE_INSTANCE_ADMIN_PASSWORD  (dès que instance.baseDomain est posé)
   #   PARAPHE_VALKEY_PASSWORD          (dès que valkey.enabled est vrai)
+  #   PARAPHE_MEDIA_ACCESS_KEY         (dès que media.enabled est vrai)
+  #   PARAPHE_MEDIA_SECRET_KEY         (dès que media.enabled est vrai)
+  #   PARAPHE_GARAGE_RPC_SECRET        (dès que garage.enabled est vrai)
+  #   PARAPHE_GARAGE_ADMIN_TOKEN       (dès que garage.enabled est vrai)
   existingSecret: ""
 
 # -- Valkey : la mémoire PARTAGÉE du rate-limiting. Avec 3 réplicas de
@@ -186,6 +207,74 @@ valkey:
       memory: 32Mi
     limits:
       memory: 64Mi
+
+# -- Logo des campagnes : un stockage objet, et une ORIGINE à lui.
+#
+# Le navigateur télécharge les logos depuis cette origine, pas à travers
+# l'application — c'est ce que la Content-Security-Policy autorise
+# nommément, et l'origine étant distincte du sous-domaine de la campagne,
+# elle ne porte ni le cookie de session ni le DOM de l'application.
+#
+# Désactivé : les campagnes n'ont pas de logo, l'en-tête garde l'hexagone
+# et l'écran « Mon équipe » le dit. Rien d'autre ne change.
+media:
+  enabled: false
+  # Hôte public servant le seau. L'Ingress route dessus, et Garage sert le
+  # seau dont le nom est l'hôte demandé — d'où un seau nommé pareil.
+  host: media.paraphe.exemple.fr
+  bucket: media.paraphe.exemple.fr
+  region: garage
+  # Vide = l'endpoint S3 du Garage de ce chart. Renseigné = l'object store
+  # d'un fournisseur (OVH, Scaleway, R2), et garage.enabled peut passer à
+  # false : c'est la forme « cloud », où l'on n'héberge aucun stockage.
+  endpoint: ""
+  # Vide = https://<media.host> (http si l'ingress n'a pas de TLS).
+  publicUrl: ""
+
+# -- Garage : le stockage objet, hébergé par ce chart.
+#
+# Trois nœuds, réplication 3 : la perte d'un nœud ne perd rien. Ce sont les
+# SEULS pods de ce chart à porter un volume — un logo n'est pas
+# reconstructible, même s'il reste re-téléversable par sa campagne.
+#
+# La disposition du cluster est IMPÉRATIVE (nommer les nœuds, leur donner
+# zone et capacité, appliquer la version) : un Job d'amorçage la pose à
+# chaque install et upgrade, et il est idempotent.
+garage:
+  enabled: true
+  # 3 = tolère la perte d'un nœud. En dessous, la réplication ci-dessous
+  # n'atteint jamais son quorum et toute écriture est refusée.
+  replicas: 3
+  replicationFactor: 3
+  # une seule zone : ces trois pods vivent dans le même cluster, et
+  # l'anti-affinité les répartit déjà sur trois machines
+  zone: paraphe
+  # Capacité annoncée par nœud, EN OCTETS ET ENTRE GUILLEMETS. Les logos
+  # pèsent 64 Kio au plus : ce n'est pas un dimensionnement, c'est ce que
+  # Garage exige pour placer quoi que ce soit.
+  #
+  # Les guillemets ne sont pas cosmétiques : sans eux, YAML lit un flottant
+  # et Helm rend « 1e+10 », que Garage refuse — un cluster qui ne se pose
+  # jamais, sur un message que seuls les logs du Job portent.
+  capacityBytes: "10000000000"
+  image:
+    repository: dxflrs/garage
+    tag: "v2.3.0"
+  # Une image avec un shell, pour écrire la configuration du pod et pour le
+  # Job d'amorçage : celle de Garage est FROM scratch et n'en a pas.
+  initImage:
+    repository: alpine
+    tag: "3.22"
+  storage:
+    className: ""
+    meta: 1Gi
+    data: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
 
 # -- Réseaux dont le X-Forwarded-For est cru par le rate-limiting (l'ingress,
 # un éventuel proxy devant lui). Dans la forme de ce chart le trafic arrive

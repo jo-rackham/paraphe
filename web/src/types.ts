@@ -9,6 +9,12 @@ import type { Mayor } from "../../noyau/messages.ts";
 
 export type { Campaign, Mayor } from "../../noyau/messages.ts";
 
+/** A campaign's logo, as the API describes it. Null: the campaign has none. */
+export interface Logo {
+  url: string;
+  type: string;
+}
+
 /**
  * Card as the API returns it: the CSV columns, plus the work state.
  * `team_id` stays out of the type: it is the row's only non-textual field,
@@ -58,6 +64,12 @@ export interface Rank {
 export interface ServerConfig {
   mode: "team";
   campaign: Record<string, string>;
+  /**
+   * The campaign's logo, or null. The URL is ABSOLUTE and built by the API:
+   * it points at the object store's own origin, which the page cannot
+   * derive — and which the Content-Security-Policy names explicitly.
+   */
+  logo: Logo | null;
   batch_size: number;
   unfilled: string[];
   source_url: string;

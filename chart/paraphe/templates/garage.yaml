@@ -1,0 +1,331 @@
+{{/*
+  Garage, en haute disponibilité : le stockage objet qui porte les logos de
+  campagne. Trois nœuds, facteur de réplication 3 — la perte d'un nœud ne
+  perd rien et n'interrompt rien.
+
+  Contrairement à Valkey, ces pods ont des VOLUMES : leur contenu n'est pas
+  reconstructible. Un logo perdu reste re-téléversable par sa campagne, donc
+  ce n'est pas la classe du travail de l'équipe, mais ce n'est pas non plus
+  un compteur jetable.
+
+  Le navigateur télécharge les logos DEPUIS ce service (endpoint web, 3902),
+  pas à travers l'application : c'est l'arbitrage retenu, et c'est ce que la
+  Content-Security-Policy de l'application autorise nommément. L'origine
+  média étant distincte du sous-domaine de la campagne, et le cookie de
+  session étant host-only, un SVG hostile n'y trouverait ni cookie ni DOM.
+
+  Désactivable : garage.enabled=false et media.* pointant sur l'object store
+  d'un fournisseur (OVH, Scaleway, R2) — c'est la forme « cloud », où l'on
+  n'héberge aucun stockage.
+*/}}
+{{- if and .Values.media.enabled .Values.garage.enabled }}
+{{- $name := include "paraphe.nomGarage" . -}}
+{{- $headless := printf "%s-rpc" $name -}}
+{{/* Headless : chaque pod y reçoit un nom stable, et c'est par ces
+     noms-là qu'ils se parlent en RPC et que le Job les adresse un par un. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $headless }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # les pods doivent se résoudre AVANT d'être prêts, sinon personne ne
+  # rejoint personne et la disponibilité n'arrive jamais
+  publishNotReadyAddresses: true
+  selector: {{- include "paraphe.selecteurGarage" . | nindent 4 }}
+  ports:
+    - name: rpc
+      port: 3901
+    - name: admin
+      port: 3903
+---
+{{/* L'API S3 : l'adresse que l'APPLICATION appelle pour écrire. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  selector: {{- include "paraphe.selecteurGarage" . | nindent 4 }}
+  ports:
+    - name: s3
+      port: 3900
+---
+{{/* L'endpoint web : l'adresse que le NAVIGATEUR appelle pour lire. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-web
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  selector: {{- include "paraphe.selecteurGarage" . | nindent 4 }}
+  ports:
+    - name: web
+      port: 3902
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  serviceName: {{ $headless }}
+  replicas: {{ .Values.garage.replicas }}
+  # Parallel : chaque nœud est autonome au démarrage et le Job les
+  # présente ensuite. En OrderedReady, le pod 1 attend que le 0 soit prêt,
+  # et un cluster à trois met trois fois plus longtemps à exister.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {{- include "paraphe.selecteurGarage" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paraphe.selecteurGarage" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/garage-config.yaml") . | sha256sum }}
+        checksum/secret: {{ printf "%s|%s" (include (print $.Template.BasePath "/secret.yaml") .)
+            (.Values.secrets.existingSecret | default "") | sha256sum }}
+    spec:
+      # le kubelet injecte une variable PARAPHE_* par port de Service : le
+      # drapeau vaut pour chaque pod que ce chart dessine, pas seulement
+      # pour celui où la collision a été remarquée
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # l'image officielle tourne en root par défaut ; rien ici n'en a
+        # besoin, et les volumes sont donnés au groupe par fsGroup
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          # « required » et non « preferred » : trois réplicas sur un même
+          # nœud ne tolèrent la perte de rien du tout, et c'est la seule
+          # chose que ces trois pods existent pour offrir.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {{- include "paraphe.selecteurGarage" . | nindent 18 }}
+      initContainers:
+        # Écrit la configuration du pod : son adresse publique, qui diffère
+        # d'un pod à l'autre alors qu'un ConfigMap est commun aux trois.
+        # RIEN de secret ne passe ici — le secret RPC arrive au serveur par
+        # son environnement, jamais par une ligne de commande.
+        - name: config
+          image: "{{ .Values.garage.initImage.repository }}:{{ .Values.garage.initImage.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command:
+            - sh
+            - -ec
+            - |
+              sed -e "s|__RPC_PUBLIC_ADDR__|$POD_NAME.{{ $headless }}.{{ .Release.Namespace }}.svc:3901|" \
+                  /tmpl/garage.toml > /etc/garage/garage.toml
+          volumeMounts:
+            - { name: tmpl, mountPath: /tmpl }
+            - { name: config, mountPath: /etc/garage }
+      containers:
+        - name: garage
+          image: "{{ .Values.garage.image.repository }}:{{ .Values.garage.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          # The image has NO entrypoint, only a CMD of ["/garage","server"]:
+          # giving args alone replaces the whole of it, and the kubelet then
+          # looks for a program called "server".
+          command: ["/garage"]
+          args: ["server"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: GARAGE_CONFIG_FILE
+              value: /etc/garage/garage.toml
+            # Par l'environnement et non par le fichier : un ConfigMap n'est
+            # pas un endroit pour un secret, et une substitution le ferait
+            # passer par une ligne de commande.
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_GARAGE_RPC_SECRET
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_GARAGE_ADMIN_TOKEN
+          ports:
+            - { name: s3, containerPort: 3900 }
+            - { name: rpc, containerPort: 3901 }
+            - { name: web, containerPort: 3902 }
+            - { name: admin, containerPort: 3903 }
+          livenessProbe:
+            # Le PROCESSUS, pas le cluster. `/health` répond 503 tant que la
+            # disposition n'est pas posée — et elle est posée par un Job qui
+            # attend que les nœuds répondent : en sonde de vivacité, elle
+            # tuait les trois pods en boucle avant que l'amorçage puisse
+            # tourner. Elle reste la bonne sonde de PRÉPARATION.
+            tcpSocket: { port: admin }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            # 200 quand ce nœud peut réellement servir : avant la
+            # disposition, et pendant une perte de quorum, le Service ne
+            # doit pas lui envoyer de trafic.
+            httpGet: { path: /health, port: admin }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.garage.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/garage }
+            - { name: meta, mountPath: /mnt/meta }
+            - { name: data, mountPath: /mnt/data }
+      volumes:
+        - name: tmpl
+          configMap:
+            name: {{ $name }}
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: meta
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.className }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.storage.meta }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.className }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.storage.data }}
+---
+{{- if gt (int .Values.garage.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "paraphe.selecteurGarage" . | nindent 6 }}
+{{- end }}
+---
+{{/*
+  L'amorçage. Impératif par nature : la disposition d'un cluster Garage
+  n'a pas de forme déclarative — il faut nommer les nœuds, leur donner une
+  zone et une capacité, puis appliquer la version obtenue.
+
+  Hook Helm, donc rejoué à chaque install ET à chaque upgrade, et
+  idempotent : un nœud déjà placé est laissé tel quel, un seau existant
+  n'est pas recréé. C'est ce qui fait qu'un passage de 3 à 5 réplicas place
+  les deux nouveaux sans intervention.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-init
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      # Ses PROPRES étiquettes, surtout pas celles du StatefulSet : les
+      # nœuds s'excluent mutuellement par anti-affinité (un par machine),
+      # et ce pod portant les mêmes étiquettes s'excluait lui-même de
+      # toutes les machines — il restait Pending pour toujours, et le
+      # cluster n'était jamais amorcé.
+      labels:
+        app.kubernetes.io/name: {{ include "paraphe.nom" . }}-garage-init
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      securityContext:
+        # ROOT, and only here. The bootstrap needs curl and jq, and the
+        # image installs them at start — `apk` writes to /lib/apk and
+        # refuses to run as anyone else. Everything else stays shut: no
+        # capability, no privilege escalation, no volume but the script,
+        # and the pod lives for the few seconds the bootstrap takes.
+        #
+        # An operator who would rather not: point garage.initImage at an
+        # image that already carries curl and jq, and this pod stops
+        # needing anything at all.
+        runAsUser: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: init
+          image: "{{ .Values.garage.initImage.repository }}:{{ .Values.garage.initImage.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: GARAGE_PEERS
+              # chaque pod NOMMÉMENT : derrière un Service à répartition de
+              # charge, on ne peut pas présenter les nœuds les uns aux autres
+              value: >-
+                {{- range $i := until (int .Values.garage.replicas) }}
+                http://{{ $name }}-{{ $i }}.{{ $headless }}.{{ $.Release.Namespace }}.svc:3903
+                {{- end }}
+            - name: GARAGE_ZONE
+              value: {{ .Values.garage.zone | quote }}
+            - name: GARAGE_CAPACITY
+              value: {{ .Values.garage.capacityBytes | quote }}
+            - name: MEDIA_BUCKET
+              value: {{ .Values.media.bucket | quote }}
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_GARAGE_ADMIN_TOKEN
+            - name: MEDIA_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_MEDIA_ACCESS_KEY
+            - name: MEDIA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_MEDIA_SECRET_KEY
+          command: ["sh", "-ec"]
+          args:
+            # installed only if absent, so an image that already carries
+            # them needs no network at all
+            - |
+              command -v curl >/dev/null && command -v jq >/dev/null \
+                || apk add --no-cache curl jq >/dev/null
+              sh /scripts/garage-init.sh
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $name }}
+{{- end }}

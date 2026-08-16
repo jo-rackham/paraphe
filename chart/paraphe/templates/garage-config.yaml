@@ -1,0 +1,46 @@
+{{/*
+  La configuration des nœuds Garage et le script d'amorçage, dans leur
+  propre fichier : le StatefulSet en prend l'empreinte pour se rouler quand
+  elle change, et un template ne peut pas prendre la sienne propre.
+*/}}
+{{- if and .Values.media.enabled .Values.garage.enabled }}
+{{- $name := include "paraphe.nomGarage" . -}}
+{{- $headless := printf "%s-rpc" $name -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+data:
+  # Un seul marqueur, remplacé au démarrage par l'initContainer : l'adresse
+  # publique est PROPRE À CHAQUE POD, et un ConfigMap est le même pour les
+  # trois. Le secret RPC, lui, n'est PAS substitué — il arrive par
+  # GARAGE_RPC_SECRET, depuis le Secret. Substitué, il devenait l'argv de
+  # sed et se lisait dans /proc/<pid>/cmdline le temps du démarrage.
+  garage.toml: |
+    metadata_dir = "/mnt/meta"
+    data_dir = "/mnt/data"
+    db_engine = "lmdb"
+
+    replication_factor = {{ .Values.garage.replicationFactor }}
+    consistency_mode = "consistent"
+
+    rpc_bind_addr = "[::]:3901"
+    rpc_public_addr = "__RPC_PUBLIC_ADDR__"
+
+    [s3_api]
+    s3_region = {{ .Values.media.region | quote }}
+    api_bind_addr = "[::]:3900"
+
+    [s3_web]
+    bind_addr = "[::]:3902"
+    # Le seau dont le nom est l'hôte demandé est servi tel quel : le seau
+    # s'appelle donc comme l'hôte média, et l'Ingress route dessus.
+    root_domain = ".{{ .Values.media.host }}"
+    index = "index.html"
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+  garage-init.sh: |
+{{ .Files.Get "files/garage-init.sh" | indent 4 }}
+{{- end }}

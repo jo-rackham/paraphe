@@ -77,6 +77,69 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # The object store holding the campaign logos. ONE node here, like Valkey
+  # above and for the same reason: this compose serves the one-VPS shape,
+  # and the chart carries the HA topology (three nodes, erasure-coded).
+  #
+  # Unlike Valkey, this one HAS a volume: its contents are not rebuildable.
+  # A lost logo is re-uploadable by its campaign, so it is not in the class
+  # of the team's work — but it is not a counter either.
+  garage:
+    image: dxflrs/garage:v2.3.0
+    volumes:
+      - ./config/garage.toml:/etc/garage.toml:ro
+      - paraphe-garage-meta:/var/lib/garage/meta
+      - paraphe-garage-data:/var/lib/garage/data
+    environment:
+      GARAGE_RPC_SECRET: ${PARAPHE_GARAGE_RPC_SECRET}
+      # Not published: only garage-init, on this network, ever calls it.
+      GARAGE_ADMIN_TOKEN: ${PARAPHE_GARAGE_ADMIN_TOKEN}
+    ports:
+      # loopback ONLY, like the database and the counters: 3900 is the S3
+      # API — write access to every logo — and 3902 the WEB endpoint the
+      # browser fetches them from, which the host's TLS proxy publishes.
+      # Both are here so that `task api`, run outside Docker, reaches them.
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3902:3902"
+    healthcheck:
+      # the S3 API answering, which is what the bootstrap and the app need
+      test: ["CMD", "/garage", "status"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # One shot, at every start, and idempotent. The layout of a Garage cluster
+  # is imperative — there is no declarative form of "this node stores data"
+  # — and a bucket that does not exist fails the API's startup check.
+  #
+  # An alpine, not the garage image: that one is FROM scratch and carries no
+  # shell, so nothing built on it can run a multi-step bootstrap. The script
+  # talks to the admin API, which is the supported machine interface, and
+  # the chart's Job runs the very same file.
+  # Lancez-le par `task garage`, jamais par `docker compose up garage-init`
+  # tout seul : sans .env, les variables ci-dessous s'interpolent à vide,
+  # compose en conclut que la définition de `garage` a changé et RECRÉE le
+  # nœud avec un secret RPC vide — il ne redémarre plus, et la commande qui
+  # dit « up » vient de détruire une pile qui tournait. `task garage` pose
+  # des valeurs locales pour celles que .env ne porte pas.
+  garage-init:
+    image: alpine:3.22
+    depends_on:
+      garage:
+        condition: service_healthy
+    volumes:
+      - ./chart/paraphe/files/garage-init.sh:/garage-init.sh:ro
+    environment:
+      # un seul nœud ici, donc une liste de pairs à un élément
+      GARAGE_PEERS: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${PARAPHE_GARAGE_ADMIN_TOKEN}
+      MEDIA_BUCKET: paraphe-media
+      MEDIA_ACCESS_KEY: ${PARAPHE_MEDIA_ACCESS_KEY}
+      MEDIA_SECRET_KEY: ${PARAPHE_MEDIA_SECRET_KEY}
+    command: ["sh", "-c", "apk add --no-cache curl jq >/dev/null && /garage-init.sh"]
+    restart: "no"
+
   api:
     build:
       context: .
@@ -86,6 +149,8 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     environment:
       # here and not in .env: `environment` wins over `env_file`, so
       # setting it in .env would have no effect and nobody would see why
@@ -100,6 +165,13 @@ services:
       # wrong passwords lock every volunteer out, and three hosting requests
       # close the public form for the world.
       PARAPHE_TRUSTED_PROXIES: "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+      # The endpoint the APPLICATION writes to, inside this network. The
+      # origin the BROWSER reads from is PARAPHE_MEDIA_PUBLIC_URL in .env —
+      # two different addresses for the same bucket, and confusing them
+      # produces a logo the server stores and no page can display.
+      PARAPHE_MEDIA_ENDPOINT: http://garage:3900
+      PARAPHE_MEDIA_BUCKET: paraphe-media
+      PARAPHE_MEDIA_REGION: garage
     ports:
       # loopback ONLY, like the database: DEPLOYMENT.md prescribes this
       # compose on a public-IP VPS behind a TLS proxy, and "8047:8047" would
@@ -116,3 +188,5 @@ services:
 
 volumes:
   paraphe-pg:
+  paraphe-garage-meta:
+  paraphe-garage-data:

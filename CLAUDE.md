@@ -73,7 +73,9 @@ buys three things, and the first is why:
   original; the server negotiates on `Accept-Encoding`. 357 kB of bundle
   leaves as 90. nginx shipped `#gzip on;` commented out and served all 357.
 - **Nothing is written to disk.** The final stage has no shell, no package
-  manager and no writable filesystem; the chart mounts no volume at all.
+  manager and no writable filesystem. The application's own pods mount no
+  volume; the only ones the chart gives a volume to are the object store's
+  (see below), and the application never touches them except over S3.
 
 ## Sources (all open)
 
@@ -321,8 +323,68 @@ refuses to open rather than let anyone in.
   columns (volunteer, status, updated_at) are never touched. A target removed
   from the CSV is deleted if untouched, flagged "RETIRÉ" if already worked on.
   Schema migrated by ALTER TABLE.
-- **The team's work lives in PostgreSQL and is the only irreplaceable data**
-  — `task backup`.
+- **The team's work lives in PostgreSQL and is the only IRREPLACEABLE data**
+  — `task backup`. It is no longer the only data: a campaign logo lives in
+  the object store (`task backup-media`), and losing one costs the thirty
+  seconds it takes to upload it again. PostgreSQL keeps the POINTER (the key and
+  its type, the key ending in a digest of the content), so a bucket
+  restored from an older copy is detectable rather than silent.
+
+## The campaign logo, and the origin that serves it
+
+Optional, uploaded from "Mon équipe", shown beside the paraphe mark and on
+the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
+
+- **The hexagon and the word stay.** `style.css` opens on the reason — this
+  identity is deliberately not the State's and the site must never look
+  official — and on a shared instance a campaign taking over the whole mark
+  is the squat moderation exists to prevent. The logo JOINS the mark.
+- **The browser fetches it from the object store's own origin**, not
+  through the application. That is the one remote origin
+  `securityHeaders` allows, assembled at startup from
+  `PARAPHE_MEDIA_PUBLIC_URL` — so the policy is no longer a constant, and
+  `contentSecurityPolicy` reads the setting into `img-src` and nowhere else.
+- **A separate host is what contains an SVG.** The session cookie is
+  host-only (no `Domain=`), so a script that ran on the media origin finds
+  neither cookie nor DOM. Serving from the app would have needed a
+  per-response `sandbox` policy; the bucket cannot set one, and the origin
+  replaces it. The upload validator is the third line, behind that and
+  behind `<img>`'s secure static mode: the BYTES decide the format, and an
+  SVG with a script, an `on*` attribute, a DOCTYPE or an external reference
+  is refused.
+- **PostgreSQL holds the pointer, the store holds the bytes**
+  (`orgs.logo_key`, `orgs.logo_type` — no digest COLUMN: the key ends in
+  one, and the same fact written twice is a fact that can diverge). The key
+  carries a digest of the content,
+  so the URL is immutable and cached for ever; replacing a logo writes a new
+  key and deletes the old one, best-effort and never blocking the answer.
+  The object goes in BEFORE the pointer moves: the other order publishes a
+  URL that 404s.
+- **Five settings, all or nothing.** Half of them refuses the start, and so
+  does a store that is configured but unreachable — the same posture as an
+  unreadable `PARAPHE_WEB_DIR`. None of them is the normal state of a
+  developer's instance and of most tests: the routes then answer 501 saying
+  so, and the header shows the hexagon.
+- **The S3 client is hand-written** (`api/media.go`), SigV4 over two calls.
+  The usual client brings fourteen transitive modules into a project with
+  six direct ones, almost all for multipart paths a 64 KiB object never
+  takes. `TestALogoWrittenToTheStoreIsPubliclyReadableThenGone` runs it
+  against a real Garage: a wrong signature is a 403, loudly.
+- **Browser mode never holds a URL**, only a data URI in IndexedDB (a new
+  key in the existing `settings` store — no VERSION bump). A logo adopted
+  through `?org=` is downloaded ONCE, at the moment the volunteer accepts.
+  Holding the URL would put a call to the instance in every page load, and
+  "aucune donnée ne quitte ce navigateur" has to survive being checked in
+  the network tab.
+- **A Garage layout is imperative**: there is no declarative form of "this
+  node stores data". `chart/paraphe/files/garage-init.sh` — one file, run by
+  the compose stack and by the chart's Job — introduces the nodes, lays them
+  out, creates the bucket, imports the key and publishes it. Three things it
+  learned the hard way: `/health` answers 503 until the layout exists (so it
+  is the READINESS probe and never the liveness one), the Job must not wear
+  the StatefulSet's labels (their anti-affinity then excludes it from every
+  machine), and `capacityBytes` must be QUOTED in values.yaml (unquoted,
+  YAML reads a float and Garage is handed `1e+10`).
 
 ## Non-obvious constraints
 

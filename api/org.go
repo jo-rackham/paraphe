@@ -55,6 +55,16 @@ type Org struct {
 	// Listed: whether the apex directory shows this campaign — chosen on
 	// the hosting request, adjustable by coordination
 	Listed bool `json:"listed"`
+	// The campaign's logo, optional. The BYTES live in the object store;
+	// what the database keeps is the pointer. The key ENDS in a digest of
+	// the content, which is what makes its public URL immutable. Kept here
+	// rather than in `campaign` because it fills no {placeholder} and must not count as an
+	// unfilled key: a campaign without a logo is a complete campaign.
+	//
+	// ReadOrg runs on every request that resolves a subdomain, which is why
+	// these two are text and the image is not among them.
+	LogoKey  string `json:"logo_key"`
+	LogoType string `json:"logo_type"`
 }
 
 // BaseDomain: the domain under which campaigns receive their subdomain.
