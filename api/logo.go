@@ -188,7 +188,13 @@ func refuseSVG(raw []byte) string {
 			break
 		}
 		if err != nil {
-			return "SVG illisible : le fichier n'est pas du XML valide."
+			// The encoding is named because Go's decoder reads UTF-8 and
+			// nothing else: an `encoding="ISO-8859-1"` declaration, or XML
+			// 1.1, fails here and "not valid XML" then sends the uploader
+			// looking for a syntax error there is none of.
+			return "SVG illisible : le fichier n'est pas du XML valide, " +
+				"ou il est encodé autrement qu'en UTF-8. Réexportez-le en " +
+				"UTF-8."
 		}
 		switch t := token.(type) {
 		case xml.ProcInst:

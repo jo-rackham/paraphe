@@ -1,5 +1,3 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -205,6 +203,35 @@ describe("the logo field", () => {
     expect(onRetire).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the removal working while an upload never answers", async () => {
+    // One guard PER CONTROL. Shared, the token an upload takes is never
+    // given back when its promise does not settle — a hung network, a
+    // caller that forgets to resolve — and « Retirer le logo » then stops
+    // responding too, with no message and no way out but reloading. The
+    // parent cannot say it either: `occupe` is its own state, and it does
+    // not know its callback is hung.
+    const onRetire = vi.fn();
+    act(() =>
+      root.render(
+        <ChampLogo
+          logo="data:image/png;base64,iVBORw0KGgo="
+          onChoisi={() => new Promise<void>(() => {})}
+          onRetire={onRetire}
+          onErreur={vi.fn()}
+        />,
+      ),
+    );
+    const input = container.querySelector<HTMLInputElement>("#champ-logo");
+    if (!input) throw new Error("no field");
+    choisir(input, new File(["x"], "logo.png", { type: "image/png" }));
+    await act(async () => {});
+    const bouton = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Retirer"),
+    );
+    await act(async () => bouton?.click());
+    expect(onRetire).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a file the picker was talked into showing", async () => {
     // `accept` filters the dialog, and a dialog can be told to show
     // everything. In browser mode nothing else reads these bytes: a text
@@ -340,39 +367,43 @@ describe("a campaign offered by ?org=", () => {
 // drag preview would open it again — in the one mode published on GitHub
 // Pages, where there is no Content-Security-Policy to catch anything.
 describe("where a logo is allowed to be rendered", () => {
-  // jsdom rewrites import.meta.url to an http:// URL, so the directory is
-  // found from the working directory — and an empty scan THROWS: a canary
-  // over nothing passes while proving nothing.
-  let dir = "";
-  for (let d = process.cwd(), i = 0; i < 4; i++, d = dirname(d)) {
-    for (const c of [join(d, "src"), join(d, "web", "src")]) {
-      if (existsSync(join(c, "common.tsx"))) dir = c;
-    }
-    if (dir) break;
-  }
-  if (!dir) throw new Error("web/src not found from " + process.cwd());
-  const sources = readdirSync(dir)
-    .filter((f) => /\.(tsx|ts|css)$/.test(f) && !f.includes(".test."))
-    .map((f) => [f, readFileSync(join(dir, f), "utf8")] as const);
-  if (sources.length < 5) throw new Error("nothing was scanned");
+  // Judged on the RENDERED tree, not on the source text. A first version
+  // read the sources for the identifier `logo` and was walked past by
+  // renaming it: `const url = brand?.url` then `style={{backgroundImage:
+  // 'url(' + url + ')'}}` put the same bytes in the one sink the check
+  // named, and both of its rules reported nothing. A canary keyed on a NAME
+  // guards a name. This one plants a value and looks for it wherever the
+  // DOM ends up carrying it.
+  const SENTINEL = "data:image/png;base64,SENTINELLE0000";
 
-  it("is a src attribute, and nowhere else", () => {
-    // `logo={logo}` passes it down, `src={logo}` renders it; anything else
-    // — href, data, style, srcDoc — hands it to a context that executes.
-    const passing = /(\w+)=\{[^{}]*\blogo\b[^{}]*\}/g;
-    const allowed = new Set(["src", "logo", "key"]);
-    for (const [name, text] of sources) {
-      for (const [whole, attribute] of text.matchAll(passing)) {
-        expect(allowed.has(attribute), `${name}: ${whole}`).toBe(true);
-      }
-    }
-  });
+  /** Every attribute of every node that carries the planted value. */
+  const sinks = () =>
+    [...container.querySelectorAll("*")].flatMap((node) =>
+      [...node.attributes]
+        .filter((a) => a.value.includes(SENTINEL))
+        .map((a) => `<${node.tagName.toLowerCase()} ${a.name}>`),
+    );
 
-  it("is never a CSS background", () => {
-    // A background renders the same bytes in a context where SVG onload
-    // has fired, historically, in more than one engine.
-    for (const [name, text] of sources) {
-      expect(/background[^;]*logo/i.test(text), name).toBe(false);
+  it("reaches the src of an img, and no other attribute", () => {
+    // style, href, data, srcdoc, poster: each of them renders or fetches
+    // the same bytes in a context that is not <img>'s secure static mode.
+    for (const tree of [
+      () => <Marque logo={{ url: SENTINEL, type: "image/png" }} sous="x" />,
+      () => (
+        <ChampLogo
+          logo={SENTINEL}
+          onChoisi={vi.fn()}
+          onRetire={vi.fn()}
+          onErreur={vi.fn()}
+        />
+      ),
+    ]) {
+      act(() => root.render(tree()));
+      const found = sinks();
+      expect(found.length, "the value was not rendered at all").toBeGreaterThan(
+        0,
+      );
+      for (const sink of found) expect(sink).toBe("<img src>");
     }
   });
 });

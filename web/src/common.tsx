@@ -574,12 +574,20 @@ export function ChampLogo({
   occupe?: boolean;
 }) {
   const champ = useRef<HTMLInputElement>(null);
-  // `occupe` is what the SCREEN shows; this is what guards. Two clicks in
+  // `occupe` is what the SCREEN shows; these are what guard. Two clicks in
   // the same tick run two handlers built by the same render, and both read
   // the prop as it was before either of them — the project has paid for
-  // that shape twice already. The guard is held until the caller's own
+  // that shape twice already. Each guard is held until its caller's own
   // work settles, which is why both callbacks may return a promise.
-  const [busy, done] = useSubmitGuard();
+  //
+  // ONE PER CONTROL, and not one for the field: choosing a file and
+  // removing the logo are independent, so a shared token means an upload
+  // whose promise never settles also mutes « Retirer le logo » — with no
+  // message, since `occupe` is the parent's to set, and no way out but
+  // reloading the page. That is worse than the double click these exist
+  // for.
+  const [envoiEnCours, envoiFini] = useSubmitGuard();
+  const [retraitEnCours, retraitFini] = useSubmitGuard();
   return (
     <div>
       <p>
@@ -609,19 +617,26 @@ export function ChampLogo({
             // mistake became a logo that vanished at the next reload with
             // nothing said.
             if (!LOGO_TYPES.split(",").includes(file.type)) {
+              // A file with no extension has no type at all here — the
+              // browser reads the NAME, not the bytes — so the sentence
+              // names the way out instead of leaving a dead end.
               onErreur(
-                `Ce fichier est de type « ${file.type || "inconnu"} ». ` +
-                  "Choisissez un PNG, un JPEG, un WebP ou un SVG.",
+                file.type
+                  ? `Ce fichier est de type « ${file.type} ». Choisissez ` +
+                      "un PNG, un JPEG, un WebP ou un SVG."
+                  : "Le type de ce fichier n'a pas pu être déterminé : " +
+                      "son nom n'a pas d'extension. Renommez-le en .png, " +
+                      ".jpg, .webp ou .svg.",
               );
               return;
             }
-            if (busy()) return;
+            if (envoiEnCours()) return;
             try {
               await onChoisi(await lireFichier(file));
             } catch (err) {
               onErreur(err instanceof Error ? err.message : String(err));
             } finally {
-              done();
+              envoiFini();
             }
           }}
         />
@@ -639,14 +654,14 @@ export function ChampLogo({
             className="lien"
             aria-disabled={occupe || undefined}
             onClick={async () => {
-              if (busy()) return;
+              if (retraitEnCours()) return;
               // this button and the preview beside it are about to unmount:
               // hand focus to the field that replaces them, never to <body>
               champ.current?.focus();
               try {
                 await onRetire();
               } finally {
-                done();
+                retraitFini();
               }
             }}
           >
