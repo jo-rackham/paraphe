@@ -562,6 +562,13 @@ works when the relay is down, and still bootstraps the instance.
   re-arming whenever `INCR` answers 1, which a key sitting at zero does:
   **the two stores answer the same callers, so any difference between them
   is readable from outside**, and both now hold the same test.
+  **A refund that FAILS leaves that same oracle standing** — the attempt
+  counted and its window armed — and the next round found it one step past
+  the fix. It takes the shared store answering the count of a request and
+  failing its refund, a failover landing between two calls; the local store
+  has nothing to give back, because the count never went there. Assumed:
+  retrying would hold a successful sign-in on a store already known down,
+  and the residue is bounded by the class. The warning says what it leaves.
   **What is refunded is what THIS ROUTE counted, not the door the caller
   came through.** Redeeming a link counts nothing per account — the token
   carries no address, so the source ceiling is its whole bound — and
