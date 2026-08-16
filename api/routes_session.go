@@ -185,7 +185,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
-	s.openSession(w, r, c, departments, limitSignInAccount,
+	s.openSession(w, r, c, departments, &limitSignInAccount,
 		"signin_succeeded")
 }
 
@@ -200,8 +200,13 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 // The account and its departments are read by the CALLER, before it
 // commits — the transaction closes with that commit, and everything this
 // answer needs must already be in hand.
+// countedUnder names the account-keyed ceiling THIS ROUTE spent an event on,
+// or nil when it spent none. Not the door the caller came through: redeeming
+// a link carries a token and no address, so it counts nothing per account —
+// and refunding the request ceiling there gave back an event nobody had
+// spent, which is the same observable credit the refund exists to avoid.
 func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
-	c *Account, departments []string, doorTaken limitClass, event string,
+	c *Account, departments []string, countedUnder *limitClass, event string,
 	extra ...any) {
 	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
@@ -226,11 +231,10 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
 	// where it stood. An attacker watching it sees the same thing whether the
 	// owner signed in or not, and the owner's own sign-ins cost nothing.
 	//
-	// The OTHER door is not refunded: nothing was spent there, and a credit
-	// for a link nobody asked for is the observable difference all over
-	// again.
-	if subject, ok := s.signInSubjectFor(r, c.Email); ok {
-		s.limiter.refund(r.Context(), doorTaken, subject)
+	if countedUnder != nil {
+		if subject, ok := s.signInSubjectFor(r, c.Email); ok {
+			s.limiter.refund(r.Context(), *countedUnder, subject)
+		}
 	}
 	s.securityEvent(r, slog.LevelInfo, event,
 		append([]any{"account", s.accountPseudonym(c.Email)}, extra...)...)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // Which ceiling covers which route — declared HERE, checked against the
@@ -499,6 +500,72 @@ func TestRefusalCarriesRetryAfterAndCORSWhereDue(t *testing.T) {
 // bucket exactly where it stood, so the walk below — burn a real address and
 // a ghost, sign in as the real one, count how many attempts the ceiling
 // still allows — answers the same for both.
+// The door refunded is the one THIS ROUTE counted — which is not the door
+// the caller came through.
+//
+// Redeeming a link counts nothing per account: it carries a 256-bit token
+// and no address, so the source ceiling is its whole bound and the router
+// says so. Refunding the link-REQUEST ceiling there gives back an event the
+// redeem never spent, and that credit is addressable by anyone who knows an
+// e-mail: burn the request ceiling for it, wait, and the slot that reopens
+// says its owner has just clicked their link.
+func TestRedeemingALinkRefundsNothingItDidNotSpend(t *testing.T) {
+	s, srv := testServer(t)
+	withMailer(t, s, "https://campagne.exemple.fr")
+	const real = "marie@exemple.fr"
+	const ghost = "personne@exemple.fr"
+	createAccount(t, s, real, RoleVolunteer, nil)
+
+	// An INVITATION, because the purpose is part of the key: the attacker's
+	// requests below mint sign-in links, and each one replaces the last, so a
+	// sign-in link taken before the burn would be dead by the time its owner
+	// clicked it. An invitation survives them, which is the shape a volunteer
+	// meets in practice — invited on Monday, clicking on Tuesday.
+	org := orgID(t, s, testSlug)
+	var token string
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		var err error
+		if token, err = s.mintInvitation(context.Background(), tx, org, real); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// The attacker spends what is left of the ceiling on both addresses.
+	burn := func(address string) {
+		attacker := newClient(t, srv)
+		// EXACTLY to the ceiling and no further: driven well past it, one
+		// refunded event does not bring the bucket back under, and the walk
+		// would come out even for the wrong reason.
+		for i := 1; i <= limitMagicLinkAccount.events; i++ {
+			if code, _ := attacker.call(http.MethodPost, "/api/session/link",
+				map[string]string{"email": address}); code != http.StatusOK {
+				t.Fatalf("burning %s, request %d: %d", address, i, code)
+			}
+		}
+	}
+	burn(real)
+	burn(ghost)
+
+	// The owner clicks their link.
+	if code, _ := redeem(t, newClient(t, srv), token); code != http.StatusOK {
+		t.Fatalf("the owner could not use their link: %d", code)
+	}
+
+	// And the attacker asks again for each address.
+	after := func(address string) int {
+		code, _ := newClient(t, srv).call(http.MethodPost, "/api/session/link",
+			map[string]string{"email": address})
+		return code
+	}
+	realAfter, ghostAfter := after(real), after(ghost)
+	if realAfter != ghostAfter {
+		t.Errorf("the burned ceiling answers %d for an address whose owner "+
+			"has just redeemed a link and %d for one nobody bears: redeeming "+
+			"refunded a request it never made, and the ceiling reports the "+
+			"click", realAfter, ghostAfter)
+	}
+}
+
 func TestBurnedCeilingDoesNotAnnounceThatSomebodySignedIn(t *testing.T) {
 	s, srv := testServer(t)
 	const real = "marie@exemple.fr"

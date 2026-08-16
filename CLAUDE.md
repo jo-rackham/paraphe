@@ -534,9 +534,14 @@ works when the relay is down, and still bootstraps the instance.
   successes too; the end-to-end journeys found that in under a minute.
   Refunding does both: counted on arrival like every event — which is what
   still bounds a flood whose handlers never finish — and given back once the
-  attempt proved legitimate, so the bucket ends where it stood. Only the
-  door that was USED is refunded: crediting the other gives back an event
-  nobody spent, which is the observable difference all over again.
+  attempt proved legitimate, so the bucket ends where it stood.
+  **What is refunded is what THIS ROUTE counted, not the door the caller
+  came through.** Redeeming a link counts nothing per account — the token
+  carries no address, so the source ceiling is its whole bound — and
+  refunding the request ceiling there gave back an event nobody had spent:
+  burn that ceiling for an address you know, and the slot that reopens says
+  its owner has just clicked their link. `openSession` takes the class as a
+  POINTER for that reason, and the redeem passes nil.
 - **Rate limits, declared once in `api/limiter.go`**: sign-in per source
   AND per submitted address (counted whether the account exists or not — a
   429 must reveal nothing the decoy hash withholds), public hosting form,
