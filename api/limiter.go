@@ -53,10 +53,18 @@ var (
 	// 39.8-bit space; the per-ACCOUNT ceiling below is the sharp wall.
 	limitSignInIP      = limitClass{"signin_ip", 60, 10 * time.Minute}
 	limitSignInAccount = limitClass{"signin_account", 10, 15 * time.Minute}
-	limitHostingIP     = limitClass{"hosting_ip", 3, time.Hour}
-	limitAnonIP        = limitClass{"anon_ip", 120, time.Minute}
-	limitWriteAccount  = limitClass{"write_account", 120, time.Minute}
-	limitExportAccount = limitClass{"export_account", 6, 10 * time.Minute}
+	// Tighter than signing in, because this class is the only one where a
+	// refused caller still costs someone ELSE something: each admitted
+	// request sends a real email to a real inbox. Without the per-address
+	// ceiling the route is a mail bomber aimed at any address its operator
+	// happens to know. Three links per quarter of an hour is more than a
+	// person mistyping their address ever needs.
+	limitMagicLinkIP      = limitClass{"magic_link_ip", 10, 10 * time.Minute}
+	limitMagicLinkAccount = limitClass{"magic_link_account", 3, 15 * time.Minute}
+	limitHostingIP        = limitClass{"hosting_ip", 3, time.Hour}
+	limitAnonIP           = limitClass{"anon_ip", 120, time.Minute}
+	limitWriteAccount     = limitClass{"write_account", 120, time.Minute}
+	limitExportAccount    = limitClass{"export_account", 6, 10 * time.Minute}
 )
 
 // counterStore counts events per opaque key. Two implementations: this
@@ -271,33 +279,46 @@ func (s *Server) limitAccount(class limitClass) func(http.HandlerFunc) http.Hand
 	}
 }
 
-// limitSignInBody bounds sign-in attempts per submitted address. It runs
-// after jsonOnly, whose buffered body it re-reads and restores; the campaign
-// comes from the Host header alone — no database touched, nothing held
-// while the decision is made.
-func (s *Server) limitSignInBody(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		subject, ok := s.signInSubject(r)
-		if !ok {
-			// an unreadable body or an unknown host is refused by the
-			// layers this middleware sits between; nothing to count yet
-			next(w, r)
-			return
+// limitEmailBody bounds a class per SUBMITTED address. It runs after
+// jsonOnly, whose buffered body it re-reads and restores; the campaign comes
+// from the Host header alone — no database touched, nothing held while the
+// decision is made.
+//
+// Two routes take an address before anyone is authenticated — signing in and
+// asking for a link — and both count on it. One implementation, because the
+// second copy is where the two would stop agreeing on what "the same
+// address" means.
+func (s *Server) limitEmailBody(class limitClass) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			subject, ok := s.emailSubject(r)
+			if !ok {
+				// an unreadable body or an unknown host is refused by the
+				// layers this middleware sits between; nothing to count yet
+				next(w, r)
+				return
+			}
+			s.enforce(w, r, class, subject, next)
 		}
-		s.enforce(w, r, limitSignInAccount, subject, next)
 	}
 }
 
-// signInSubject: the (campaign, submitted address) pair a sign-in counts
+// emailSubject: the (campaign, submitted address) pair those routes count
 // under. It reads the body jsonOnly buffered, and restores it for the
 // handler behind it.
-func (s *Server) signInSubject(r *http.Request) (string, bool) {
+//
+// Decoded into the address alone, deliberately: json.Unmarshal ignores the
+// fields it was not shown, so the same reader serves a body carrying a
+// password and one carrying nothing else.
+func (s *Server) emailSubject(r *http.Request) (string, bool) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		return "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
-	var d signInRequest
+	var d struct {
+		Email string `json:"email"`
+	}
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return "", false
 	}

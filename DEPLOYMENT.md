@@ -64,6 +64,10 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_VALKEY_URL` | shared rate-limit counters: `valkey://host:6379`, or `valkey+sentinel://h1:26379,h2:26379,h3:26379/paraphe`. Empty = counted in process memory, which is exact for ONE replica and says so at startup |
 | `PARAPHE_VALKEY_PASSWORD` | Valkey password — never inside the URL, which travels in process lists and deployment files |
 | `PARAPHE_TRUSTED_PROXIES` | CIDRs whose `X-Forwarded-For` is believed (your TLS proxy, the ingress). Empty = every request is attributed to its TCP peer — behind a proxy, everyone then shares one counter. `docker-compose.yml` and the chart both set the private ranges; **set it yourself only when running the binary directly** behind a proxy |
+| `PARAPHE_SMTP_URL` | relay carrying the sign-in links: `smtp://user@host:587` or `smtps://user@host:465`. Empty = this instance sends nothing, and signing in by link is off everywhere. **STARTTLS is required, not attempted**: a relay that does not offer it is refused rather than served in the clear, because these messages carry a credential. The loopback is the exception, for a relay running beside the process |
+| `PARAPHE_SMTP_PASSWORD` | relay password — never inside the URL, which travels in process lists and deployment files |
+| `PARAPHE_MAIL_FROM` | sender of those messages, `Campagne <contact@exemple.fr>`. Required as soon as `PARAPHE_SMTP_URL` is set |
+| `PARAPHE_PUBLIC_URL` | the origin those links point at (`https://paraphe.org`). Required with `PARAPHE_SMTP_URL`, and **never derived from the `Host` header** — anyone can set that one, and the link would leave over your campaign's name pointing at their server. Multi-campaign: give the apex, each campaign's subdomain is prefixed to it |
 
 A variable left unset falls back to the embedded `campagne.yaml` (or to
 `config/campagne.local.yaml`, git-ignored, if you prefer a file).
@@ -95,6 +99,16 @@ the others.
 - Coordination creates the **teams** (a name, some departments) and their
   **leads**. Each lead then opens access for their volunteers: the app
   generates a temporary password, shown **once**.
+- **Signing in by email** (only when `PARAPHE_SMTP_URL` is set): the sign-in
+  screen offers a link, and opening an account sends an invitation carrying
+  one. It is what a volunteer who forgot their password has — there is no
+  other recovery. The token lives 15 minutes (7 days for an invitation), is
+  single-use, is stored only as a SHA-256, and travels in the URL's
+  **fragment**: never sent to a server, hence in no access log, and invisible
+  to the URL scanners corporate mail systems run — which otherwise spend a
+  one-shot link before its recipient clicks it. The generated password is
+  still shown either way: a relay can be down, and reading it out is the path
+  that always worked.
 - A lead can only create volunteers, and only in their own team. Any attempt
   to raise the role or change team is ignored server-side.
 - **Walls**: a team sees its own reservations and the free pool; cards

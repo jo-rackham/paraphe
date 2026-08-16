@@ -130,7 +130,7 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 	me := accountOf(r)
 	email := normalizeEmail(d.Email)
 	name := strings.TrimSpace(d.Name)
-	if email == "" || !strings.Contains(email, "@") || name == "" {
+	if email == "" || !storableEmail(email) || name == "" {
 		errorJSON(w, http.StatusBadRequest, "Nom et adresse email sont requis.")
 		return
 	}
@@ -203,12 +203,37 @@ func (s *Server) routeCreateAccount(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// Minted in the SAME transaction as the account: an invitation whose
+	// account rolled back opens nothing, and an account whose token vanished
+	// is a volunteer nobody wrote to.
+	token, err := s.mintInvitation(r.Context(), s.tx(r), scopeOrg(r), email)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
 	}
-	replyJSON(w, http.StatusCreated, map[string]any{
-		"email": email, "name": name, "role": role, "password": password})
+	// The database is done with; the relay may take thirty seconds, and a
+	// pool connection has no business waiting on it.
+	s.release(r)
+	// Sent once the account exists, and its outcome is told: the caller is
+	// authenticated and created this account, so there is no existence left
+	// to protect here. The password stays in the answer either way — relay
+	// down, the lead reads it out as they always have.
+	sent, warning := s.sendInvitation(invitation{
+		email: email, name: name, by: me.Name, campaign: campaignName(r),
+		slug: campaignSlug(r), token: token,
+	})
+	reply := map[string]any{
+		"email": email, "name": name, "role": role, "password": password,
+		"invitation_sent": sent,
+	}
+	if warning != "" {
+		reply["invitation_error"] = warning
+	}
+	replyJSON(w, http.StatusCreated, reply)
 }
 
 // POST /api/team/account/{email}/active — activates or deactivates an

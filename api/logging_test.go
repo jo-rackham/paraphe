@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,63 @@ import (
 	"strings"
 	"testing"
 )
+
+// A relay answers refusals in its own spelling, and plenty of them quote the
+// recipient back: `550 5.1.1 <marie@EXEMPLE.FR>: user unknown`. Logged as
+// received, that sentence puts in the log exactly what this file's subject —
+// day-scoped pseudonyms — exists to keep out of it, and by a path no test
+// that fakes the mailer can reach.
+func TestARelayCannotPutAnAddressInTheLog(t *testing.T) {
+	s, _ := testServer(t)
+	const email = "marie@exemple.fr"
+	for _, answer := range []string{
+		"SMTP RCPT TO: 550 5.1.1 <marie@exemple.fr>: user unknown",
+		"SMTP RCPT TO: 550 5.1.1 <marie@EXEMPLE.FR>: user unknown",
+		"SMTP RCPT TO: 550 5.1.1 <MARIE@Exemple.Fr>: mailbox unavailable",
+		"550 marie@exemple.fr rejected; 550 marie@EXEMPLE.fr rejected twice",
+	} {
+		got := s.withoutAddress(errors.New(answer), email)
+		if strings.Contains(strings.ToLower(got), email) {
+			t.Errorf("the address survived into the log line:\n\tfrom: %s\n\tgot:  %s",
+				answer, got)
+		}
+		if !strings.Contains(got, s.accountPseudonym(email)) {
+			t.Errorf("nothing identifies the account any more: %s", got)
+		}
+	}
+}
+
+// Lowercasing changes byte LENGTH for some characters — `Ⱦ` is two bytes and
+// `ⱦ` is three — so an offset found in a lowercased copy does not address
+// the same place in the original. Matching on the copy and slicing the
+// original left half an address in the log, and past the end of the string
+// it PANICKED — in a detached goroutine, where a panic takes the process
+// with it.
+func TestARelayAnswerInAnyAlphabetIsSafeToRedact(t *testing.T) {
+	s, _ := testServer(t)
+	for _, c := range []struct{ answer, email string }{
+		// Ⱦ (U+023E, 2 bytes) lowercases to ⱦ (U+2C66, 3 bytes)
+		{"Ⱦ user@a.b", "user@a.b"},
+		{"at Ⱦ: <user@abc.com> unknown", "user@abc.com"},
+		{"ȺȾȺȾ 550 <MARIE@EXEMPLE.FR> rejected", "marie@exemple.fr"},
+		{"550 rejected", ""},
+		{"İ 550 <a@b.c>", "a@b.c"},
+		{strings.Repeat("Ⱦ<a@b.c> ", 50), "a@b.c"},
+	} {
+		got := s.withoutAddress(errors.New(c.answer), c.email)
+		if c.email != "" && strings.Contains(strings.ToLower(got), c.email) {
+			t.Errorf("the address survived:\n\tfrom: %q\n\tgot:  %q",
+				c.answer, got)
+		}
+		// and a fragment of it must not survive either: the "before" part of
+		// the text is where a misaligned offset used to leave one
+		if local, _, _ := strings.Cut(c.email, "@"); local != "" &&
+			strings.Contains(strings.ToLower(got), local+"@") {
+			t.Errorf("part of the address survived:\n\tfrom: %q\n\tgot:  %q",
+				c.answer, got)
+		}
+	}
+}
 
 // An operator asking for `log_level=warn` is following what the deployment
 // guide tells them to do, and that is exactly the setting under which the

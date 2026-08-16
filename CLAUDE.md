@@ -142,6 +142,13 @@ licence for the RNE.
   Assumed exceptions: the transient « Chargement… » paragraphs mount with
   their text (a missed one costs nothing), and card borders (`--trait`)
   stay decorative.
+  **A re-entry guard is a REF, never state.** Two clicks in the same tick run
+  two handlers built by the same render, and both read the state as it was
+  before either of them: the button greys out and the request goes twice.
+  This project has paid for it twice now — once on a submit, once on
+  « Recevoir un lien », where it also spent two of the three links an address
+  is allowed per quarter of an hour AND killed the first one by minting the
+  second. `aria-disabled` is what the screen shows; `useRef` is what guards.
   **A control never vanishes or goes `disabled` under the user's focus**:
   a self-unmounting button (« fermer », « j'ai noté », accepting an offer)
   hands focus to the content first (`focusContenu`), and a busy submit
@@ -276,6 +283,100 @@ reservations, and a card reserved elsewhere is refused (403). Campaign
 counters stay visible to all, without names. `PARAPHE_ADMIN_EMAIL` /
 `_PASSWORD` bootstrap coordination: with no coordination account the app
 refuses to open rather than let anyone in.
+
+## Signing in by email
+
+A second path beside the password, ON only when `PARAPHE_SMTP_URL` is set —
+`s.mailer == nil` IS the "off" state, `/api/config` says so, and the two
+routes answer 503 rather than accept a request whose effect never arrives.
+It ADDS a path: the password is still read down a telephone line, still
+works when the relay is down, and still bootstraps the instance.
+
+- **The token travels in the FRAGMENT** (`/connexion#jeton=…`), never in a
+  query or a path. A fragment reaches no server: no ingress access log, no
+  Referer, no proxy history — and it is invisible to the URL scanners
+  corporate mail systems run, which FETCH every link they see and would
+  otherwise spend a one-shot token before its recipient clicks. It is
+  redeemed by a POST with the token in the BODY, which also keeps it out of
+  every route parameter on the way back.
+- **The link's origin is `PARAPHE_PUBLIC_URL`, never `r.Host`.** In
+  single-campaign mode every Host resolves the bootstrap campaign, so a link
+  built from the header would send — to a real volunteer, over the campaign's
+  own name — a link to a server of the caller's choosing. Multi-campaign, the
+  slug is prefixed to the configured apex and the setting must name the base
+  domain; the three mail settings hold together or the start fails.
+- **Stored as a plain SHA-256, deliberately.** The token is 256 bits of
+  `crypto/rand`: there is nothing to search, so a memory-hard hash buys
+  nothing and would put a 32 MiB derivation behind `hashGate` on a PUBLIC
+  route — the amplifier `hashGate` exists to bound.
+- **Requesting a link: constant answer, and NOTHING that differs happens
+  before it.** The same status and the same body for an address that names an
+  account, a deactivated one, or nobody — the promise the decoy hash makes on
+  the password path. Detaching the SEND was not enough: minting is a DELETE,
+  an INSERT and a COMMIT, and while they sat before the reply an existing
+  address answered 3.5x to 6.5x slower — a stopwatch handing back the roster
+  the sentence withholds. Both branches now reply on the same SELECT, and the
+  mint happens on the other side of it, on its own connection
+  (`mintDetached`). `TestAnExistingAddressIsNoSlowerThanAnUnknownOne` measures
+  the ratio and refuses above 1.5. A failure in that detached work is logged
+  and NOT answered: the one assumed exception to "errors surface".
+- **STARTTLS is required, not attempted.** Opportunistic TLS is TLS an
+  attacker strips from the greeting, and the message carries a credential
+  with a fifteen-minute life. A relay that does not offer it is refused;
+  `smtps://` and the loopback are the two ways past that refusal, and the
+  loopback is the same exception `net/smtp` makes for credentials.
+- **Assumed**: whoever knows an address can burn its pending link (minting
+  deletes the previous row), bounded by three per quarter of an hour. The
+  password path is untouched by it, and the alternative — several live tokens
+  per address — trades a bounded nuisance for an unbounded table.
+- **Invitations: synchronous, and the outcome is told.** The opposite rule
+  for the opposite reason — the caller is authenticated and has just created
+  the account, so there is no existence to protect. `invitation_sent` travels
+  in the answer, the generated password stays on screen whatever happened,
+  and the token is minted in the SAME transaction as the account.
+- One live row per (campaign, address): minting deletes the previous one and
+  sweeps expired rows in passing, so a new link invalidates the old one and
+  the table cannot grow under a loop. Redeeming is `DELETE … RETURNING` —
+  single-use by construction, with no consumed row whose existence would
+  then have to be told apart from a token that never was.
+- **PRESENTING a token spends it, atomically**, and on the request's OWN
+  connection (`Scope.renew`: commit, then reopen a transaction behind it).
+  Three shapes were tried and two were wrong. Committing at the END of the
+  route let every failure in between roll the DELETE back — refused against
+  a DEACTIVATED account, the link came back live and opened a session the day
+  the account was switched on again, seven days later for an invitation.
+  Taking a SECOND pool connection made the spend independent and DEADLOCKED
+  the pool: the request already holds one, so eight simultaneous redemptions
+  against a pool of four hung until they timed out. Renewing costs neither.
+- **One live link per address AND PURPOSE is the DATABASE's promise**, not
+  the DELETE's: a unique index on `(org_id, email, purpose)` plus
+  `ON CONFLICT … DO UPDATE`. Under READ COMMITTED the DELETE cannot see a row
+  a neighbour has not committed, so two requests in the same instant both
+  inserted — two links in one inbox, the older already dead. The purpose is
+  in the key because the two kinds do not compete: a sign-in request used to
+  destroy a pending invitation the invitee had not asked about and would find
+  dead days later.
+- **Redacting an address out of a relay's answer matches the ORIGINAL text**
+  (`events.go`, a case-insensitive regexp), never a lowercased copy of it.
+  Lowercasing changes byte LENGTH — `Ⱦ` is two bytes, `ⱦ` is three — so an
+  offset found in the copy addresses somewhere else in the original: it left
+  half an address in the log, and past the end of the string it PANICKED, in
+  a detached goroutine, which takes the process with it.
+- **The interface takes the token out of the URL at BOOT** (`main.tsx`),
+  hands it over EXACTLY ONCE (`consumeLinkToken`), and DROPS it when the
+  visit lands on a screen that cannot use it. Kept until a screen that could
+  use it finally mounted, it opened the first visitor's session for the
+  second: an outage, a tab left on the table, `Réessayer` pressed by someone
+  else. The link is still in its owner's inbox — clicking it again costs one
+  click.
+- `login_tokens` is a walled table: it carries `org_id` and is in
+  `walledTables`. A token minted on one campaign is not a credential on its
+  neighbour, and both guards were seen to go red on that mutation.
+- Nothing a human typed reaches a HEADER: the subjects are constants of the
+  package, addresses are refused if they carry a control character
+  (`normalizeEmail` only lowercases and trims), and the body — where the
+  campaign's name lives — is base64, an alphabet that cannot spell a header
+  break.
 
 ## Security and operations
 

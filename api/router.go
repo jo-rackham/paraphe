@@ -92,9 +92,24 @@ func (s *Server) router() chi.Router {
 		// admitSignIn — a refused attempt has no business queueing for the
 		// hash gate.
 		r.With(guard(s.limitIP(limitSignInIP)), guard(jsonOnly),
-			guard(s.limitSignInBody), guard(admitSignIn), guard(s.inScope)).
+			guard(s.limitEmailBody(limitSignInAccount)), guard(admitSignIn),
+			guard(s.inScope)).
 			Post("/session", s.routeSignIn)
 		r.Delete("/session", s.routeSignOut)
+		// Signing in by email. The link REQUEST counts per source and per
+		// submitted address like a sign-in, and lower: admitted, it makes
+		// this service send a real message to a real inbox, so its ceiling
+		// protects the address it would be aimed at, not only this server.
+		// No admitSignIn — nothing here derives a password hash.
+		r.With(guard(s.limitIP(limitMagicLinkIP)), guard(jsonOnly),
+			guard(s.limitEmailBody(limitMagicLinkAccount)), guard(s.inScope)).
+			Post("/session/link", s.routeRequestLink)
+		// Redeeming carries a 256-bit token and no address, so there is
+		// nothing to count per account: the source ceiling is the whole
+		// bound, and a token cannot be searched for behind it.
+		r.With(guard(s.limitIP(limitSignInIP)), guard(jsonOnly),
+			guard(s.inScope)).
+			Post("/session/link/redeem", s.routeRedeemLink)
 		// Read by the browser version from ANOTHER origin: no session, no
 		// cookie, only the campaign a mayor already reads in every message.
 		// The CORS marker stays first so a 429 remains readable over there.

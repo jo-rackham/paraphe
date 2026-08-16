@@ -188,6 +188,26 @@ spec:
                   name: {{ include "paraphe.nomSecret" . }}
                   key: PARAPHE_VALKEY_PASSWORD
             {{- end }}
+            {{- if .Values.mail.url }}
+            # Signing in by email. All three or none: the application refuses
+            # to start on a half-configured relay, and the public URL is a
+            # SETTING because a link built from the request's Host header
+            # would be a link an attacker chooses.
+            - name: PARAPHE_SMTP_URL
+              value: {{ .Values.mail.url | quote }}
+            - name: PARAPHE_MAIL_FROM
+              value: {{ .Values.mail.from | quote }}
+            - name: PARAPHE_PUBLIC_URL
+              value: {{ .Values.mail.publicUrl | quote }}
+            - name: PARAPHE_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paraphe.nomSecret" . }}
+                  key: PARAPHE_SMTP_PASSWORD
+                  # a relay without authentication is legitimate (a sidecar,
+                  # an internal MTA): the key may simply not be there
+                  optional: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: {{ .Values.probes.path }}

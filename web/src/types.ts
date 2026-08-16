@@ -64,6 +64,8 @@ export interface ServerConfig {
   statuses: Status[];
   ranks: Rank[];
   no_account: boolean;
+  /** L'instance sait envoyer un email : la connexion par lien est offerte. */
+  magic_link: boolean;
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
 }
@@ -77,6 +79,8 @@ export interface InstanceConfig {
   browser_version_url: string;
   no_account: boolean;
   campaign_keys: string[];
+  /** L'instance sait envoyer un email : la connexion par lien est offerte. */
+  magic_link: boolean;
 }
 
 export interface CampaignRequest {

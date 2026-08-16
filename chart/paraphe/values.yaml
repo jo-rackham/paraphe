@@ -123,6 +123,28 @@ admin:
   email: "coordination@exemple.fr"
   name: "Coordination"
 
+# -- Connexion par email. Vide = éteinte : l'écran de connexion ne propose
+# pas de lien, et ouvrir un accès continue de faire dicter un mot de passe.
+# Renseignée, elle donne aux bénévoles le seul recours qui existe en cas
+# d'oubli, et transforme la création de compte en invitation.
+# Les trois valeurs vont ensemble : l'application refuse de démarrer si `url`
+# est posée sans les deux autres.
+mail:
+  # smtp://utilisateur@relais.exemple.fr:587  (STARTTLS, le cas courant)
+  # smtps://utilisateur@relais.exemple.fr:465 (TLS dès le premier octet)
+  # Le mot de passe va dans secrets.smtpPassword, JAMAIS dans cette URL.
+  url: ""
+  # Expéditeur affiché : « Campagne <contact@exemple.fr> », ou une adresse
+  # seule. Une virgule non protégée dans le nom affiché est refusée — un
+  # en-tête y lirait deux destinataires.
+  from: ""
+  # L'origine que désignent les liens envoyés. JAMAIS déduite de l'en-tête
+  # Host : n'importe qui peut le poser, et un lien signé de la campagne
+  # partirait alors vers le serveur de son choix. En multi-campagnes, c'est
+  # l'apex (https://paraphe.org) — le sous-domaine de chaque campagne
+  # s'ajoute tout seul.
+  publicUrl: ""
+
 secrets:
   # mot de passe du compte de coordination — OBLIGATOIRE
   adminPassword: ""
@@ -140,6 +162,9 @@ secrets:
   # mot de passe de Valkey (compteurs du rate-limiting) — obligatoire dès
   # que valkey.enabled, pour la même raison.
   valkeyPassword: ""
+  # mot de passe du relais SMTP. Vide est légitime : un relais interne peut
+  # n'en demander aucun.
+  smtpPassword: ""
   # Nom d'un Secret existant. Il doit porter les clés suivantes — le chart
   # ne peut pas lire son contenu, et une clé manquante ne se voit qu'en
   # CreateContainerConfigError, aucun pod ne devenant jamais prêt :
@@ -147,6 +172,8 @@ secrets:
   #   PARAPHE_SECRET_KEY               (toujours)
   #   PARAPHE_INSTANCE_ADMIN_PASSWORD  (dès que instance.baseDomain est posé)
   #   PARAPHE_VALKEY_PASSWORD          (dès que valkey.enabled est vrai)
+  #   PARAPHE_SMTP_PASSWORD            (dès que mail.url est posée, si le
+  #                                     relais demande une authentification)
   existingSecret: ""
 
 # -- Valkey : la mémoire PARTAGÉE du rate-limiting. Avec 3 réplicas de

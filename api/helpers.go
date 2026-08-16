@@ -13,6 +13,21 @@ func normalizeEmail(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// storableEmail: an address this application will still be able to USE.
+//
+// normalizeEmail only trims the edges, so a CR or an LF in the middle
+// survives it, and `strings.Contains(email, "@")` passes. The row was then
+// written and the account was broken for good: safeAddress refuses that
+// address at send time — rightly, it is how a header gets a second recipient
+// — so no invitation and no sign-in link could ever reach it, and the
+// address is the primary key, so it cannot be corrected either.
+//
+// Checked where the row is WRITTEN, which is the only place the mistake can
+// still be told to whoever is making it.
+func storableEmail(email string) bool {
+	return strings.Contains(email, "@") && safeAddress(email) == nil
+}
+
 // text: CSV rendering of a value coming from PostgreSQL. NULL is written
 // empty, not "<nil>" — volunteers open this file in a spreadsheet.
 func text(v any) string {

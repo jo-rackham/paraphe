@@ -20,10 +20,16 @@ var routeLimits = map[string]string{
 	"GET /health":    "never: kubelet's liveness probe",
 	"GET /health/db": "never: kubelet's readiness probe",
 
-	"GET /api/config":          "anon_ip",
-	"POST /api/session":        "signin_ip + signin_account",
-	"DELETE /api/session":      "none: clears a cookie, touches nothing",
-	"GET /api/campaign/public": "anon_ip",
+	"GET /api/config":     "anon_ip",
+	"POST /api/session":   "signin_ip + signin_account",
+	"DELETE /api/session": "none: clears a cookie, touches nothing",
+	// Lower than signing in, because an admitted call makes this service
+	// send a real message to somebody else's inbox.
+	"POST /api/session/link": "magic_link_ip + magic_link_account",
+	// No account class: the body carries a 256-bit token and no address,
+	// so there is no subject to count under and nothing to search for.
+	"POST /api/session/link/redeem": "signin_ip",
+	"GET /api/campaign/public":      "anon_ip",
 
 	"GET /api/me":                "none: authenticated read of one's own row",
 	"POST /api/me/personal_note": "write_account",

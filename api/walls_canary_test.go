@@ -94,9 +94,15 @@ var (
 	// before the rule that exists for them ever ran. The rule passed its own
 	// unit test and guarded nothing. TestEveryDestructiveVerbReachesTheRules
 	// ties the two together.
+	// TABLE is here because `TABLE accounts` IS a statement — PostgreSQL's
+	// shorthand for `SELECT * FROM accounts`. Without it, a bare one read as
+	// "not SQL at all" and went to the invisibility check instead of the
+	// wall; wrapped in a CTE it became a statement whose walled table
+	// tableRef could not see either. Both halves are fixed, and both are
+	// pinned below.
 	sqlVerb = regexp.MustCompile(
 		`\b(SELECT|INSERT|UPDATE|DELETE|WITH|SET|COPY|LOCK|CREATE|ALTER|DROP` +
-			`|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO)\b`)
+			`|GRANT|REVOKE|TRUNCATE|REINDEX|CLUSTER|REFRESH|COMMENT|DO|TABLE)\b`)
 )
 
 // normaliseSQL: what the canary reads. Comments and string literals are
@@ -358,7 +364,13 @@ func tableRef(table string) *regexp.Regexp {
 		// A keyword needs the space that separates it from the name; a comma
 		// does not, and `FROM teams g,accounts c` hid the second table
 		// entirely.
-		`((?:FROM|JOIN|INTO|USING|UPDATE)\s+|,\s*)(?:ONLY\s+)?` +
+		//
+		// TABLE is one of those keywords: `TABLE accounts` reads every row of
+		// every campaign, and `WITH x AS (TABLE accounts) SELECT * FROM x`
+		// walked past this canary and every other one — for EVERY walled
+		// table, not just one. A shorthand nobody writes by hand is still a
+		// shorthand PostgreSQL executes.
+		`((?:FROM|JOIN|INTO|USING|UPDATE|TABLE)\s+|,\s*)(?:ONLY\s+)?` +
 			`(?:(?:"[A-Z_]+"|[A-Z_]+)\s*\.\s*)?"?` + table +
 			`"?(?:\s+(?:AS\s+)?([A-Z][A-Z0-9_]*))?`)
 }
@@ -1030,6 +1042,12 @@ func TestEverySpellingOfAWalledTableIsSeen(t *testing.T) {
 		`DELETE FROM T USING %[1]s`,
 		`UPDATE %[1]s SET X=1`,
 		`INSERT INTO %[1]s $SUB0 VALUES $SUB1`,
+		// PostgreSQL's shorthand for `SELECT * FROM …`, in the three shapes
+		// it reaches a walled table by. Nobody writes them by hand, which is
+		// exactly why they went unseen for every walled table at once.
+		`TABLE %[1]s`,
+		`TABLE ONLY %[1]s`,
+		`WITH X AS (TABLE %[1]s) SELECT * FROM X`,
 	} {
 		for _, table := range walledTablesUpper() {
 			sql := fmt.Sprintf(spelling, table)

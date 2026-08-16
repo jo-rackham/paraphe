@@ -114,6 +114,17 @@ var Settings = []Setting{
 	{Key: "trusted_proxies", Env: "PARAPHE_TRUSTED_PROXIES", Flag: "trusted-proxies",
 		Help: "CIDRs whose X-Forwarded-For is believed (the TLS proxy, the " +
 			"ingress); empty attributes every request to its TCP peer"},
+	{Key: "smtp_url", Env: "PARAPHE_SMTP_URL", Flag: "smtp-url",
+		Help: "relay that carries the sign-in links: smtp://user@host:587 " +
+			"(STARTTLS) or smtps://user@host:465; empty sends no email at all"},
+	{Key: "smtp_password", Env: "PARAPHE_SMTP_PASSWORD", Flag: "smtp-password",
+		Help: "password of the SMTP relay; never put it in smtp_url"},
+	{Key: "mail_from", Env: "PARAPHE_MAIL_FROM", Flag: "mail-from",
+		Help: "sender of those emails, `Campagne <contact@exemple.fr>`; " +
+			"required as soon as smtp_url is set"},
+	{Key: "public_url", Env: "PARAPHE_PUBLIC_URL", Flag: "public-url",
+		Help: "origin the sign-in links point at (https://paraphe.org); " +
+			"required with smtp_url — a link is never built from a Host header"},
 }
 
 // fromFile: the `server:` block, read once at startup. Empty until then, so

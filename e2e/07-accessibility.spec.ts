@@ -214,6 +214,19 @@ test.describe
       ).toBeVisible();
       await checkA11y(page, "team:connexion");
 
+      // The screen CARRYING ITS ANSWER, not merely the empty form: the
+      // message lands in a live region, beside two buttons that go
+      // aria-disabled and change one label — none of which the empty form
+      // shows.
+      await page.getByLabel("Adresse email").fill(COORDINATION.email);
+      await page
+        .getByRole("button", { name: "Recevoir un lien par email" })
+        .click();
+      await expect(
+        page.getByText(/Si un compte existe à cette adresse/),
+      ).toBeVisible();
+      await checkA11y(page, "team:connexion (lien demandé)");
+
       await signIn(page, origin, COORDINATION.email, COORDINATION.password);
       await checkA11y(page, "team:guide");
 
@@ -236,6 +249,18 @@ test.describe
         page.getByRole("heading", { name: "Mon équipe" }),
       ).toBeVisible();
       await checkA11y(page, "team:equipe");
+
+      // The card that appears after an access is opened: a live region, a
+      // password in a large typeface, an invitation outcome, and a button
+      // that unmounts itself. It exists only after a successful write, so
+      // the scan above never reached it.
+      await page.getByLabel("Nom", { exact: true }).fill("Bénévole A11y");
+      await page
+        .getByLabel("Adresse email", { exact: true })
+        .fill("a11y@premiere.test");
+      await page.getByRole("button", { name: "Créer", exact: true }).click();
+      await expect(page.getByText(/Mot de passe provisoire/)).toBeVisible();
+      await checkA11y(page, "team:equipe (accès ouvert)");
 
       await openTab(page, "Mon profil");
       await expect(

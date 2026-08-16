@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import * as API from "./api.ts";
+import { FormulaireConnexion } from "./Connexion.tsx";
 import {
   Alerte,
   CompteurResultats,
@@ -33,12 +34,38 @@ export default function Instance({ config }: { config: InstanceConfig }) {
 
   useEffect(() => {
     (async () => {
+      const fail = (e: unknown) =>
+        setMessage({ tone: "erreur", text: (e as Error).message });
+      // The link's own refusal outranks whatever the cookie's turn says
+      // next: a 502 on /api/me used to overwrite « ce lien n'est plus
+      // valable » with a network error.
+      let linkSaidWhy = false;
       try {
+        // An administrator's own sign-in link, already out of the address
+        // bar (main.tsx) and handed over exactly once.
+        const token = API.consumeLinkToken();
+        if (token) {
+          try {
+            setMe(await API.redeemLink(token));
+            return;
+          } catch (e) {
+            // said, with what to do next — the token is out of the address
+            // bar by now, so the link in the inbox is the only way back —
+            // and the cookie still gets its chance below. A spent link also
+            // means they came here to sign in, not to read the landing page.
+            setMessage({
+              tone: "erreur",
+              text: `${(e as Error).message} Rouvrez le lien reçu par email pour réessayer.`,
+            });
+            linkSaidWhy = true;
+            setView("connexion");
+          }
+        }
         setMe(await API.me());
       } catch (e) {
         // 401 = visitor not signed in: this page's normal state
-        if (!(e instanceof API.APIError) || e.code !== 401) {
-          setMessage({ tone: "erreur", text: (e as Error).message });
+        if (!linkSaidWhy && (!(e instanceof API.APIError) || e.code !== 401)) {
+          fail(e);
         }
       } finally {
         setReady(true);
@@ -116,6 +143,7 @@ export default function Instance({ config }: { config: InstanceConfig }) {
             <AdministrationSignIn
               config={config}
               onSignedIn={setMe}
+              onAttempt={() => setMessage(null)}
               onBack={() => setView("accueil")}
             />
           )}
@@ -345,31 +373,14 @@ function Annuaire() {
 function AdministrationSignIn({
   config,
   onSignedIn,
+  onAttempt,
   onBack,
 }: {
   config: InstanceConfig;
   onSignedIn: (m: Me) => void;
+  onAttempt: () => void;
   onBack: () => void;
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (sending) return; // aria-disabled greys the button but keeps it live
-    setError(null);
-    setSending(true);
-    try {
-      onSignedIn(await API.signIn(email.trim(), password));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSending(false);
-    }
-  };
-
   return (
     <>
       <h1>Administration de l'instance</h1>
@@ -380,36 +391,11 @@ function AdministrationSignIn({
           pour créer le premier accès.
         </p>
       )}
-      <form className="carte etroite" onSubmit={submit}>
-        <Alerte message={error ? { tone: "erreur", text: error } : null} />
-        <p>
-          <label>
-            Adresse email
-            <input
-              type="text"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            Mot de passe
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-        </p>
-        <button type="submit" aria-disabled={sending || undefined}>
-          {sending ? "Connexion…" : "Se connecter"}
-        </button>
-      </form>
+      <FormulaireConnexion
+        magicLink={config.magic_link}
+        onSignedIn={onSignedIn}
+        onAttempt={onAttempt}
+      />
       <p>
         <button type="button" className="lien" onClick={onBack}>
           Retour à l'accueil

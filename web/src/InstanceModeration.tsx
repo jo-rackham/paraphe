@@ -20,6 +20,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     address: string;
     coordination: string;
     password: string;
+    invitation_sent?: boolean;
+    invitation_error?: string;
   } | null>(null);
 
   const load = async () => {
@@ -47,6 +49,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           address: rep.address,
           coordination: rep.coordination,
           password: rep.password,
+          invitation_sent: rep.invitation_sent,
+          invitation_error: rep.invitation_error,
         });
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
@@ -69,6 +73,8 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
       address: rep.address,
       coordination: rep.coordination,
       password: rep.password,
+      invitation_sent: rep.invitation_sent,
+      invitation_error: rep.invitation_error,
     });
     await load();
   };
@@ -88,17 +94,39 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
         {opened
-          ? `La campagne ${opened.address} vient d'être ouverte. Le mot de ` +
-            "passe de coordination est affiché à l'écran."
+          ? `La campagne ${opened.address} vient d'être ouverte. ` +
+            (opened.invitation_sent
+              ? `Une invitation est partie à ${opened.coordination}. `
+              : "") +
+            // an invitation that did not leave changes what the
+            // administrator has to do next, sighted or not
+            (opened.invitation_error ? `${opened.invitation_error} ` : "") +
+            "Le mot de passe de coordination est affiché à l'écran."
           : ""}
       </span>
       {opened && (
         <div className="carte">
           <h2>Campagne ouverte : {opened.address}</h2>
+          {opened.invitation_sent ? (
+            <p>
+              Une invitation vient de partir à {opened.coordination} : le lien
+              qu'elle contient ouvre l'accès, sans que vous ayez à transmettre
+              quoi que ce soit.
+            </p>
+          ) : (
+            <p>
+              Transmettez ces accès à {opened.coordination}.
+              {opened.invitation_error && (
+                <>
+                  {" "}
+                  <strong>{opened.invitation_error}</strong>
+                </>
+              )}
+            </p>
+          )}
           <p>
-            Transmettez ces accès à {opened.coordination}. Le mot de passe n'est
-            affiché <strong>qu'une seule fois</strong> — il n'est stocké nulle
-            part en clair.
+            Le mot de passe n'est affiché <strong>qu'une seule fois</strong> —
+            il n'est stocké nulle part en clair.
           </p>
           <p>
             <code>{opened.password}</code>

@@ -23,10 +23,12 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -59,6 +61,17 @@ type Server struct {
 	// logKey derives the day-scoped pseudonyms the security events carry:
 	// no client address and no submitted email reaches a log line raw
 	logKey []byte
+	// mailer: the SMTP relay, or NIL — which is not a missing dependency but
+	// a state: this instance sends no email, /api/config says so, and the
+	// two link routes refuse instead of pretending (mail.go)
+	mailer Mailer
+	// publicURL: the origin the links in those emails point at. A setting,
+	// never a request's Host header — see parsePublicURL
+	publicURL *url.URL
+	// outbound: the sends detached from a request. Waited on at shutdown, so
+	// a link drawn a moment before SIGTERM still leaves; waited on by the
+	// tests, so they can read what was sent
+	outbound sync.WaitGroup
 	// marked index.html: see markInterface
 	landingPage []byte
 	// the same page, gzipped once at startup: it is served on every load
@@ -182,6 +195,13 @@ func run() error {
 		return fmt.Errorf("PARAPHE_ORG_SLUG = %q: 2 to 63 characters, lowercase, "+
 			"digits and dashes, and not a reserved name", bootstrapSlug)
 	}
+	// Checked BEFORE the import, like the slug above: the import waits on an
+	// advisory lock and writes 34 826 rows, and a typo in a mail setting has
+	// no business being discovered on the far side of it.
+	mailer, publicURL, err := setupMail(time.Now)
+	if err != nil {
+		return err
+	}
 	if err := InitDatabase(ctx, pool, Get("csv"),
 		cfg, bootstrapSlug); err != nil {
 		return err
@@ -237,6 +257,8 @@ func run() error {
 		proxies:       proxies,
 		limiter:       newRateLimiter(secret, shared, time.Now),
 		logKey:        deriveKey(secret, "paraphe:log-pseudonyms:v1"),
+		mailer:        mailer,
+		publicURL:     publicURL,
 	}
 	// One image serves the pages AND the JSON, so an unreadable interface is
 	// a broken image and not a shape anybody deploys: it FAILS the start.
@@ -314,7 +336,26 @@ func run() error {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+		s.drainOutbound(10 * time.Second)
 		return <-done
+	}
+}
+
+// drainOutbound waits for the detached sends. A sign-in link drawn a second
+// before SIGTERM is a volunteer waiting on their inbox: cutting the send
+// leaves them with a token that works and no way to learn it exists.
+// Bounded, because a relay that stopped answering must not hold a rollout.
+func (s *Server) drainOutbound(d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		s.outbound.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		slog.Warn("shutdown: emails were still going out and were cut short",
+			"waited", d)
 	}
 }
 

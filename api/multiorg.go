@@ -28,7 +28,8 @@ import (
 // also names the campaign, and TestEveryQueryOnAWalledTableNamesTheCampaign
 // reads the package to prove it. This list is what that guard iterates, so a
 // new per-campaign table is covered the day it is added here.
-var walledTables = []string{"assignments", "notes", "teams", "accounts"}
+var walledTables = []string{"assignments", "notes", "teams", "accounts",
+	"login_tokens"}
 
 func orgSchema(ctx context.Context, tx pgx.Tx) error {
 	statements := []string{

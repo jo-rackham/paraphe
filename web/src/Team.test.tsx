@@ -13,29 +13,16 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import * as API from "./api.ts";
 import Team from "./Team.tsx";
-import type { Me, ServerConfig } from "./types.ts";
+import { teamConfig, who } from "./testing/fixtures.ts";
+import type { Me } from "./types.ts";
 
 vi.mock("./api.ts", { spy: true });
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-const CAMPAIGN = Object.fromEntries(
-  CAMPAIGN_KEYS.map((k) => [k, `valeur de ${k}`]),
-);
-
-const CONFIG: ServerConfig = {
-  mode: "team",
-  campaign: CAMPAIGN,
-  batch_size: 10,
-  unfilled: [],
-  source_url: "",
-  no_account: false,
-  statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
-  ranks: [{ key: "has_endorsed", label: "A parrainé" }],
-};
+const CONFIG = teamConfig();
 
 const MAYOR = {
   insee_code: "90001",
@@ -53,25 +40,13 @@ const MAYOR = {
   status: "to_contact",
 };
 
-const who = (email: string, name: string): Me => ({
-  account: {
-    email,
-    name,
-    role: "volunteer",
-    team_id: null,
-    active: true,
-    personal_note: "",
-    team_name: null,
-  },
-  departments: ["90"],
-  may_manage: false,
-});
+const inDept90 = (email: string, name: string): Me => who(email, name, ["90"]);
 
-const ALICE = who("alice@exemple.fr", "Alice Bénévole");
+const ALICE = inDept90("alice@exemple.fr", "Alice Bénévole");
 // same display name on purpose: the only barrier left when the email is
 // not compared is `signer`, a free field — and this project's thesis is
 // that names repeat
-const BRUNO = who("bruno@exemple.fr", "Alice Bénévole");
+const BRUNO = inDept90("bruno@exemple.fr", "Alice Bénévole");
 
 let container: HTMLDivElement;
 let root: Root;

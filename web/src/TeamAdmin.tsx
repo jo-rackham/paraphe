@@ -132,6 +132,8 @@ export function GestionEquipe({
     name: string;
     role: string;
     password: string;
+    invitation_sent?: boolean;
+    invitation_error?: string;
   } | null>(null);
   const [draft, setDraft] = useState({
     email: "",
@@ -196,8 +198,16 @@ export function GestionEquipe({
           would re-read the whole card, password included. */}
       <span role="status" className="sr-only">
         {created
-          ? `Un accès vient d'être créé pour ${created.name}. Le mot de ` +
-            "passe provisoire est affiché à l'écran, à transmettre de vive voix."
+          ? `Un accès vient d'être créé pour ${created.name}. ` +
+            (created.invitation_sent
+              ? `Une invitation est partie à ${created.email}. `
+              : "") +
+            // Said here too, and not only on the card: this announcement is
+            // what somebody who cannot see the screen acts on, and an
+            // invitation that did not leave changes what they must do next.
+            (created.invitation_error ? `${created.invitation_error} ` : "") +
+            "Le mot de passe provisoire est affiché à l'écran, à " +
+            "transmettre de vive voix."
           : ""}
       </span>
       {created && (
@@ -207,6 +217,20 @@ export function GestionEquipe({
               Accès créé pour {created.name} ({created.email}).
             </strong>
           </p>
+          {created.invitation_sent && (
+            <p>
+              Une invitation vient de partir à cette adresse : le lien qu'elle
+              contient ouvre l'accès sans mot de passe.
+            </p>
+          )}
+          {created.invitation_error && (
+            <p>
+              <strong>{created.invitation_error}</strong>
+            </p>
+          )}
+          {/* The password stays on screen whatever the invitation did: a
+              relay can be down tomorrow, and reading it out is the path
+              that has always worked. */}
           <p>
             Mot de passe provisoire — <strong>affiché une seule fois</strong>, à
             transmettre de vive voix :
