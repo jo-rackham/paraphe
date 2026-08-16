@@ -300,6 +300,12 @@ export default function Team({ config }: { config: ServerConfig }) {
               chosen.mayor.insee_code,
               status,
               note,
+              // what this screen was showing: the server refuses the write
+              // if the stored status has moved since, so a tab left open
+              // cannot erase what somebody recorded in between. A card with
+              // no status displays « à contacter », and that is what was
+              // read.
+              chosen.mayor.status ?? "to_contact",
             );
             setChosen(fresh);
           }}

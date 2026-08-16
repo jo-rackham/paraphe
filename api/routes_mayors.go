@@ -322,6 +322,19 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 type statusRequest struct {
 	Status string `json:"status"`
 	Note   string `json:"note"`
+	// Seen: the status the screen was SHOWING when this was written.
+	//
+	// Removing the claim from the write left nothing comparing what the
+	// writer saw with what is stored, and the window that opens is not the
+	// instant it was described as: a tab left open all morning wrote over a
+	// status recorded since, silently, with no 409 and no trace of who. It
+	// is what the lock used to give, given back without the lock.
+	//
+	// Absent, it means « à contacter » — the state of a card nobody has
+	// touched. A client that does not send it therefore keeps working on
+	// free cards and is refused on contested ones, which is the safe half of
+	// the bargain rather than a hard break at deploy time.
+	Seen string `json:"seen"`
 }
 
 // POST /api/mayors/{insee}/status — recording what a contact gave. It does
@@ -388,22 +401,32 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	//
 	// The reservation itself is untouched: a card someone HAS taken is still
 	// theirs, and the guard below still refuses a write over it.
+	seen := d.Seen
+	if seen == "" {
+		seen = StatusToContact
+	}
 	tag, err := s.tx(r).Exec(ctx,
 		"INSERT INTO assignments(org_id, insee_code, status, updated_at) "+
 			"VALUES($1,$2,$3,$4) "+
 			"ON CONFLICT (org_id, insee_code) DO UPDATE SET "+
 			"status=excluded.status, updated_at=excluded.updated_at "+
-			"WHERE assignments.volunteer IS NULL OR assignments.volunteer=$5",
-		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.Email)
+			"WHERE (assignments.volunteer IS NULL OR assignments.volunteer=$5) "+
+			"AND assignments.status=$6",
+		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.Email, seen)
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
+	// One refusal for the two ways the card moved under the writer: somebody
+	// reserved it, or somebody recorded something on it. Telling them apart
+	// would say who is working where, which no screen of this campaign says;
+	// what the writer needs is the same either way — read it again first.
 	if tag.RowsAffected() == 0 {
 		errorJSON(w, http.StatusConflict,
-			"Ce maire vient d'être attribué à quelqu'un d'autre de votre "+
-				"équipe. Rafraîchissez la fiche avant d'écrire : deux personnes "+
-				"ne doivent pas contacter le même élu.")
+			"Cette fiche a changé depuis que vous l'avez ouverte : quelqu'un "+
+				"l'a prise ou y a enregistré quelque chose. Rafraîchissez-la "+
+				"avant d'écrire — deux personnes ne doivent pas contacter le "+
+				"même élu.")
 		return
 	}
 	if _, err := s.tx(r).Exec(ctx,
