@@ -162,33 +162,48 @@ func unwalled() { run("SELECT email" + scopedFilter("anything")) }
 // adding a verb to the guard without teaching it its unreadable form goes
 // red here, rather than three months later in a round nobody ran.
 func TestEveryDestructiveVerbHasAnUnreadableForm(t *testing.T) {
+	// …over the same axes as every other table position. Walked on the verb
+	// alone, this certified an agreement that did not hold: the schema
+	// qualifier was carried by all three destructive alternatives and checked
+	// on none of them, so an edit dropping it went green while
+	// `TRUNCATE public.`+t went back to reading as a statement touching no
+	// walled table.
+	qualifiers := []string{"", "PUBLIC.", `"PUBLIC".`, "PARAPHE.PUBLIC."}
 	for _, verb := range strings.Split(destructiveVerbs, "|") {
-		named := verb + " ACCOUNTS"
-		if !destructiveRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("destructiveRef does not know %q, so nothing refuses "+
-				"it with the table named:\n\t%s", verb, named)
-		}
-		// …and the same statement with the name taken out
-		for _, unreadable := range []string{verb + " %S", verb + " $?"} {
-			if _, found := unreadablePosition(unreadable, true); !found {
-				t.Errorf("%q names a table nobody can read and no rule says "+
-					"so — the statement reads as touching no walled table:"+
-					"\n\t%s", verb, unreadable)
+		for _, modifier := range []string{"", "ONLY "} {
+			for _, schema := range qualifiers {
+				named := verb + " " + modifier + schema + "ACCOUNTS"
+				if !destructiveRef("ACCOUNTS").MatchString(named) {
+					t.Errorf("destructiveRef does not know %q, so nothing "+
+						"refuses it with the table named:\n\t%s", verb, named)
+				}
+				// …and the same statement with the name taken out
+				for _, marker := range []string{"%S", "$?"} {
+					unreadable := verb + " " + modifier + schema + marker
+					if _, found := unreadablePosition(unreadable, true); !found {
+						t.Errorf("%q names a table nobody can read and no rule "+
+							"says so — the statement reads as touching no "+
+							"walled table:\n\t%s", verb, unreadable)
+					}
+				}
 			}
 		}
 	}
 	// The privilege and object-governing shapes, which name their table after
-	// an ON rather than after the verb.
-	for _, unreadable := range []string{
-		`GRANT SELECT ON %S TO PUBLIC`,
-		`REVOKE ALL ON $? FROM PARAPHE`,
-		`CREATE POLICY P ON %S USING $SUB0`,
-		`DROP POLICY P ON $?`,
-		`CREATE TRIGGER T AFTER DELETE ON %S FOR EACH ROW EXECUTE F$SUB0`,
-	} {
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("the table this governs cannot be read and no rule says "+
-				"so:\n\t%s", unreadable)
+	// an ON rather than after the verb — over the same qualifiers.
+	for _, schema := range qualifiers {
+		for _, unreadable := range []string{
+			`GRANT SELECT ON ` + schema + `%S TO PUBLIC`,
+			`REVOKE ALL ON ` + schema + `$? FROM PARAPHE`,
+			`CREATE POLICY P ON ` + schema + `%S USING $SUB0`,
+			`DROP POLICY P ON ` + schema + `$?`,
+			`CREATE TRIGGER T AFTER DELETE ON ` + schema +
+				`%S FOR EACH ROW EXECUTE F$SUB0`,
+		} {
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("the table this governs cannot be read and no rule "+
+					"says so:\n\t%s", unreadable)
+			}
 		}
 	}
 	// And what must NOT be a finding: a message is not a statement. `sqlVerb`
@@ -250,14 +265,16 @@ func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 	// and is a locking clause, not a table position — so it is walked here
 	// rather than left out of the grid.
 	for _, modifier := range modifiers {
-		named := "UPDATE " + modifier + "ACCOUNTS SET X=1"
-		if !tableRef("ACCOUNTS").MatchString(named) {
-			t.Errorf("tableRef does not read the table of %q", named)
-		}
-		unreadable := "UPDATE " + modifier + "%S SET X=1"
-		if _, found := unreadablePosition(unreadable, true); !found {
-			t.Errorf("a marker after UPDATE %sis a table nobody can read and "+
-				"no rule says so:\n\t%s", modifier, unreadable)
+		for _, schema := range schemas {
+			named := "UPDATE " + modifier + schema + "ACCOUNTS SET X=1"
+			if !tableRef("ACCOUNTS").MatchString(named) {
+				t.Errorf("tableRef does not read the table of %q", named)
+			}
+			unreadable := "UPDATE " + modifier + schema + "%S SET X=1"
+			if _, found := unreadablePosition(unreadable, true); !found {
+				t.Errorf("a marker after UPDATE is a table nobody can read "+
+					"and no rule says so:\n\t%s", unreadable)
+			}
 		}
 	}
 	// …and the comma position, which tableRef has read since the day a second
