@@ -60,7 +60,7 @@ test.describe("le logo de campagne", () => {
     // logo joins the identity, it does not replace it.
     const inHeader = page.locator("header img.logo-campagne");
     await expect(inHeader).toBeVisible();
-    await expect(page.locator("header svg")).toBeVisible();
+    await expect(page.locator("header .marque svg")).toBeVisible();
     await expect(page.locator("header")).toContainText("paraphe");
 
     // Served by the OBJECT STORE, on its own origin — not by the API.
@@ -98,7 +98,7 @@ test.describe("le logo de campagne", () => {
     await expect(page.getByText("Logo retiré.")).toBeVisible();
     await expect(page.locator("header img.logo-campagne")).toHaveCount(0);
     // the mark itself is untouched
-    await expect(page.locator("header svg")).toBeVisible();
+    await expect(page.locator("header .marque svg")).toBeVisible();
   });
 
   test("un SVG porteur de script est refusé, avec la raison", async ({
