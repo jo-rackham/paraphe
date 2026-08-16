@@ -308,12 +308,21 @@ func TestAnSVGThatCanRunSomethingIsRefused(t *testing.T) {
 		"an animateMotion":                          "<animatemotion>",
 	}
 
-	// The list does not verify itself. Five of its eleven elements were
-	// exercised and six were not, so deleting `iframe`, `embed`, `object`,
-	// `handler` or either of the two remaining SMIL names changed nothing
-	// above — the same shape as a walled table nobody asks the database
-	// about. Every element must be named by a case, and adding one to the
-	// list without a case fails here.
+	// Every entry of `by` names a case that RUNS. Without this half, the
+	// loop below is satisfied by a line of text: add an element to
+	// `svgForbidden`, add a `by` entry naming it, write no case, and it
+	// reports nothing — the list would be verified by a promise written
+	// beside it rather than by anything executed.
+	for name := range by {
+		if _, exercised := cases[name]; !exercised {
+			t.Errorf("%q declares a rule and has no case: it exercises "+
+				"nothing", name)
+		}
+	}
+	// And every element of the list is named by one of those cases. Five of
+	// its eleven were exercised and six were not, so deleting `iframe`,
+	// `embed`, `object`, `handler` or either of the two remaining SMIL names
+	// changed nothing above.
 	for element := range svgForbidden {
 		found := false
 		for _, fragment := range by {
