@@ -487,10 +487,91 @@ var queryCalls = map[string]bool{
 // parameter, or ANY name this function assigns, stops meaning what the
 // package said, whether or not the new value can be read here — `sql, _ :=
 // build()` puts two names on the left, which the collector below ignores.
+// localScopeVariants: one scope per BRANCH, because a query built across an
+// if/else is not one query.
+//
+//	sql := "SELECT email FROM notes"
+//	if mode == 1 { sql += " WHERE org_id=$1" } else { sql += " WHERE parent_id=$1" }
+//
+// Read sequentially, that text carries `ORG_ID=$1` and the reference counts
+// as bounded — while the driver runs ONE of the two, and the second is the
+// query the canary refuses when it is written on its own. The branches are
+// mutually exclusive, so each is resolved with the OTHERS REMOVED, and every
+// variant is judged. What the driver can execute, the canary must read.
+//
+// Only branching statements that assign are enumerated, and only one at a
+// time: a query assembled across two independent conditionals would need
+// their product, which no site here builds and which explodes.
+func localScopeVariants(
+	values map[string]string, fn *ast.FuncDecl,
+) []map[string]string {
+	assigns := func(n ast.Node) bool {
+		found := false
+		ast.Inspect(n, func(x ast.Node) bool {
+			if a, ok := x.(*ast.AssignStmt); ok && len(a.Lhs) == 1 {
+				if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
+					found = true
+				}
+			}
+			return true
+		})
+		return found
+	}
+	// the branch bodies of every conditional that assigns
+	var groups [][]ast.Node
+	ast.Inspect(fn, func(n ast.Node) bool {
+		var branches []ast.Node
+		switch s := n.(type) {
+		case *ast.IfStmt:
+			branches = append(branches, s.Body)
+			if s.Else != nil {
+				branches = append(branches, s.Else)
+			}
+		case *ast.SwitchStmt:
+			for _, c := range s.Body.List {
+				branches = append(branches, c)
+			}
+		case *ast.TypeSwitchStmt:
+			for _, c := range s.Body.List {
+				branches = append(branches, c)
+			}
+		default:
+			return true
+		}
+		var assigning []ast.Node
+		for _, b := range branches {
+			if assigns(b) {
+				assigning = append(assigning, b)
+			}
+		}
+		if len(assigning) > 1 {
+			groups = append(groups, assigning)
+		}
+		return true
+	})
+	var out []map[string]string
+	for _, group := range groups {
+		for _, keep := range group {
+			skip := map[ast.Node]bool{}
+			for _, other := range group {
+				if other != keep {
+					skip[other] = true
+				}
+			}
+			out = append(out, localScopeSkipping(values, fn, skip))
+		}
+	}
+	return out
+}
+
 func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
+	return localScopeSkipping(values, fn, nil)
+}
+
+func localScopeSkipping(
+	values map[string]string, fn *ast.FuncDecl, skip map[ast.Node]bool,
+) map[string]string {
 	scoped := map[string]string{}
-	// one application per STATEMENT per pass
-	applied := map[ast.Node]bool{}
 	for k, v := range values {
 		scoped[k] = v
 	}
@@ -502,6 +583,9 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 		}
 	}
 	ast.Inspect(fn, func(n ast.Node) bool {
+		if skip[n] {
+			return false
+		}
 		if a, ok := n.(*ast.AssignStmt); ok {
 			for _, lhs := range a.Lhs {
 				if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
@@ -535,11 +619,21 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 		return true
 	})
 	for range 3 {
-		clear(applied)
+		// back to what the PACKAGE says, not to nothing: deleting the name
+		// outright lost the base of `var pkgSQL = "…walled…"` followed by
+		// `pkgSQL += " OR TRUE"`, and the canary then read the appended
+		// fragment alone — no SQL verb, statement dropped, disjunction unseen.
 		for name := range accumulated {
-			delete(scoped, name)
+			if base, ok := values[name]; ok {
+				scoped[name] = base
+			} else {
+				delete(scoped, name)
+			}
 		}
 		ast.Inspect(fn, func(n ast.Node) bool {
+			if skip[n] {
+				return false // a branch this variant does not take
+			}
 			a, ok := n.(*ast.AssignStmt)
 			if !ok || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
 				return true
@@ -553,27 +647,16 @@ func localScope(values map[string]string, fn *ast.FuncDecl) map[string]string {
 				return true
 			}
 			if a.Tok.String() == "+=" {
-				// bounded per STATEMENT, not per name. Per name, a second
-				// `+=` on the same variable was dropped in silence; with no
-				// bound at all, a `+=` whose `:=` is not replayed each pass
-				// — `var sql string`, `sql, err := build()`, a parameter, a
-				// struct field — accumulated three times, and the canary
-				// then refused a legitimate query nobody wrote that way.
-				if applied[a] {
-					return true
-				}
-				applied[a] = true
-				// `+=` accumulates. What must not happen twice is ONE
-				// statement being applied twice in one pass; ast.Inspect
-				// already visits each node exactly once, and the `:=` before
-				// them is replayed every pass, which resets the accumulator.
+				// `+=` accumulates, and what bounds it is the reset at the head
+				// of each pass — ast.Inspect visits each node exactly once, so
+				// nothing here can apply twice.
 				//
-				// Bounding by NAME instead conflated the two: `sql += a`
-				// followed by `sql += b` applied the first and dropped the
-				// second in silence. The canary read `base+a` while the
-				// driver ran `base+a+b` — so an `OR TRUE` written in the
-				// second one walked straight past `neutralised`, which
-				// exists for exactly that.
+				// Bounding by NAME instead dropped the second `+=` on one
+				// variable in silence: the canary read `base+a` while the driver
+				// ran `base+a+b`, and an `OR TRUE` written in the second walked
+				// past `neutralised`. A per-STATEMENT map was then added on top
+				// and guarded nothing at all — a defence the comment claimed and
+				// the code could not perform.
 				scoped[id.Name] += txt
 				return true
 			}
@@ -606,21 +689,34 @@ func sqlStatements(t *testing.T) []statement {
 			// package, and `filter` is a local in four different functions:
 			// one lent its value to another and produced a query nobody had
 			// written.
-			scoped := localScope(values, fn)
-			ast.Inspect(fn, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				for _, arg := range call.Args {
-					if sqlText(arg, scoped) == "" {
-						continue
+			// the sequential reading, PLUS one per mutually exclusive
+			// branch: what the driver can execute, the canary must read
+			scopes := append([]map[string]string{localScope(values, fn)},
+				localScopeVariants(values, fn)...)
+			seen := map[string]bool{}
+			for _, scoped := range scopes {
+				ast.Inspect(fn, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
 					}
-					out = append(out, statement{name, fn.Name.Name,
-						normaliseSQL(sqlTextMarked(arg, scoped))})
-				}
-				return true
-			})
+					for _, arg := range call.Args {
+						if sqlText(arg, scoped) == "" {
+							continue
+						}
+						sql := normaliseSQL(sqlTextMarked(arg, scoped))
+						// one variant per branch means the same statement is
+						// resolved several times; report each text once
+						key := name + "\x00" + fn.Name.Name + "\x00" + sql
+						if seen[key] {
+							continue
+						}
+						seen[key] = true
+						out = append(out, statement{name, fn.Name.Name, sql})
+					}
+					return true
+				})
+			}
 		}
 	}
 	return out
@@ -1193,9 +1289,23 @@ func buildsAQuery(n ast.Node) bool {
 	// INNER literal — its Type is nil — so reading only `query{…}` saw
 	// neither. The container is what names the type, and it is what is
 	// matched here.
-	namesQuery := func(e ast.Expr) bool {
-		id, ok := e.(*ast.Ident)
-		return ok && id.Name == "query"
+	// RECURSIVE: `[][]query{{{…}}}` and `map[K][]query{…}` nest the container,
+	// so the element of the outer one is another container and not the name.
+	// Matching only the immediate element saw the one-level shapes and missed
+	// every deeper one.
+	var namesQuery func(ast.Expr) bool
+	namesQuery = func(e ast.Expr) bool {
+		switch t := e.(type) {
+		case *ast.Ident:
+			return t.Name == "query"
+		case *ast.ArrayType:
+			return namesQuery(t.Elt)
+		case *ast.MapType:
+			return namesQuery(t.Value)
+		case *ast.StarExpr:
+			return namesQuery(t.X)
+		}
+		return false
 	}
 	switch e := n.(type) {
 	case *ast.CompositeLit:
