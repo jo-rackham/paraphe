@@ -15,23 +15,46 @@ func normalizeEmail(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// legible: whether a one-line label can be trusted to LOOK, on the screen of
-// whoever moderates it, like what is stored.
+// legible: whether a one-line label REORDERS or BREAKS when rendered — that
+// is, whether the moderator reading it can be shown something other than what
+// is stored.
 //
-// A public form's name is read by a human before they act on it, and a
-// right-to-left override reverses what the screen shows without touching a
-// byte of what is written — so the row a moderator believes they are
-// accepting is not the one they accept. Zero-width joiners hide a difference
-// between two rows, ANSI escapes colour a terminal reading the logs, and a
-// line break turns one label into two. Refused at the door rather than
-// escaped at each of the places that render it.
+// A right-to-left override reverses the display without touching a byte of
+// what is written, so the row a moderator believes they are accepting is not
+// the one they accept; a line separator turns one label into two. Refused at
+// the door rather than escaped at each of the places that render it.
 //
-// Controls (Cc) and format characters (Cf) only: no legitimate name carries
-// either. Free text is NOT passed through this — a message is allowed its
-// line breaks.
+// WHAT IS NOT REFUSED, and why the obvious `Cc || Cf` is wrong. That test
+// refused U+200C, which Persian orthography REQUIRES — میر‌حسین (Mir-Hossein)
+// carries one, and without it the two words merge. It refused the U+200D of
+// Devanagari and Sinhala conjuncts and of every emoji built by joining. It
+// refused the directional MARKS (U+200E, U+200F, U+061C) that hold a Latin
+// fragment in place inside an Arabic name. None of those reorder anything:
+// they shape the glyphs around them. And the test let U+2028 and U+2029
+// through — the two characters that ARE Unicode's line separators, the very
+// thing the guard exists to stop.
+//
+// It does NOT try to make two labels impossible to confuse: an invisible
+// U+3164, U+2800 or U+1680 renders blank and is none of the categories below,
+// and the list of such runes has no end. Telling two look-alike rows apart is
+// a comparison problem, not a character-blocking one.
+//
+// Free text is not passed through this — a message keeps its line breaks.
 func legible(s string) bool {
 	for _, r := range s {
-		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
+		switch {
+		// every control character: CR, LF, TAB, ESC, BEL — no name holds one
+		case unicode.Is(unicode.Cc, r):
+			return false
+		// the bidi embeddings, overrides and isolates: these REORDER the text
+		// that follows them, which is the whole Trojan Source class
+		case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+			return false
+		// Unicode's own line and paragraph separators
+		case r == 0x2028, r == 0x2029:
+			return false
+		// a byte-order mark inside a label is nothing a person typed
+		case r == 0xFEFF:
 			return false
 		}
 	}

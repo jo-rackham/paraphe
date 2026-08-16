@@ -212,11 +212,10 @@ func TestTheFormRefusesATakenNameWithoutSayingWhatHoldsIt(t *testing.T) {
 	}
 }
 
-// A name is read by the coordination before it decides. A right-to-left
-// override reverses what the screen shows without changing what is stored, so
-// the row a moderator believes they are accepting is not the one they accept.
-// Legitimate French carries no control and no format character.
-func TestTheFormRefusesInvisibleCharactersInTheNames(t *testing.T) {
+// A name is read by the coordination before it decides. What is refused is
+// what makes the screen disagree with the row: an override reverses the
+// display without changing a byte, a separator turns one label into two.
+func TestTheFormRefusesANameThatReordersOrBreaks(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 3, "01")
 	org := orgID(t, s, testSlug)
@@ -227,9 +226,14 @@ func TestTheFormRefusesInvisibleCharactersInTheNames(t *testing.T) {
 	// very thing being refused here.
 	for _, probe := range []struct{ what, name, requester string }{
 		{"a right-to-left override", "Innocent\u202eiliaM", "Qui"},
-		{"a zero-width joiner", "Équipe\u200d\u200d", "Qui"},
+		{"a bidi isolate", "\u2066Équipe\u2069", "Qui"},
 		{"an ANSI escape", "Équipe\x1b[31m", "Qui"},
 		{"a line break", "Équipe\nAutre ligne", "Qui"},
+		// the two characters that ARE Unicode's line separators, and which a
+		// blanket Cc/Cf test let straight through
+		{"a line separator", "Équipe\u2028Autre ligne", "Qui"},
+		{"a paragraph separator", "Équipe\u2029Autre ligne", "Qui"},
+		{"a byte-order mark", "\ufeffÉquipe", "Qui"},
 		{"an override in the requester's name", "Équipe", "Qui\u202emoc"},
 	} {
 		body := teamRequestBody(probe.name, "01")
@@ -241,7 +245,46 @@ func TestTheFormRefusesInvisibleCharactersInTheNames(t *testing.T) {
 	}
 	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
 		org); n != 0 {
-		t.Fatalf("%d request(s) carrying an invisible character were stored", n)
+		t.Fatalf("%d request(s) carrying a reordering character were stored", n)
+	}
+}
+
+// …and what it must NOT refuse. A guard on the only door an outsider has
+// costs as much when it turns away a real name as when it lets an attack
+// through, and it is far harder to notice: the person is told no, and leaves.
+// Every name below was refused by the blanket Cc/Cf test this replaced.
+func TestTheFormAcceptsNamesThatMerelyShapeTheirGlyphs(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "01")
+	org := orgID(t, s, testSlug)
+	c := newClient(t, srv)
+
+	for _, probe := range []struct{ what, name, requester string }{
+		// Persian orthography REQUIRES the zero-width non-joiner: without it
+		// the two words of this given name merge into one
+		{"a Persian compound given name", "Équipe de Lyon",
+			"میر\u200cحسین"},
+		// Devanagari and Sinhala conjuncts are written with the joiner
+		{"a Devanagari conjunct", "Équipe क्\u200dष", "Qui"},
+		// and so is every emoji built by joining
+		{"a family emoji",
+			"Familles \U0001f468\u200d\U0001f469\u200d\U0001f467", "Qui"},
+		// the directional MARKS hold a Latin fragment in place inside an
+		// Arabic name; they reorder nothing
+		{"an Arabic name with a directional mark", "Équipe",
+			"أحمد\u200f"},
+		{"a soft hyphen from a word processor", "Jean\u00adPaul", "Qui"},
+	} {
+		body := teamRequestBody(probe.name, "01")
+		body["requester_name"] = probe.requester
+		if code, rep := c.call(http.MethodPost, "/api/team/request", body); code !=
+			http.StatusCreated {
+			t.Errorf("%s was turned away: %d %v", probe.what, code, rep)
+		}
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM team_requests WHERE org_id=$1",
+		org); n != 5 {
+		t.Fatalf("%d of 5 legitimate names got through", n)
 	}
 }
 

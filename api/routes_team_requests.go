@@ -128,10 +128,24 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The ceiling is applied BY THE INSERT, not by a count read before it.
-	// Read separately, two clients both saw 199 and both wrote — and the
-	// queue then dropped the oldest, legitimate requests off the only screen
-	// that can accept them. No row comes back when the campaign is full.
+	// The ceiling rides IN the insert rather than in a count read before it —
+	// but it is a bound with slack, not an invariant, and the difference
+	// matters enough to write down.
+	//
+	// Under READ COMMITTED, which is what every request runs at, the count
+	// subquery is evaluated on the transaction's own snapshot: concurrent
+	// writers each see the same total and each pass the test. Measured, two
+	// sessions at 199 both insert and the table lands at 201; a hundred
+	// goroutines overshoot by 2 to 14. Merging the read into the write
+	// narrows the window and closes nothing.
+	//
+	// It is left that way deliberately. An exact cap needs
+	// `pg_advisory_xact_lock` per campaign or SERIALIZABLE with a retry, and
+	// a blocking lock on an anonymous form makes every request queue while
+	// holding a pool connection — the failure this codebase buffers request
+	// bodies to avoid (auth.go, jsonOnly). What the slack costs is a few
+	// hundred kilobytes; what it must NOT cost is a request the coordination
+	// never sees, and that is why the queue below reads without a LIMIT.
 	var id int64
 	err = s.tx(r).QueryRow(r.Context(),
 		"INSERT INTO team_requests(org_id, name, departments, requester_email, "+

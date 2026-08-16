@@ -235,6 +235,69 @@ describe("focus survives the control's own destruction", () => {
     expect(document.activeElement).toBe(submit);
   });
 
+  // The moderation pair refused the second press by STATE, which the handler
+  // reads from the render it was created in — so two clicks in one tick both
+  // saw it free. On this screen that means a decision filed twice, and on two
+  // DIFFERENT cards it means one intended click deciding two campaigns.
+  it("Moderation: two decisions in one tick file ONE", async () => {
+    vi.mocked(API.me).mockResolvedValueOnce({
+      account: {
+        email: "admin@exemple.fr",
+        name: "Administration",
+        // the instance administrator's role lives outside the campaign
+        // vocabulary the type enumerates
+        role: "administration" as unknown as "coordination",
+        team_id: null,
+        active: true,
+        personal_note: "",
+        team_name: null,
+      },
+      departments: [],
+      may_manage: true,
+    });
+    const pending = (id: number, slug: string) => ({
+      id,
+      slug,
+      name: `Campagne ${slug}`,
+      requester_email: "qui@exemple.fr",
+      requester_name: "Qui",
+      message: "",
+      state: "pending" as const,
+      listed: true,
+      reason: "",
+      ts: "2026-01-01T00:00",
+      decided_at: "",
+      decided_by: "",
+    });
+    vi.mocked(API.moderationQueue).mockResolvedValue({
+      requests: [pending(1, "une"), pending(2, "deux")],
+      organisations: [],
+      base_domain: "paraphe.test",
+    });
+    // never settles: both clicks land while the first is still in flight
+    vi.mocked(API.decideRequest).mockReturnValue(new Promise<never>(() => {}));
+    await act(async () => {
+      root.render(<Instance config={INSTANCE_CONFIG} />);
+    });
+    await flush();
+    await flush();
+
+    const decide = [...container.querySelectorAll("button")].filter((b) =>
+      b.textContent?.includes("Ouvrir la campagne"),
+    );
+    expect(decide.length, "the queue shows both requests").toBe(2);
+    // two DIFFERENT cards, one tick: the costliest shape of the bug
+    await act(async () => {
+      decide[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      decide[1].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(
+      vi.mocked(API.decideRequest).mock.calls.map((c) => c[0]),
+      "one intended decision must not reach two campaigns",
+    ).toEqual([1]);
+  });
+
   it("Demande: a request accepted replaces the whole form — focus is rescued", async () => {
     vi.mocked(API.me).mockRejectedValueOnce(
       Object.assign(new Error("non connecté"), { code: 401 }),
