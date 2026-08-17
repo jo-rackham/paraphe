@@ -92,16 +92,74 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # AN API THAT DOES NOT ANSWER IS NOT A VERDICT ON THE PIN. Both calls
+          # below swallowed their own failure once — `2>&1` into a test, then
+          # `|| true` — so GitHub answering "we couldn't respond to your request
+          # in time" reported a correct pin as the wrong version, printing the
+          # error body where the tag list goes, and a commit that exists as one
+          # that does not. Three runs in a row were red on pins nobody had
+          # touched. In a guard that BLOCKS, a false positive costs as much as a
+          # hole: whoever reads it either edits a correct pin or stops reading
+          # the guard. So a failure that is the API's is retried, and if it
+          # persists it is reported AS ITSELF — still red, never as a finding.
+          # Prints the body; 2 = the API says there is no such thing,
+          # 1 = it says nothing this run can use.
+          err=$(mktemp)
+          api() {
+            local out status attempt=1
+            while :; do
+              if out=$(gh api "$@" 2>"$err"); then
+                printf '%s' "$out"
+                return 0
+              fi
+              status=$(sed -nE 's/.*\(HTTP ([0-9]{3})\).*/\1/p' "$err" | tail -1)
+              # Both of these are the API ANSWERING: 404 for a repository it
+              # does not have, 422 — "No commit found for SHA" — for a sha it
+              # cannot find in one it does have, which is the shape a fabricated
+              # pin actually takes. Anything else, a 5xx or a 429 or silence,
+              # is a question it never answered. Read as a non-answer, a made-up
+              # sha is retried three times and then blamed on the network.
+              if [ "$status" = 404 ] || [ "$status" = 422 ]; then
+                return 2
+              fi
+              if [ "$attempt" -ge 3 ]; then
+                sed 's/^/  /' "$err" >&2
+                return 1
+              fi
+              sleep $((attempt * 4))
+              attempt=$((attempt + 1))
+            done
+          }
           bad=0
           while read -r repo sha version; do
-            if ! gh api "repos/$repo/commits/$sha" --jq .sha >/dev/null 2>&1; then
+            rc=0
+            api "repos/$repo/commits/$sha" --jq .sha >/dev/null || rc=$?
+            if [ "$rc" -eq 2 ]; then
               echo "::error::$repo@$sha does not exist"
               bad=1
               continue
             fi
-            tags=$(gh api "repos/$repo/tags" --paginate \
-              --jq ".[] | select(.commit.sha==\"$sha\") | .name" 2>/dev/null || true)
-            if [ -n "$version" ] && ! printf '%s\n' "$tags" | grep -qx "$version"; then
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$repo@$sha could not be checked: the API did not answer"
+              bad=1
+              continue
+            fi
+            if [ -z "$version" ]; then
+              continue
+            fi
+            # /tags dereferences an annotated tag on our behalf (.commit.sha),
+            # where /git/ref/tags/<version> answers with the tag OBJECT's sha:
+            # pnpm/action-setup's releases are annotated, and its ref names
+            # ff378eb where the pin correctly names the commit 0977fd9.
+            rc=0
+            tags=$(api "repos/$repo/tags" --paginate \
+              --jq ".[] | select(.commit.sha==\"$sha\") | .name") || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::the tags of $repo could not be read: the API did not answer"
+              bad=1
+              continue
+            fi
+            if ! printf '%s\n' "$tags" | grep -qx "$version"; then
               echo "::error::$repo@$sha is not $version (tags: ${tags:-none})"
               bad=1
             fi
