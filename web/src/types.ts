@@ -26,6 +26,19 @@ export interface MayorCard extends Mayor {
   volunteer?: string | null;
   volunteer_name?: string | null;
   status?: string | null;
+  /**
+   * The TEAM that last wrote the status — never the person. A status is read
+   * by every team of the campaign, and that is what keeps two of them off the
+   * same mayor; a name of another team's is not.
+   *
+   * An identifier as TEXT, like every other column of a card: `"0"` is the
+   * national scope, a real answer held by the accounts that carry no team,
+   * and it has no row in `teams` hence no name. Absent means a card statused
+   * before the column existed. The two are different answers and the screen
+   * says different things about them.
+   */
+  updated_by_team?: string | null;
+  updated_by_team_name?: string | null;
 }
 
 export interface Note {

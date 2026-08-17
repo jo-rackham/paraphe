@@ -94,6 +94,7 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			volunteer TEXT,
 			status TEXT NOT NULL DEFAULT 'to_contact',
 			updated_at TEXT,
+			updated_by_team INTEGER,
 			PRIMARY KEY (org_id, insee_code))`,
 		`CREATE INDEX IF NOT EXISTS assignments_volunteer ON assignments(org_id, volunteer)`,
 		`CREATE INDEX IF NOT EXISTS assignments_team ON assignments(org_id, team_id)`,
@@ -137,6 +138,22 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
+		// Who WROTE the status, at team granularity. `team_id` beside it
+		// names who RESERVED, and the two are not the same fact: since a
+		// status stopped claiming the card, `team_id` is null on a card that
+		// carries a status every team of the campaign reads. The status was
+		// therefore attributable to nobody — one team watched « signé »
+		// become « refusé » and could ask no one.
+		//
+		// It is the TEAM and not the person because a team's members are its
+		// own: a status crosses the teams of a campaign, a name does not.
+		// And it grants nothing — no ownership, no lock, the card stays free.
+		//
+		// NULL and 0 are DIFFERENT answers: null is a row written before this
+		// column existed, 0 is NationalTeam, which is a real scope with no
+		// row in `teams`. Whoever reads this reads it against null, never for
+		// truthiness.
+		`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS updated_by_team INTEGER`,
 		// assignments.team_id stays NULLABLE, and the null is not an
 		// accident: `UPDATE assignments SET volunteer=NULL, team_id=NULL`
 		// is how an operator puts a stuck card back in the shared pool, and

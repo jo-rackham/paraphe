@@ -35,15 +35,30 @@ const maxBatchRounds = 8
 // join.
 const (
 	mayorSelection = "m.*, t.volunteer, COALESCE(t.status,'to_contact') AS status, " +
-		"t.updated_at, t.team_id, c.name AS volunteer_name"
+		"t.updated_at, t.team_id, c.name AS volunteer_name, " +
+		// ::text because a card IS a dictionary of text on the other side —
+		// it comes from a CSV as readily as from here. The cast keeps the
+		// three answers apart, which is the whole point of the column: null
+		// (nobody wrote), '0' (the national scope, which has no team row) and
+		// an identifier. A number here would not fit the type, and the
+		// obvious way to make it fit — dropping the id and comparing names —
+		// loses the difference between « nobody » and « the national scope ».
+		"t.updated_by_team::text AS updated_by_team, " +
+		"u.name AS updated_by_team_name"
 	// mayors is the common, read-only list: it carries no org_id. The work
 	// rows do, and the campaign is named in the JOIN CONDITION, never in a
 	// WHERE: `WHERE t.org_id = …` would turn these outer joins into inner
 	// ones and drop every mayor nobody has taken yet — that is, exactly the
 	// ones `mayorAvailable` exists to find.
+	//
+	// `teams u` names the team that WROTE the status, which is the one
+	// attribution a status carries from one team of a campaign to another.
+	// Joined on the primary key, so it multiplies no row and the COUNT(*)
+	// built on this join still counts mayors.
 	assignmentJoinFmt = " FROM mayors m " +
 		"LEFT JOIN assignments t ON t.insee_code = m.insee_code AND t.org_id = %[1]s " +
-		"LEFT JOIN accounts c ON c.email = t.volunteer AND c.org_id = %[1]s"
+		"LEFT JOIN accounts c ON c.email = t.volunteer AND c.org_id = %[1]s " +
+		"LEFT JOIN teams u ON u.id = t.updated_by_team AND u.org_id = %[1]s"
 	// Available: no work row, or a row nobody took and on which nothing was
 	// done.
 	mayorAvailable = "(t.insee_code IS NULL OR " +
@@ -405,14 +420,20 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	if seen == "" {
 		seen = StatusToContact
 	}
+	//
+	// What it DOES record is the team that wrote it. Read by the whole
+	// campaign and owned by nobody, a status was attributable to no one; the
+	// team is the granularity that answers « who put that there » without a
+	// name of another team's crossing to say it.
 	tag, err := s.tx(r).Exec(ctx,
-		"INSERT INTO assignments(org_id, insee_code, status, updated_at) "+
-			"VALUES($1,$2,$3,$4) "+
+		"INSERT INTO assignments(org_id, insee_code, status, updated_at, updated_by_team) "+
+			"VALUES($1,$2,$3,$4,$5) "+
 			"ON CONFLICT (org_id, insee_code) DO UPDATE SET "+
-			"status=excluded.status, updated_at=excluded.updated_at "+
-			"WHERE (assignments.volunteer IS NULL OR assignments.volunteer=$5) "+
-			"AND assignments.status=$6",
-		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.Email, seen)
+			"status=excluded.status, updated_at=excluded.updated_at, "+
+			"updated_by_team=excluded.updated_by_team "+
+			"WHERE (assignments.volunteer IS NULL OR assignments.volunteer=$6) "+
+			"AND assignments.status=$7",
+		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.MyTeam(), c.Email, seen)
 	if err != nil {
 		s.failure(w, err)
 		return

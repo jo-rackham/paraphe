@@ -419,8 +419,11 @@ function Coquille({
       </RenderGuard>
       <PiedDePage sourceUrl={cfg.source_url}>
         <p>
-          Le travail de l'équipe (statuts, notes, réservations) est enregistré
-          sur le serveur de la campagne et partagé avec votre équipe locale.
+          Le travail est enregistré sur le serveur de la campagne. Vos notes et
+          vos réservations restent dans votre équipe. Les statuts, eux, sont lus
+          par toute la campagne — c'est ce qui évite que deux équipes appellent
+          le même élu — avec le nom de l'équipe qui les a enregistrés, jamais
+          celui de la personne.
         </p>
       </PiedDePage>
     </>
@@ -486,7 +489,33 @@ function Connexion({
   );
 }
 
-function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
+/**
+ * The team that wrote the status shown, when it is not yours — the one
+ * attribution a status carries from one team to another. Null when there is
+ * nothing to say: your own team, or a card statused before the column existed.
+ *
+ * The account says `team_id: null` for « no team » where the card says `"0"`,
+ * and the API's `MyTeam()` normalises the first into the second. Comparing
+ * them without doing the same makes the national scope foreign to itself:
+ * every coordinator then reads « enregistré par l'équipe nationale » on their
+ * own writes.
+ */
+export function equipeAyantEcrit(mayor: MayorCard, me: Account): string | null {
+  // text, so the national scope is `"0"` — truthy, where the number 0 is the
+  // falsy value that would read « nobody wrote this » on every write of the
+  // accounts that carry no team
+  const ecrite = mayor.updated_by_team;
+  if (!ecrite) return null;
+  if (ecrite === String(me.team_id ?? 0)) return null;
+  if (ecrite === "0") return "l'équipe nationale";
+  // A team is never deleted, so the name is there; if it ever is not, saying
+  // « nationale » would name a different team than the one that wrote.
+  return mayor.updated_by_team_name
+    ? `l'équipe ${mayor.updated_by_team_name}`
+    : "une autre équipe";
+}
+
+function EtatDeLaFiche({ mayor, me }: { mayor: MayorCard; me: Account }) {
   // « vous l'attribue » was true when writing a status claimed the card, and
   // it stopped being true when that claim was removed. Left standing it was
   // worse than a stale sentence: two volunteers each read that the fiche was
@@ -496,7 +525,7 @@ function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
   if (!mayor.volunteer) {
     return (
       <p className="gris">
-        Fiche libre. Enregistrer un statut le note pour toute l'équipe, sans
+        Fiche libre. Enregistrer un statut le note pour toute la campagne, sans
         vous réserver la fiche : pour cela, prenez un lot depuis « Mon tableau
         ».
       </p>
@@ -510,5 +539,15 @@ function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
       Réservée par <strong>{mayor.volunteer_name ?? mayor.volunteer}</strong>.
       Ne la contactez pas : votre enregistrement serait refusé.
     </p>
+  );
+}
+
+function ReserveePar({ mayor, me }: { mayor: MayorCard; me: Account }) {
+  const autre = equipeAyantEcrit(mayor, me);
+  return (
+    <>
+      <EtatDeLaFiche mayor={mayor} me={me} />
+      {autre && <p className="gris">Dernier statut enregistré par {autre}.</p>}
+    </>
   );
 }
