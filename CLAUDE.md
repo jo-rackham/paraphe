@@ -812,6 +812,25 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   call, where the lock made the second lose the race and be told so. A card
   somebody HAS reserved is still theirs, and a write over it is still
   refused.
+- **A status names the TEAM that wrote it, and nobody in it.** The other half
+  of the same decision: once a status claims nothing, `assignments.team_id` —
+  which names who RESERVED — is null on a card carrying a status every team
+  of the campaign reads, and the status was attributable to no one. One team
+  watched « signé » become « refusé » and could ask whom. `updated_by_team`
+  answers, grants nothing, and stops at the team: a status crosses the teams
+  of a campaign because that is what keeps two of them off the same mayor, a
+  name does not — the campaign's counters have always been visible to all
+  **without names**, and an address here would be that rule's one exception.
+  The card says « Dernier statut enregistré par l'équipe Nord »; the notes
+  behind it stay with the team that wrote them.
+  **Three answers, not two**: null is a card statused before the column
+  existed, `0` is `NationalTeam` — a real scope, held by every account
+  carrying no team, with no row in `teams` hence no name. It reaches the
+  browser as TEXT, like every other column of a card, and that is what keeps
+  the national scope from reading as « nobody wrote this » to anything
+  testing for truthiness. `equipeAyantEcrit` compares against
+  `String(me.team_id ?? 0)`: the account says null where the card says `"0"`,
+  and comparing them unnormalised makes the national scope foreign to itself.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit
