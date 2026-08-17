@@ -113,17 +113,28 @@ api_json() {
 echo "waiting for $expected node(s) to connect…"
 attempt=0
 while : ; do
-  up=$(peer "$first" /v2/GetClusterStatus 2>/dev/null \
-    | jq '[.nodes[] | select(.isUp)] | length' 2>/dev/null || echo 0)
-  [ "${up:-0}" -ge "$expected" ] && break
+  # Ask EVERY node, not just the first: once discovery has run any answering
+  # node reports the whole cluster's view, and polling the first alone would
+  # read THAT node being down (a rolling update, an OOM — the PDB allows one)
+  # as the cluster never forming, and blame the CRD for it. The best count
+  # wins, and its node becomes the one the layout is addressed to.
+  best=0
+  for url in $GARAGE_PEERS; do
+    up=$(peer "$url" /v2/GetClusterStatus 2>/dev/null \
+      | jq '[.nodes[] | select(.isUp)] | length' 2>/dev/null || echo 0)
+    if [ "${up:-0}" -gt "$best" ]; then best=$up; first=$url; fi
+  done
+  [ "$best" -ge "$expected" ] && break
   attempt=$((attempt + 1))
-  if [ "$attempt" -gt 90 ]; then
-    echo "only ${up:-0} of $expected node(s) connected after three minutes." \
-      "Native discovery needs the garagenodes.deuxfleurs.fr CRD to exist and" \
-      "the nodes' ServiceAccount to carry read and write on it — check both," \
-      "then the pods' logs for a discovery error." >&2
-    peer "$first" /v2/GetClusterStatus 2>/dev/null \
-      | jq -c '.nodes[] | {id, addr, isUp}' >&2 || true
+  if [ "$attempt" -gt 120 ]; then
+    echo "only $best of $expected node(s) connected after four minutes." \
+      "If NONE answered, native discovery needs the garagenodes.deuxfleurs.fr" \
+      "CRD and the nodes' ServiceAccount right on it — check both, then a" \
+      "pod's logs. If some did, a node is down — check the pods." >&2
+    for url in $GARAGE_PEERS; do
+      peer "$url" /v2/GetClusterStatus 2>/dev/null \
+        | jq -c '.nodes[] | {id, addr, isUp}' >&2 && break
+    done
     exit 1
   fi
   sleep 2

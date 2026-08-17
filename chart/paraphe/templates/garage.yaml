@@ -135,8 +135,7 @@ spec:
             # that stale address to its peers verbatim, and they could never
             # reach it — measured once, the last node to roll stuck on its
             # predecessor's IP while the other two could not see it. The IP the
-            # kubelet injects is this pod's, with nothing to resolve. IPv4 here
-            # (the pod network); an IPv6 pod IP would need brackets.
+            # kubelet injects is this pod's, with nothing to resolve.
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -144,8 +143,17 @@ spec:
           command:
             - sh
             - -ec
+            # An empty POD_IP is refused loudly: substituted, it would become
+            # ":3901", which Garage cannot resolve — the node would run and
+            # never advertise, and the cluster would hang blaming the CRD. An
+            # IPv6 pod IP is bracketed, the unambiguous form of an address:port.
             - |
-              sed -e "s|__RPC_PUBLIC_ADDR__|$POD_IP:3901|" \
+              : "${POD_IP:?the pod IP, from the downward API status.podIP}"
+              case "$POD_IP" in
+                *:*) addr="[$POD_IP]:3901" ;;
+                *)   addr="$POD_IP:3901" ;;
+              esac
+              sed -e "s|__RPC_PUBLIC_ADDR__|$addr|" \
                   /tmpl/garage.toml > /etc/garage/garage.toml
           volumeMounts:
             - { name: tmpl, mountPath: /tmpl }

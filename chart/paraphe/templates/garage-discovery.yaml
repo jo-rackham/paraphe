@@ -35,11 +35,13 @@ metadata:
   labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
 rules:
   # NAMESPACED, and only on the resource — never on the CRD: the nodes read
-  # the set (list) and advertise themselves (get, then create or replace),
-  # they do not manage the type. This is the whole of the right skip_crd buys.
+  # the set (list) and advertise themselves (get, then create-or-replace, i.e.
+  # update), they do not manage the type. Exactly the four verbs Garage 2.3.0
+  # calls (src/rpc/kubernetes.rs: list, get, create, replace) — never watch,
+  # patch or delete. Whoever bumps Garage checks its usage against this list.
   - apiGroups: ["deuxfleurs.fr"]
     resources: ["garagenodes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "create", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
