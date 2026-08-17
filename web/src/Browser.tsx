@@ -385,6 +385,7 @@ export default function Browser() {
         <Marque
           logo={logo ? { url: logo, type: "" } : null}
           sous="version navigateur"
+          onHome={() => setTab("liste")}
         />
         <NavOnglets
           tabs={[

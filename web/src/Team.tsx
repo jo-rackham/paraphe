@@ -391,7 +391,11 @@ function Coquille({
         <i />
       </div>
       <header>
-        <Marque logo={cfg.logo} sous={cfg.campaign?.candidat} />
+        <Marque
+          logo={cfg.logo}
+          sous={cfg.campaign?.candidat}
+          onHome={me && setTab ? () => setTab("guide") : undefined}
+        />
         {me && setTab && (
           <NavOnglets tabs={tabs} tab={tab ?? ""} onTab={setTab} />
         )}

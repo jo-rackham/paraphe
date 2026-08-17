@@ -105,9 +105,11 @@ export default function Instance({ config }: { config: InstanceConfig }) {
         <i />
       </div>
       <header>
-        {/* the apex serves no campaign, so it carries no campaign's mark */}
-        <Marque sous={config.base_domain} />
-        {me && (
+        {/* the apex serves no campaign, so it carries no campaign's mark; and
+            no subtitle either — repeating its own domain under the word reads
+            heavy. The mark returns to the accueil view. */}
+        <Marque onHome={() => setView("accueil")} />
+        {me ? (
           <span className="qui">
             {me.account.name}
             {" · "}
@@ -115,6 +117,16 @@ export default function Instance({ config }: { config: InstanceConfig }) {
               déconnexion
             </button>
           </span>
+        ) : (
+          view !== "connexion" && (
+            <button
+              type="button"
+              className="lien connexion-entete"
+              onClick={() => setView("connexion")}
+            >
+              Se connecter
+            </button>
+          )
         )}
         <ThemeToggle />
       </header>
@@ -125,11 +137,7 @@ export default function Instance({ config }: { config: InstanceConfig }) {
           {!ready && <p role="status">Chargement…</p>}
           {ready && me && <Moderation onMessage={setMessage} />}
           {ready && !me && view === "accueil" && (
-            <Accueil
-              config={config}
-              onDemande={() => setView("demande")}
-              onAdministration={() => setView("connexion")}
-            />
+            <Accueil config={config} onDemande={() => setView("demande")} />
           )}
           {ready && !me && view === "demande" && (
             <DemandeView config={config} onBack={() => setView("accueil")} />
@@ -158,11 +166,9 @@ export default function Instance({ config }: { config: InstanceConfig }) {
 function Accueil({
   config,
   onDemande,
-  onAdministration,
 }: {
   config: InstanceConfig;
   onDemande: () => void;
-  onAdministration: () => void;
 }) {
   const browserUrl = httpUrl(config.browser_version_url);
   return (
@@ -247,12 +253,6 @@ function Accueil({
           </p>
         </>
       )}
-      <p className="gris">
-        Vous administrez cette instance ?{" "}
-        <button type="button" className="lien" onClick={onAdministration}>
-          Se connecter
-        </button>
-      </p>
     </>
   );
 }

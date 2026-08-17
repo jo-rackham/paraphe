@@ -87,13 +87,30 @@ header .theme { margin-left: auto; background: none; border: 0; cursor: pointer;
                 color: var(--entete-txt); opacity: .85; line-height: 0;
                 padding: .35rem; border-radius: .45rem; }
 header .theme:hover { background: var(--entete-hover); opacity: 1; }
-header .qui ~ .theme { margin-left: 0; }
+header .qui ~ .theme, header .connexion-entete ~ .theme { margin-left: 0; }
 header .qui { margin-left: auto; font-size: .85rem; color: var(--entete-txt);
               opacity: .85; }
+/* Sign-in lives in the header now, pushed to the right edge like .qui — the
+   `button.lien` rule above already gives it the cream colour that clears
+   4.5:1 on the dark bar. */
+header .connexion-entete { margin-left: auto; }
 .marque { display: flex; align-items: center; gap: .5rem; font-weight: 700;
           color: var(--jaune-vif); }
 .marque .sous { font-weight: 400; font-size: .78rem; color: var(--entete-txt);
                 opacity: .8; }
+/* The mark returns home: a button reset to the text mark, with the header's
+   focus ring (button:focus-visible, below). A view reset, never a reload —
+   so it drops no draft — hence a button and not an <a href="/">. */
+.marque-lien { background: none; border: 0; cursor: pointer; font: inherit;
+               font-weight: 700; text-align: left;
+               padding: .15rem .3rem; margin: -.15rem -.3rem;
+               border-radius: .45rem;
+               /* the WORD stays yellow: this rule comes after .marque at equal
+                  specificity, so without it `color` fell through to the dark
+                  header's #fff and the wordmark turned white — the mark's own
+                  identity, quietly lost, and axe sees only a high contrast */
+               color: var(--jaune-vif); }
+.marque-lien:hover { background: var(--entete-hover); }
 /* The campaign's logo, BESIDE the hexagon and never in its place. Bounded
    on both axes and `contain`: a banner and a square both have to sit in a
    header whose height everything else depends on. */
@@ -290,9 +307,14 @@ pre.lettre { background: var(--fond); border: 1px solid var(--trait);
              border-radius: .45rem; padding: 1rem; }
 footer { max-width: 64rem; margin: 2rem auto 0; padding: 1rem;
          color: var(--texte-sec); font-size: .85rem; }
-footer .officiel { border: 1px solid var(--trait);
-         border-left: 5px solid var(--rouge); border-radius: .45rem;
-         padding: .5rem .8rem; }
+/* The source line carries the GitHub mark; the icon takes the link's colour
+   (fill: currentColor) and sits on the text baseline. */
+footer .source a { display: inline-flex; align-items: center; gap: .35em; }
+footer .source .github { flex: none; }
+/* The disclaimer stays a standing notice, discreet and last: no box, a touch
+   smaller than the footer around it, the same AA-clearing --texte-sec colour
+   (no opacity — that would halve its contrast). */
+footer .officiel { margin-top: .8rem; font-size: .8rem; }
 @media (max-width: 640px) { main { padding: .6rem } .marque .sous { display: none } }
 
 /* Under 640 px a mayor row lays out as a stacked card: the four-column
