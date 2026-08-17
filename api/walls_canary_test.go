@@ -161,7 +161,17 @@ var (
 			`|\bUPDATE\s*` + tableModifier + schemaQualifier + `(?:%|\$\?|,)` +
 			`|\b(?:FROM|USING)\s+` + tableName +
 			`(?:\s*,\s*` + tableName + `)*\s*,\s*` + tableModifier +
-			schemaQualifier + marker)
+			schemaQualifier + marker +
+			// A table name PARENTHESISED after ONLY. PostgreSQL accepts the
+			// noise-parens `ONLY (t)` in every table position, and reads t
+			// across every campaign — `FROM ONLY (accounts)` returned two rows
+			// where the walled query returned one. `levels()` would turn `(t)`
+			// into $SUBn, but this rule runs on the RAW statement, so the paren
+			// is still here; and ONLY precedes a table NAME, never a subquery,
+			// so an open paren after it is a table nobody can read. `tableRef`
+			// cannot help — the name is inside the group, with no keyword before
+			// it — so this position belongs to the unreadable rule alone.
+			`|\b(?:` + tablePositions + `|UPDATE)\s+ONLY\s*\(`)
 	// The destructive verbs, with an operand that cannot be read.
 	//
 	// destructiveRef catches every one of these when the table is NAMED,
@@ -191,7 +201,13 @@ var (
 			`[^;]*?\bON\s+` + tableModifier + schemaQualifier + `(?:%|\$\?)` +
 			`|(?:^|;)\s*(?:GRANT|REVOKE)\b[^;]*?\bON\s+(?:TABLE\s+)?` +
 			`(?:ALL\s+TABLES\s+IN\s+SCHEMA\s+)?` + tableModifier +
-			schemaQualifier + `(?:%|\$\?)`)
+			schemaQualifier + `(?:%|\$\?)` +
+			// `TRUNCATE ONLY (accounts)`, `LOCK TABLE ONLY (accounts)`: the
+			// parenthesised name is invisible to the NAMED destructive rule as
+			// well, for the reason unreadableTable states — ONLY takes a table
+			// name in parens, and a destructive verb no predicate can bound
+			// reaches every campaign's rows.
+			`|(?:^|;)\s*(?:` + destructiveVerbs + `)\s+(?:TABLE\s+)?ONLY\s*\(`)
 	// Where a FROM or USING list ENDS, so a comma inside one can be told from
 	// a comma in an ORDER BY. RE2 cannot say "up to the first of these
 	// words", which is why fromListMarker is Go rather than a pattern.
@@ -1207,7 +1223,18 @@ func insertNamesCampaign(table, level string) bool {
 	}
 	key := conflictKey.FindStringSubmatch(level)
 	if key == nil {
-		return true // no fallback: only the row being written is touched
+		// A named-constraint conflict — `ON CONFLICT ON CONSTRAINT c DO UPDATE`
+		// — is a fallback the canary CANNOT read: whether `c` covers org_id
+		// lives in a CREATE elsewhere, maybe another release, and nothing here
+		// can check it. Refused rather than passed as "no fallback": a
+		// UNIQUE(email) added tomorrow would open the DO UPDATE onto every
+		// campaign's row, and the next author reading this would take the shape
+		// for a verified one. The column-list form `ON CONFLICT (org_id, …)` is
+		// checked key by key and is the one to write.
+		if namedConstraintConflict.MatchString(level) {
+			return false
+		}
+		return true // no fallback (plain INSERT, or ON CONFLICT DO NOTHING)
 	}
 	i, err := strconv.Atoi(key[1])
 	return err == nil && i < len(currentLevels) &&
@@ -1219,6 +1246,13 @@ func insertNamesCampaign(table, level string) bool {
 // another one — and the SET clause is not scanned for predicates, so nothing
 // else would have caught it.
 var conflictKey = regexp.MustCompile(`ON CONFLICT\s*\$SUB(\d+)`)
+
+// namedConstraintConflict: `ON CONFLICT ON CONSTRAINT c` references the key by
+// NAME instead of by columns. conflictKey does not match it — there is no
+// parenthesised column list to read — so without this it fell into the
+// "no fallback" branch and was declared safe, a DO UPDATE the canary never
+// bounded.
+var namedConstraintConflict = regexp.MustCompile(`ON CONFLICT\s+ON CONSTRAINT\b`)
 
 // qualifiers: every name under which a predicate may address this table
 // reference. With an alias, that alias and nothing else. Without one, either

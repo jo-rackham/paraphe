@@ -298,6 +298,92 @@ func TestEveryTablePositionIsReadByBothRules(t *testing.T) {
 	}
 }
 
+// TestAParenthesisedTableNameAfterOnlyIsUnread walks the ninth form of the
+// wall's blind spots. ONLY takes noise-parens around the table name in every
+// position — `FROM ONLY (accounts)`, `UPDATE ONLY (accounts)`, `TRUNCATE ONLY
+// (accounts)` — and PostgreSQL reads the table across every campaign
+// (measured: two rows where the walled query returns one). `levels()` turns
+// the paren into $SUBn and `tableRef` cannot read a name behind it, so the
+// unreadable rules must flag the position. A derived table `FROM (SELECT …)`
+// carries NO ONLY and must stay a legitimate unnamed position, or the fix
+// would refuse half the subqueries this package writes.
+//
+// Unlike TestEveryTablePositionIsReadByBothRules, only ONE rule can apply
+// here: the name is hidden by construction, so there is no NAME for tableRef
+// to read — the pair's promise is that AT LEAST one rule speaks, and here it
+// is the unreadable one alone.
+func TestAParenthesisedTableNameAfterOnlyIsUnread(t *testing.T) {
+	read := []string{
+		"SELECT X FROM ONLY (ACCOUNTS) A",
+		"SELECT X FROM ONLY(ACCOUNTS) A",
+		"SELECT X FROM T JOIN ONLY (ACCOUNTS) A ON A.X=T.X",
+		"UPDATE ONLY (ACCOUNTS) SET X=1",
+		"DELETE FROM ONLY (ACCOUNTS) A",
+	}
+	for _, sql := range read {
+		if _, found := unreadablePosition(sql, false); !found {
+			t.Errorf("a parenthesised table name after ONLY is unread and "+
+				"flagged by no rule — PostgreSQL reads it across campaigns:"+
+				"\n\t%s", sql)
+		}
+	}
+	// The destructive verbs, each in its ONLY-paren form: TRUNCATE empties and
+	// LOCK visits every campaign's rows, and the paren hides the name from the
+	// named rule too.
+	for _, verb := range strings.Split(destructiveVerbs, "|") {
+		sql := verb + " ONLY (ACCOUNTS)"
+		if _, found := unreadablePosition(sql, true); !found {
+			t.Errorf("%s ONLY (t) reaches a table the canary cannot read and "+
+				"no rule says so:\n\t%s", verb, sql)
+		}
+	}
+	// …and the derived table, which carries no ONLY, stays legitimate. A
+	// subquery in a table position is how this package walls a join; refusing
+	// it here would send the next author around the canary.
+	if seen, found := unreadablePosition("SELECT X FROM (SELECT 1) A", false); found {
+		t.Errorf("a derived table was flagged as an unreadable ONLY position "+
+			"(%q): the rule widened past ONLY and now refuses legitimate "+
+			"subqueries", seen)
+	}
+}
+
+// TestANamedConstraintConflictIsUnverifiable pins the tenth blind spot: an
+// upsert may name its conflict key by COLUMNS — `ON CONFLICT (org_id, …)`,
+// which the canary reads key by key — or by the NAME of a constraint —
+// `ON CONFLICT ON CONSTRAINT c`, whose columns live in a CREATE elsewhere the
+// canary never sees. The second fell into the "no fallback" branch and passed
+// as verified, a DO UPDATE nothing bounded.
+func TestANamedConstraintConflictIsUnverifiable(t *testing.T) {
+	set := func(sql string) string {
+		currentLevels = levels(sql)
+		return currentLevels[len(currentLevels)-1]
+	}
+	// The column-list form names the campaign in its ON CONFLICT key: verified.
+	if !insertNamesCampaign("ACCOUNTS", set(
+		"INSERT INTO ACCOUNTS (ORG_ID, EMAIL) VALUES ($1, $2) "+
+			"ON CONFLICT (ORG_ID, EMAIL) DO UPDATE SET NAME=EXCLUDED.NAME")) {
+		t.Error("a column-list ON CONFLICT naming org_id was refused — the " +
+			"verified form is the one to write")
+	}
+	// ON CONFLICT DO NOTHING writes no other row: genuinely no fallback.
+	if !insertNamesCampaign("ACCOUNTS", set(
+		"INSERT INTO ACCOUNTS (ORG_ID, EMAIL) VALUES ($1, $2) "+
+			"ON CONFLICT DO NOTHING")) {
+		t.Error("ON CONFLICT DO NOTHING was refused, though it touches no " +
+			"existing row")
+	}
+	// The named-constraint form is a fallback the canary cannot read.
+	if insertNamesCampaign("ACCOUNTS", set(
+		"INSERT INTO ACCOUNTS (ORG_ID, EMAIL) VALUES ($1, $2) "+
+			"ON CONFLICT ON CONSTRAINT ACCOUNTS_PKEY DO UPDATE "+
+			"SET NAME=EXCLUDED.NAME")) {
+		t.Error("ON CONFLICT ON CONSTRAINT passed as verified: whether the " +
+			"constraint covers org_id lives in a CREATE the canary never reads, " +
+			"and a UNIQUE(email) added tomorrow would open the DO UPDATE onto " +
+			"every campaign")
+	}
+}
+
 // A text seen at two call sites is recorded by the STRICTEST of them.
 //
 // The destructive rule judges only statements something RUNS — telling
