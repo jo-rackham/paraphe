@@ -189,6 +189,22 @@ the header keeps the hexagon and the screen says so.
   machine, replication 3 — the loss of a node costs nothing. A Job lays the
   cluster out at every install and upgrade, because a Garage layout is
   imperative and has no declarative form.
+- **The nodes find each other by native Kubernetes discovery**, which needs
+  the `garagenodes.deuxfleurs.fr` CRD to exist. Each node advertises its
+  current rpc address (its pod IP) as one of these custom resources and reads
+  its peers'; a pod that reschedules to a fresh IP is found again, where a
+  persisted peer list would redial the address it had before. **Apply the CRD
+  before the first install** — it is cluster-scoped, so it lives outside the
+  application chart (an ArgoCD project may admit only namespaced resources):
+
+  ```
+  kubectl apply -f deploy/garagenodes.deuxfleurs.fr.crd.yaml
+  ```
+
+  On a managed platform, install it once in the cluster layer beside the
+  other operators' CRDs; a CRD is a platform prerequisite, not an app's to
+  create. The chart carries only the namespaced half — a ServiceAccount and a
+  Role letting the nodes read and write their own `garagenodes`.
 - **On a cloud**, run no storage at all: `garage.enabled=false` and
   `media.endpoint` pointing at the provider's object store (OVH, Scaleway,
   R2). The application only ever speaks S3.
