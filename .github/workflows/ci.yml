@@ -535,6 +535,11 @@ jobs:
           refuse secrets.secretKey=trop-court "octets"
           refuse "mail.publicUrl=https://p.exemple.fr/chemin?x=1" "mail.publicUrl vaut"
           refuse "mail.publicUrl=https://qui@exemple.fr" "mail.publicUrl vaut"
+          # the host is separate from the port: no host at all, and a port that
+          # is not a number, both render past the old pattern and both are
+          # refused by url.Parse at startup — CrashLoopBackOff behind ArgoCD
+          refuse "mail.publicUrl=https://:8080" "mail.publicUrl vaut"
+          refuse "mail.publicUrl=https://foo::80" "mail.publicUrl vaut"
           # the composed origin, so the setting it is composed FROM as well
           # the comma is escaped for helm's own parser, which otherwise reads
           # it as a second --set and fails before any guard is reached — which
