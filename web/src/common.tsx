@@ -1090,6 +1090,10 @@ export function Fiche({
 }: CardProps) {
   const [status, setStatus] = useState(initialStatus ?? "to_contact");
   const [statusError, setStatusError] = useState<string | null>(null);
+  // `saving` is the STATE the button reads (aria-disabled, label); `submitting`
+  // is the re-entry guard the handler reads. They are two different things, and
+  // this card is the last submission in the app that conflated them — see save.
+  const [submitting, submitted] = useSubmitGuard();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -1191,7 +1195,19 @@ export function Fiche({
   });
 
   const save = async () => {
-    if (saving) return; // aria-disabled greys the button but keeps it live
+    // A REF, not the `saving` state: two clicks in the same tick run two
+    // handlers built by the same render, both read `saving` as false, and both
+    // POST — two identical notes in the team's history for one intention, and
+    // in browser mode two `saveTracking` racing on the same key. `aria-disabled`
+    // greys the button but keeps it live; `useSubmitGuard` is what makes the
+    // second click a no-op. Every other submission in the app already does this.
+    // A REF, not the `saving` state: two clicks in the same tick run two
+    // handlers built by the same render, both read `saving` as false, and both
+    // POST — two identical notes in the team's history for one intention, and
+    // in browser mode two `saveTracking` racing on the same key. `aria-disabled`
+    // greys the button but keeps it live; `useSubmitGuard` is what makes the
+    // second click a no-op. Every other submission in the app already does this.
+    if (submitting()) return;
     setStatusError(null);
     setSaved(false);
     setSaving(true);
@@ -1202,6 +1218,7 @@ export function Fiche({
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
+      submitted();
       setSaving(false);
     }
   };

@@ -148,4 +148,32 @@ describe("Fiche", () => {
     expect(container.querySelector('a[href^="tel:"]')).toBeNull();
     expect(container.textContent).toContain("non renseigné");
   });
+
+  it("two clicks in the same tick record the status ONCE, not twice", async () => {
+    // A re-entry guard is a REF, never state. Two clicks in the same tick run
+    // two handlers built by the same render, both read `saving` as false, and
+    // both POST — two identical notes in the team's history for one intention,
+    // and two racing writes in browser mode. `aria-disabled` greys the button
+    // but keeps it live; the guard has to live in the handler.
+    const onStatus = vi.fn(() => new Promise<void>(() => {})); // stays in flight
+    await act(async () => {
+      root.render(
+        <Fiche
+          mayor={MAYOR}
+          cfg={EMPTY_CFG}
+          onBack={() => {}}
+          onStatus={onStatus}
+        />,
+      );
+    });
+    const save = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Enregistrer"),
+    );
+    expect(save).toBeTruthy();
+    await act(async () => {
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStatus).toHaveBeenCalledTimes(1);
+  });
 });
