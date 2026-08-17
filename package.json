@@ -1,7 +1,7 @@
 {
   "name": "paraphe",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "description": "Racine de l'espace de travail : l'interface (web/) et les outils en ligne de commande (outils/) partagent le noyau (noyau/).",
   "packageManager": "pnpm@11.21.0",
