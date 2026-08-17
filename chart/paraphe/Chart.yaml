@@ -9,8 +9,8 @@ type: application
 # là pour empêcher. Un refus à l'installation vaut mieux qu'un drain qui
 # n'a jamais eu lieu.
 kubeVersion: ">=1.30.0-0"
-version: 0.4.3
-appVersion: "0.4.3"
+version: 0.4.4
+appVersion: "0.4.4"
 home: https://github.com/jo-rackham/paraphe
 sources:
   - https://github.com/jo-rackham/paraphe
