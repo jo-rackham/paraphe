@@ -86,6 +86,10 @@ spec:
         checksum/secret: {{ printf "%s|%s" (include (print $.Template.BasePath "/secret.yaml") .)
             (.Values.secrets.existingSecret | default "") | sha256sum }}
     spec:
+      # Par ce compte que le nœud lit et écrit ses ressources de découverte
+      # (garage-discovery.yaml). Le Job d'amorçage n'en a pas besoin : il ne
+      # parle qu'à l'API admin par HTTP, jamais à l'API Kubernetes.
+      serviceAccountName: {{ $name }}
       # le kubelet injecte une variable PARAPHE_* par port de Service : le
       # drapeau vaut pour chaque pod que ce chart dessine, pas seulement
       # pour celui où la collision a été remarquée

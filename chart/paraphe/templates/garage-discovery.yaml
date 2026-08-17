@@ -1,0 +1,57 @@
+{{/*
+  Garage's native Kubernetes discovery — how the nodes find each other.
+
+  Each node advertises its CURRENT rpc address as a garagenodes.deuxfleurs.fr
+  custom resource and re-reads its peers' after every ping; a pod that comes
+  back at a fresh IP is therefore found again. A persisted peer list — the
+  only reconnect source Garage has when no peer is configured — redials the
+  address a pod held BEFORE it moved, for ever. That was the churn: a rollout
+  handed every pod a new IP, each node kept its neighbours' old ones, quorum
+  never returned, and the bootstrap Job timed out on a cluster it could not
+  reassemble. Discovery re-resolves; the hand-rolled re-introduction it
+  replaces only papered over the symptom.
+
+  The CRD is NOT here. It is cluster-scoped — a CustomResourceDefinition
+  always is — and this app's ArgoCD project admits only Namespace among
+  cluster resources, so a CRD in this chart would fail the whole sync. It is
+  applied out of band (deploy/garagenodes.deuxfleurs.fr.crd.yaml, see
+  DEPLOYMENT.md), the way a cluster's CRDs are a platform concern and not an
+  app's. skip_crd = true in garage-config.yaml says so to Garage: do not try
+  to create it, only use it. What stays here is what an app MAY carry — a
+  ServiceAccount and a NAMESPACED right on the resource the nodes advertise.
+*/}}
+{{- if and .Values.media.enabled .Values.garage.enabled }}
+{{- $name := include "paraphe.nomGarage" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-discovery
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+rules:
+  # NAMESPACED, and only on the resource — never on the CRD: the nodes read
+  # the set (list) and advertise themselves (get, then create or replace),
+  # they do not manage the type. This is the whole of the right skip_crd buys.
+  - apiGroups: ["deuxfleurs.fr"]
+    resources: ["garagenodes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-discovery
+  labels: {{- include "paraphe.etiquettes" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ $name }}-discovery
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

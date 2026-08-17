@@ -1,0 +1,52 @@
+# Garage's node-discovery custom resource, applied OUT OF BAND.
+#
+# Native Kubernetes discovery (garage-config.yaml, [kubernetes_discovery])
+# has each Garage node advertise its current rpc address as one of these and
+# read its peers', so a pod that reschedules to a fresh IP is found again —
+# the churn fix. skip_crd = true tells Garage to USE this type, not create it.
+#
+# It lives here, not in chart/paraphe, because it is CLUSTER-SCOPED (every
+# CustomResourceDefinition is) and the paraphe ArgoCD project admits only
+# Namespace among cluster resources: a CRD in the chart would fail the sync.
+# A cluster's CRDs are a platform concern. Apply it once, with cluster rights,
+# before the app rolls with discovery enabled:
+#
+#   kubectl apply -f deploy/garagenodes.deuxfleurs.fr.crd.yaml
+#
+# Reproduces exactly what Garage's kube-derive emits (src/rpc/kubernetes.rs):
+# a Namespaced type whose spec is hostname, address and port, nothing else.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: garagenodes.deuxfleurs.fr
+spec:
+  group: deuxfleurs.fr
+  names:
+    kind: GarageNode
+    listKind: GarageNodeList
+    plural: garagenodes
+    singular: garagenode
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: Auto-generated derived type for Node via `CustomResource`
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [address, hostname, port]
+              properties:
+                address:
+                  type: string
+                hostname:
+                  type: string
+                port:
+                  type: integer
+                  format: uint16
+                  minimum: 0
+                  maximum: 65535

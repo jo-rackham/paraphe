@@ -1,7 +1,9 @@
 #!/bin/sh
-# Bootstraps the Garage cluster that holds the campaign logos: introduce the
-# nodes to each other, assign a layout, create the bucket, import the
-# application's key, publish the bucket on the web endpoint.
+# Bootstraps the Garage cluster that holds the campaign logos: wait for the
+# nodes to assemble, assign a layout, create the bucket, import the
+# application's key, publish the bucket on the web endpoint. Introducing the
+# nodes to each other is Garage's own job now — native Kubernetes discovery,
+# see garage-config.yaml — and no longer this script's.
 #
 # ONE file, run by the compose stack (one node) and by the chart's Job
 # (three). The chart reads it from here into a ConfigMap and the compose
@@ -44,13 +46,13 @@ case $GARAGE_CAPACITY in
     ;;
 esac
 # GARAGE_PEERS: the admin URL of EACH node, space separated. One entry is
-# the compose stack; three are the chart — a one-item peer list is still a
-# peer list, so both shapes set the same variable and this file carries no
-# per-shape fallback. A single address behind a round-robin Service will
-# not do: the nodes have to be addressed individually to be introduced.
+# the compose stack; three are the chart. Two things are read from it: the
+# FIRST node, which every layout and bucket call is addressed to, and the
+# COUNT, which is how many must be connected before the cluster is laid out.
+# The nodes reach each OTHER through discovery, not through this list.
 : "${GARAGE_PEERS:?the admin URL of each node, space separated}"
-# Everything after the introductions is asked of the first node: they share
-# one view of the cluster from that point on.
+# Everything is asked of the first node: once discovery has connected them,
+# they share one view of the cluster.
 first=$(echo "$GARAGE_PEERS" | cut -d' ' -f1)
 expected=$(echo "$GARAGE_PEERS" | wc -w)
 
@@ -95,86 +97,37 @@ api_json() {
   echo "$body" | jq "$@"
 }
 
-# --- the introductions -----------------------------------------------------
-# Each node knows only itself until told otherwise. Garage's own discovery
-# would do this through a CustomResourceDefinition and cluster-scoped
-# rights; asking the nodes directly needs neither, and this Job already
-# speaks the admin API.
-echo "waiting for $expected node(s) to answer…"
+# --- waiting for the cluster to assemble -----------------------------------
+# The nodes introduce THEMSELVES: native Kubernetes discovery has each one
+# advertise its CURRENT rpc address as a garagenodes.deuxfleurs.fr custom
+# resource and re-read its peers', so a pod that comes back at a fresh IP is
+# found again. A persisted peer list — Garage's only reconnect source when no
+# peer is configured — redials the address a pod held BEFORE it moved, for
+# ever; that was the churn, and re-introducing the nodes by hand from here
+# only papered over it. This script introduces no one now. It waits for the
+# cluster to assemble before laying it out: a layout applied to a subset
+# never reaches its quorum, and every write is then refused.
+#
+# isUp counts the local node too (its own state is "ourself", always up), so
+# the single-node compose stack clears this at once.
+echo "waiting for $expected node(s) to connect…"
 attempt=0
-repaired=0
 while : ; do
-  answering=""
-  for url in $GARAGE_PEERS; do
-    id=$(peer "$url" /v2/GetClusterStatus 2>/dev/null \
-      | jq -r '[.nodes[] | select(.addr != null) | "\(.id)@\(.addr)"] | .[]' \
-      2>/dev/null || true)
-    [ -n "$id" ] && answering="$answering $id"
-  done
-  # deduplicated: once connected, every node reports every other one
-  answering=$(echo "$answering" | tr ' ' '\n' | grep . | sort -u | tr '\n' ' ')
-  [ "$(echo "$answering" | wc -w)" -ge "$expected" ] && break
+  up=$(peer "$first" /v2/GetClusterStatus 2>/dev/null \
+    | jq '[.nodes[] | select(.isUp)] | length' 2>/dev/null || echo 0)
+  [ "${up:-0}" -ge "$expected" ] && break
   attempt=$((attempt + 1))
-  if [ "$attempt" -gt 60 ]; then
-    if [ "$repaired" = 0 ]; then
-      # A pod restart hands every node a fresh IP while its peers keep
-      # redialling the addresses they PERSISTED: each node knows the
-      # others' IDs, reaches none of them, quorum never returns, and this
-      # wait times out — the state a restarted cluster wakes up in. The
-      # repair is the introduction done backwards: ask an answering node
-      # which IDs it knows WITHOUT an address, and offer every peer DNS
-      # name for each of them. The RPC handshake verifies the ID, so a
-      # wrong pairing fails clean and the right one sticks; gossip then
-      # re-propagates the fresh addresses to everyone.
-      echo "stale peer addresses suspected: re-introducing by DNS…"
-      for url in $GARAGE_PEERS; do
-        lost=$(peer "$url" /v2/GetClusterStatus 2>/dev/null \
-          | jq -r '.nodes[] | select(.addr == null) | .id' 2>/dev/null || true)
-        [ -n "$lost" ] || continue
-        for id in $lost; do
-          for target in $GARAGE_PEERS; do
-            host=$(echo "$target" | sed -e 's|^http://||' -e 's|:[0-9]*$|:3901|')
-            curl -sS -X POST -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" \
-              -H "Content-Type: application/json" \
-              "$url/v2/ConnectClusterNodes" -d "[\"$id@$host\"]" \
-              >/dev/null 2>&1 || true
-          done
-        done
-        break
-      done
-      repaired=1
-      attempt=0
-      continue
-    fi
-    echo "only $(echo "$answering" | wc -w) of $expected nodes answered after" \
-      "two minutes. The cluster must NOT be laid out on a subset: the" \
-      "replication factor would never reach its quorum, and every write" \
-      "would be refused." >&2
+  if [ "$attempt" -gt 90 ]; then
+    echo "only ${up:-0} of $expected node(s) connected after three minutes." \
+      "Native discovery needs the garagenodes.deuxfleurs.fr CRD to exist and" \
+      "the nodes' ServiceAccount to carry read and write on it — check both," \
+      "then the pods' logs for a discovery error." >&2
+    peer "$first" /v2/GetClusterStatus 2>/dev/null \
+      | jq -c '.nodes[] | {id, addr, isUp}' >&2 || true
     exit 1
   fi
   sleep 2
 done
-
-if [ "$expected" -gt 1 ]; then
-  echo "introducing the nodes to each other"
-  # shellcheck disable=SC2086 # a word list is exactly what jq wants here
-  api POST /v2/ConnectClusterNodes \
-    -d "$(printf '%s\n' $answering | jq -Rsc 'split("\n") | map(select(. != ""))')" \
-    >/dev/null
-  # and CONNECTED, not merely known: a layout assigned to nodes that cannot
-  # reach one another is a cluster that answers nothing.
-  attempt=0
-  until [ "$(api GET /v2/GetClusterStatus | jq '[.nodes[] | select(.isUp)] | length')" \
-    -ge "$expected" ]; do
-    attempt=$((attempt + 1))
-    if [ "$attempt" -gt 30 ]; then
-      echo "the nodes were introduced but are not all up after a minute" >&2
-      api GET /v2/GetClusterStatus | jq -c '.nodes[] | {id, addr, isUp}' >&2
-      exit 1
-    fi
-    sleep 2
-  done
-fi
 
 # --- the layout ------------------------------------------------------------
 # A node needs a role when it has NONE — and also when the one it has

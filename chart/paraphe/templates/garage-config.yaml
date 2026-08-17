@@ -28,6 +28,19 @@ data:
     rpc_bind_addr = "[::]:3901"
     rpc_public_addr = "__RPC_PUBLIC_ADDR__"
 
+    # Comment les nœuds se trouvent : chacun publie son adresse rpc COURANTE
+    # dans une ressource garagenodes.deuxfleurs.fr et relit celles de ses
+    # pairs, donc un pod revenu sur une nouvelle IP est retrouvé — là où une
+    # liste de pairs persistée rappellerait l'adresse d'avant le
+    # redéploiement, indéfiniment. skip_crd : la CRD est posée hors bande
+    # (deploy/, cf. DEPLOYMENT.md) — cluster-scoped, elle ne peut pas voyager
+    # dans une app dont le projet ArgoCD n'admet que des Namespace ; un nœud
+    # n'a donc aucun droit cluster, il se contente d'utiliser le type.
+    [kubernetes_discovery]
+    namespace = "{{ .Release.Namespace }}"
+    service_name = "{{ $name }}"
+    skip_crd = true
+
     [s3_api]
     s3_region = {{ .Values.media.region | quote }}
     api_bind_addr = "[::]:3900"
