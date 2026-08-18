@@ -6,7 +6,7 @@ import {
   FIRST_CAMPAIGN,
   INSTANCE_ADMIN,
 } from "./config.ts";
-import { openTab, signIn } from "./helpers.ts";
+import { linkIn, openTab, signIn, visit, waitForMail } from "./helpers.ts";
 
 // One journey, told in order: a stranger asks for a campaign, an instance
 // administrator decides, and only then does the campaign exist.
@@ -110,6 +110,37 @@ test.describe
         await page.locator(".carte code").first().innerText()
       ).trim();
       expect(coordinationPassword.length).toBeGreaterThan(8);
+    });
+
+    // The invitation the approval above sent, opened the way its recipient
+    // opens it. It is the most special-cased of the three this application
+    // mints: written on the APEX, inside the transaction that creates a
+    // campaign which did not exist a moment before, with its link built from
+    // a slug rather than from the Host the administrator was on.
+    //
+    // Driven HERE rather than beside the other link journeys, and that is not
+    // tidiness: the public form is bounded to three per hour per source, so a
+    // spec filing its own request to read its own inbox spends a ceiling the
+    // suite needs — measured, it took the fourth and read a 429 instead of a
+    // confirmation. The approval this journey already performs sends exactly
+    // the message to open.
+    test("the invitation that approval sent opens the campaign", async ({
+      browser,
+    }) => {
+      const link = linkIn(await waitForMail(REQUESTER));
+      // the NEW campaign's subdomain, prefixed to the configured apex — not
+      // the apex the decision was taken on, where the token belongs to no
+      // campaign and the visit can only end on a sign-in screen
+      expect(link.startsWith(`${campaignOrigin(SLUG)}/connexion#jeton=`)).toBe(
+        true,
+      );
+
+      const opened = await visit(browser, link);
+      await expect(
+        opened.page.getByRole("button", { name: "déconnexion" }),
+      ).toBeVisible();
+      await expect(opened.page.getByText("Alex Porteur")).toBeVisible();
+      await opened.context.close();
     });
 
     test("the requester signs in on their own subdomain, as coordination", async ({

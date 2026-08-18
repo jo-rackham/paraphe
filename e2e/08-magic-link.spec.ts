@@ -1,14 +1,14 @@
-import { type Browser, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
+import { COORDINATION, campaignOrigin, FIRST_CAMPAIGN } from "./config.ts";
 import {
-  API_ORIGIN,
-  COORDINATION,
-  campaignOrigin,
-  FIRST_CAMPAIGN,
-  INSTANCE_ADMIN,
-  SINK_ORIGIN,
-} from "./config.ts";
-import { signIn } from "./helpers.ts";
+  emptyInbox,
+  inbox,
+  linkIn,
+  signIn,
+  visit,
+  waitForMail,
+} from "./helpers.ts";
 
 // Signing in by email, driven the whole way: the browser asks for a link,
 // the message leaves through a real socket, and the URL it carries opens a
@@ -21,60 +21,6 @@ import { signIn } from "./helpers.ts";
 // exactly the way to ship a link that never arrives.
 
 const ORIGIN = campaignOrigin(FIRST_CAMPAIGN);
-
-interface Received {
-  recipients: string[];
-  headers: string;
-  body: string;
-}
-
-async function inbox(): Promise<Received[]> {
-  const response = await fetch(SINK_ORIGIN);
-  return (await response.json()) as Received[];
-}
-
-async function emptyInbox() {
-  await fetch(SINK_ORIGIN, { method: "DELETE" });
-}
-
-/** Waits for a message to reach the sink: the send is detached from the
- *  request that asked for it, on purpose.
- *
- *  The LAST match, not the first. A send is detached, so one from an earlier
- *  journey can land after the inbox was emptied and before this one leaves —
- *  and its token is still live for fifteen minutes, so redeeming it would
- *  succeed and the journey would pass without the send it is testing ever
- *  having happened. */
-async function waitForMail(to: string): Promise<Received> {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    const found = (await inbox()).findLast((m) => m.recipients.includes(to));
-    if (found) return found;
-    if (Date.now() > deadline) {
-      throw new Error(`no message reached ${to}`);
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
-function linkIn(mail: Received): string {
-  const url = /(http:\/\/\S+#jeton=\S+)/.exec(mail.body);
-  if (!url) throw new Error(`no sign-in link in:\n${mail.body}`);
-  return url[1];
-}
-
-/**
- * Opens a link in a browser that has never seen this campaign — which is
- * what a recipient's browser is, and what makes the visit a real document
- * load. Reusing the page would be a FRAGMENT navigation from the URL the
- * first visit scrubbed: same document, no reload, nothing re-read.
- */
-async function visit(browser: Browser, link: string) {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto(link);
-  return { page, context };
-}
 
 test.describe
   .serial("signing in by email", () => {
@@ -166,73 +112,5 @@ test.describe
       ).toBeVisible();
       await expect(invitee.page.getByText("Nouvelle Bénévole")).toBeVisible();
       await invitee.context.close();
-    });
-
-    // The invitation nobody drove, and it is the most special-cased of the
-    // three: it is minted on the APEX, inside the transaction that creates a
-    // campaign which did not exist a moment before, and its link is built
-    // from a slug rather than from the Host the administrator is on. Every
-    // other invitation is written by a campaign, for that campaign, from
-    // inside it.
-    //
-    // What it must prove is the whole chain in one go — the message leaves,
-    // it points at the NEW subdomain and not at the apex the approval ran
-    // on, and the token opens the coordination account the approval created.
-    // The journey next door signs that account in by PASSWORD, so a link
-    // that never worked would leave that assertion green.
-    test("approving a hosting request sends an invitation that opens the campaign", async ({
-      page,
-      browser,
-    }) => {
-      await emptyInbox();
-      const slug = "tierce";
-      const requester = "porteur@tierce.test";
-
-      await page.goto(`${API_ORIGIN}/`);
-      await page
-        .getByRole("button", { name: "Héberger une campagne" })
-        .first()
-        .click();
-      await page.getByLabel("Adresse souhaitée").fill(slug);
-      await page.getByLabel("Nom de la campagne").fill("Campagne Tierce");
-      await page.getByLabel("Votre nom").fill("Alex Tierce");
-      await page.getByLabel("Votre adresse email").fill(requester);
-      await page.getByRole("button", { name: "Envoyer la demande" }).click();
-      await expect(
-        page.getByRole("heading", { name: "Demande enregistrée" }),
-      ).toBeVisible();
-
-      await page.goto(`${API_ORIGIN}/`);
-      await page.getByRole("button", { name: "Se connecter" }).click();
-      await page.getByLabel("Adresse email").fill(INSTANCE_ADMIN.email);
-      await page.getByLabel("Mot de passe").fill(INSTANCE_ADMIN.password);
-      await page.getByRole("button", { name: "Se connecter" }).click();
-
-      // scoped to the card: the queue holds whatever earlier journeys left,
-      // and an unscoped checkbox would arm somebody else's decision
-      const queued = page.locator(".carte", { hasText: slug });
-      await expect(queued).toContainText(requester);
-      await queued.getByLabel(/J'ai vérifié/).check();
-      await queued.getByRole("button", { name: "Ouvrir la campagne" }).click();
-      await expect(
-        page.getByRole("heading", {
-          name: `Campagne ouverte : ${slug}.localhost`,
-        }),
-      ).toBeVisible();
-
-      const link = linkIn(await waitForMail(requester));
-      // the NEW campaign's subdomain, prefixed to the configured apex — not
-      // the apex itself, where the token belongs to no campaign and the
-      // visit can only end on a sign-in screen
-      expect(link.startsWith(`${campaignOrigin(slug)}/connexion#jeton=`)).toBe(
-        true,
-      );
-
-      const opened = await visit(browser, link);
-      await expect(
-        opened.page.getByRole("button", { name: "déconnexion" }),
-      ).toBeVisible();
-      await expect(opened.page.getByText("Alex Tierce")).toBeVisible();
-      await opened.context.close();
     });
   });
