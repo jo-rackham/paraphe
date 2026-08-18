@@ -316,3 +316,46 @@ describe("what the header of a free card promises", () => {
     );
   });
 });
+
+// A CAMPAIGN IS NOT ITS CANDIDATE, and the mark beside the logo is where a
+// volunteer reads which one they are working for.
+//
+// The subtitle used to be `campaign.candidat`, which for a hosted campaign is
+// neither the name its coordination asked for nor the one an administrator
+// approved: « Alliance écologiste » signed in and read « Marie Dupont ». The
+// two are equal on a campaign bootstrapped from a file, so a fixture where
+// they agree passes either way — this one makes them disagree on purpose.
+describe("the mark beside the logo", () => {
+  const named = teamConfig({
+    organisation: {
+      slug: "alliance",
+      name: "Alliance écologiste",
+      listed: true,
+    },
+    campaign: { ...CONFIG.campaign, candidat: "Marie Dupont" },
+  });
+
+  const open = async (config: typeof CONFIG) => {
+    vi.mocked(API.detectMode).mockResolvedValue({ kind: "team", config });
+    vi.mocked(API.me).mockResolvedValueOnce(ALICE);
+    await act(async () => {
+      root.render(<Team config={config} />);
+    });
+    await until(() => text().includes("Mon tableau"), "the app opens");
+  };
+
+  it("names the campaign, not its candidate", async () => {
+    await open(named);
+    const marque = container.querySelector(".marque")!;
+    expect(marque.textContent).toContain("Alliance écologiste");
+    expect(marque.textContent).not.toContain("Marie Dupont");
+  });
+
+  // An unnamed campaign is a supported state — the annuaire skips it, and
+  // every campaign bootstrapped without a name starts there. The mark shows
+  // the word alone rather than an empty line under it.
+  it("shows the word alone when the campaign has no name", async () => {
+    await open(teamConfig());
+    expect(container.querySelector(".marque .sous")).toBeNull();
+  });
+});
