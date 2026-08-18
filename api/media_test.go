@@ -242,17 +242,31 @@ func TestTheContentSecurityPolicyNamesTheMediaOrigin(t *testing.T) {
 	if !strings.Contains(plain, "img-src 'self' data:;") {
 		t.Errorf("with no object store the policy should be unchanged: %q", plain)
 	}
+	if !strings.Contains(plain, "connect-src 'self';") {
+		t.Errorf("with no object store the policy should be unchanged: %q", plain)
+	}
 	with := contentSecurityPolicy("https://media.paraphe.org")
 	if !strings.Contains(with, "img-src 'self' data: https://media.paraphe.org;") {
 		t.Errorf("the media origin is missing from img-src: %q", with)
 	}
-	// Only the images. An origin that could also serve scripts or be
-	// connected to would be a much wider door than the one being opened.
+	// And from connect-src, which is a SECOND thing the same origin is
+	// needed for: the account-less version served under /navigateur/
+	// downloads the logo and inlines it as a data URI, because that mode
+	// promises nothing leaves the browser. Left out, the campaign was
+	// adopted without its mark and the failure showed in the console alone.
+	if !strings.Contains(with, "connect-src 'self' https://media.paraphe.org;") {
+		t.Errorf("the media origin is missing from connect-src: %q", with)
+	}
+	// The store's origin, and nothing else. What it must never become is a
+	// place scripts, frames or forms may come from.
 	for _, directive := range []string{"default-src 'self';",
-		"connect-src 'self';", "form-action 'self';", "base-uri 'none';"} {
+		"form-action 'self';", "base-uri 'none';", "frame-ancestors 'none'"} {
 		if !strings.Contains(with, directive) {
 			t.Errorf("%q no longer holds: %q", directive, with)
 		}
+	}
+	if strings.Contains(with, "script-src") {
+		t.Errorf("the media origin reached a script directive: %q", with)
 	}
 }
 

@@ -920,14 +920,27 @@ export function httpUrl(raw: string | undefined | null): string | undefined {
 export function PiedDePage({
   children,
   sourceUrl,
+  browserUrl,
 }: {
   children?: ReactNode;
   sourceUrl?: string;
+  /**
+   * The account-less version, reachable from every screen of a campaign.
+   * Passed by team mode only: browser mode IS it, and the instance's home
+   * page offers it in its own words.
+   */
+  browserUrl?: string;
 }) {
   const source = httpUrl(sourceUrl);
+  const sansCompte = httpUrl(browserUrl);
   return (
     <footer>
       {children}
+      {sansCompte && (
+        <p className="sans-compte">
+          <a href={sansCompte}>Travailler sans compte, dans mon navigateur</a>
+        </p>
+      )}
       {source && (
         <p className="source">
           <a href={source} rel="noreferrer">

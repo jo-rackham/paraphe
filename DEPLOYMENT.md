@@ -53,7 +53,7 @@ variable — the recommended route on a server (full list and examples in
 | `PARAPHE_SECRET_KEY` | session signing secret — `openssl rand -hex 64`. Refused below 32 bytes: it signs every session, and a short one falls to an offline search on a single captured cookie |
 | `PARAPHE_LOG_LEVEL` | `debug`, `info` (default), `warn` or `error`. Panics, 500s and refused waves are logged at `warn` or above, so they survive any level an operator picks |
 | `PARAPHE_SOURCE_URL` | public repository URL: shows "source code" in the footer |
-| `PARAPHE_BROWSER_VERSION_URL` | URL of the account-less browser version offered on the instance home page — defaults to the self-hosted `/navigateur/` when the image serves one; set to point elsewhere |
+| `PARAPHE_BROWSER_VERSION_URL` | URL of the account-less browser version, offered on the instance home page AND on every campaign's sign-in screen, which appends its own `?org=<slug>`. Defaults to the self-hosted `/navigateur/` when the image serves one; set to point elsewhere. Anything that is not an http(s) URL or an absolute path **fails the start**: the interface drops it, and an absent link is indistinguishable from an instance offering none |
 | `PARAPHE_BROWSER_WEB_DIR` | build of the browser version served under `/navigateur/` (the image sets it; empty serves none) |
 | `PARAPHE_WEB_DIR` | the interface the binary serves (the image sets it). Unreadable, **the start fails** — one image serves the pages and the JSON, so a 404 on every page while `/api` answers is what a probe calls healthy and a volunteer calls a blank screen. Set explicitly empty, it means "JSON only" |
 | `PARAPHE_DATABASE_URL` | PostgreSQL DSN — **mandatory**, the app refuses to start without it |
@@ -387,27 +387,45 @@ controller** — not the author of the repository.
   is hesitating, who refused, what a mayor said in confidence. Hence the
   per-team walls, HTTPS and encrypted backups.
 
-## Pre-filling the browser version (optional)
+## Pre-filling the browser version
 
 Volunteers working without an account, in their browser, otherwise retype the
 campaign's nine fields — and a typo goes out to mayors under the campaign's
-name. Built with `PARAPHE_BASE_DOMAIN`, the interface accepts `?org=<slug>`
-and offers to take the campaign published by `<slug>.<domain>`:
+name. The interface accepts `?org=<slug>` and offers to take the campaign
+published by `<slug>.<domain>`.
+
+**Nothing to configure for the version this image serves.** Each campaign's
+sign-in screen carries the link, `?org=` included, and every screen of it
+carries the same link in the footer. The instance the parameter resolves
+against is injected into `/navigateur/index.html` **at startup**, in memory,
+the way the mode marker is: the published image is built with no domain at
+all, because one image serves every operator's instance and one carrying
+`paraphe.org` would send everyone else's volunteers to fetch campaigns from
+there.
+
+A build published **elsewhere** — GitHub Pages, another static host — has no
+server to inject anything, so it bakes the domain instead:
 
 ```
 PARAPHE_BASE_DOMAIN=paraphe.fr PARAPHE_BASE_PATH=/paraphe/ pnpm --dir web build
 ```
 
-What that exposes: `GET /api/campaign/public` returns the slug, the name and
-the nine campaign keys — nothing else, and with `Access-Control-Allow-Origin:
-*` since those are exactly the values that already go out in every message to
-a mayor. No session, no cookie.
+Point `PARAPHE_BROWSER_VERSION_URL` at it and the campaigns will offer that
+one instead, with their `?org=` on it.
 
-**The parameter names a CAMPAIGN, never a host**: the domain is fixed at build
-time. A forged link therefore cannot slip a third party's contact details
-under a real candidate's name — that would require having a campaign approved
-on your instance. The volunteer sees the values before accepting them anyway,
-and a campaign still at its template values pre-fills nothing (409).
+What the pre-fill exposes: `GET /api/campaign/public` returns the slug, the
+name, the nine campaign keys and the logo — nothing else, and with
+`Access-Control-Allow-Origin: *` since those are exactly the values that
+already go out in every message to a mayor. No session, no cookie.
 
-Leave `PARAPHE_BASE_DOMAIN` empty at build time and `?org=` does nothing at
-all.
+**The parameter names a CAMPAIGN, never a host**: the domain comes from the
+document — a marker the serving instance wrote, or a value fixed at build
+time — never from the URL. A forged link therefore cannot slip a third
+party's contact details under a real candidate's name; that would require
+having a campaign approved on your instance. The volunteer sees the values
+before accepting them anyway, and a campaign still at its template values
+pre-fills nothing (409).
+
+A **single-campaign** instance has no subdomain space for `<slug>.<domain>`
+to name, so it injects no marker and its campaign offers the link without a
+parameter: the tool, with its nine fields to fill in by hand.

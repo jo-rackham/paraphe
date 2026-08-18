@@ -324,8 +324,14 @@ logLevel: ""
 # -- Lien « code source » affiché en pied de page (dépôt public, MIT)
 sourceUrl: "https://github.com/jo-rackham/paraphe"
 
-# -- URL publique de la version navigateur (sans compte), proposée sur la
-# page d'accueil de l'instance en multi-campagnes. Vide : aucun lien.
+# -- URL publique de la version navigateur (sans compte), proposée sur
+# l'accueil de l'instance ET sur l'écran de connexion de chaque campagne,
+# qui y ajoute son `?org=<slug>` pour que ses textes soient déjà remplis.
+# Vide : l'image sert la sienne sous /navigateur/ et le lien apparaît tout
+# seul — ne renseigner que pour pointer ailleurs (une publication Pages).
+# Une valeur qui n'est ni une URL http(s) ni un chemin absolu fait échouer
+# le démarrage : l'interface l'écarterait, et un lien absent ne se
+# distingue pas d'une instance qui n'en propose aucun.
 browserVersionUrl: ""
 
 service:

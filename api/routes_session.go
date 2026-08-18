@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -64,6 +66,11 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		"source_url": s.cfg.SourceURL,
 		"statuses":   Statuses,
 		"ranks":      Ranks,
+		// The same account-less version the apex offers, carrying THIS
+		// campaign: the sign-in screen is where a volunteer with no account
+		// stands, and it is the one place that knows which campaign they
+		// came for.
+		"browser_version_url": browserVersionFor(browserURL, org.Slug),
 		// The COMMON mayor list's departments — public open data, identical
 		// for every campaign and already published beside the browser
 		// version. Unlike the `no_account` boolean this body stopped
@@ -79,6 +86,71 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 			"listed": org.Listed,
 		},
 	})
+}
+
+// browserVersionFor: where a volunteer with no account goes to work on THIS
+// campaign, alone, in their browser.
+//
+// The `?org=<slug>` is what carries the campaign across — candidate,
+// contacts, signature, logo — instead of nine fields retyped by hand, where
+// a typo goes out to mayors under the campaign's name. The volunteer sees
+// those values before anything is written (BrowserProposition.tsx).
+//
+// It is added ONLY where it resolves: the pre-fill asks
+// `<slug>.<base domain>`, so a single-campaign instance — which has no
+// subdomain space — gets the plain link. A parameter promising a pre-fill
+// that lands on an empty campaign is a promise discovered by paying for it.
+//
+// The setting is refused at startup unless it is an http(s) URL or a path on
+// this instance (validBrowserVersionURL), so there is no unparseable value
+// to fall back from here.
+func browserVersionFor(base, slug string) string {
+	if base == "" || BaseDomain() == "" {
+		return base
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	q := u.Query()
+	q.Set("org", slug)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// validBrowserVersionURL: what PARAPHE_BROWSER_VERSION_URL may say.
+//
+// It becomes an `href` on the instance's home page and on every campaign's
+// sign-in screen. The interface refuses anything that is not http(s) before
+// rendering it, so a wrong value here shows as a link that is simply absent
+// — an operator reading their own configuration back has no way to tell that
+// from "this instance serves no browser version". Said at startup instead,
+// where they are looking.
+func validBrowserVersionURL(raw string) error {
+	refuse := func(why string) error {
+		return fmt.Errorf("PARAPHE_BROWSER_VERSION_URL = %q: %s. Give an "+
+			"absolute http(s) URL, or a path on this instance such as "+
+			"/navigateur/ — or leave it empty to offer the self-hosted one",
+			raw, why)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return refuse(fmt.Sprintf("it is not a URL (%v)", err))
+	}
+	if u.Scheme == "" {
+		if !strings.HasPrefix(raw, "/") {
+			return refuse("a relative path resolves against whatever screen " +
+				"the visitor is on")
+		}
+		return nil
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return refuse(fmt.Sprintf("%q is not a scheme a link may carry", u.Scheme))
+	}
+	if u.Host == "" {
+		return refuse("it names no host")
+	}
+	return nil
 }
 
 type signInRequest struct {

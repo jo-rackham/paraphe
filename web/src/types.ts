@@ -110,6 +110,12 @@ export interface ServerConfig {
   departments: string[];
   /** L'instance sait envoyer un email : la connexion par lien est offerte. */
   magic_link: boolean;
+  /**
+   * The account-less browser version, carrying THIS campaign (`?org=<slug>`)
+   * when the instance has a subdomain space for the pre-fill to resolve in.
+   * Empty: this instance offers none, and no link is shown.
+   */
+  browser_version_url: string;
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
 }

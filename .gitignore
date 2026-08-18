@@ -26,6 +26,9 @@ out/
 # --- Interface et outils (espace de travail pnpm) ------------------------
 node_modules/
 web/dist/
+# la version sans compte, second build des mêmes sources : `task
+# web-build-navigateur`, l'image, et les parcours complets
+web/dist-navigateur/
 # listes publiées : régénérées par `task web-donnees` et par la CI Pages
 web/public/donnees/*.csv
 

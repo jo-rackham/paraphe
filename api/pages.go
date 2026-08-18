@@ -41,6 +41,68 @@ func markInterface(dir string) ([]byte, error) {
 	return []byte(strings.Replace(page, "</head>", modeMarker+"\n</head>", 1)), nil
 }
 
+// markBrowserVersion prepares the page /navigateur/ serves: the SAME build a
+// static host would publish, told which instance it is standing on.
+//
+// The domain is what `?org=<slug>` resolves against — the pre-fill asks
+// `<slug>.<domain>` for the campaign a link names. It is injected HERE, at
+// startup, and not baked by the build: an image carrying one instance's
+// domain would send every OTHER operator's volunteers to fetch campaigns
+// from ours. The published image is built with none, and this is what makes
+// the parameter work on the instance actually serving the page.
+//
+// It changes nothing about what a LINK may name. The domain comes from the
+// server that served the document, exactly like the mode marker one
+// function up; the parameter still carries a slug and nothing else.
+//
+// An empty domain injects NOTHING, and that absence is the honest answer: a
+// single-campaign instance has no subdomain space, so `?org=` has nowhere to
+// resolve and stays inert.
+func markBrowserVersion(dir, domain string) ([]byte, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "index.html"))
+	if err != nil {
+		return nil, err
+	}
+	page := string(raw)
+	// The absence of the mode marker is what lets this build fall into
+	// browser mode. Checked here rather than after the fact: this function
+	// is the one place that knows which page /navigateur/ will serve.
+	if strings.Contains(page, `name="paraphe-mode"`) {
+		return nil, fmt.Errorf("%s/index.html carries the mode marker: this "+
+			"build would never switch to browser mode. Point browser_web_dir "+
+			"at a build made for /navigateur/, not at web_dir", dir)
+	}
+	if domain == "" {
+		return []byte(page), nil
+	}
+	// Through the SAME functions the rest of the application uses, not a
+	// copy of them: this value becomes an HTML attribute, and the lesson of
+	// mediaOrigin is that a guard which re-states a rule is the copy that
+	// drifts. validBaseDomain bounds it to DNS labels — no quote, no angle
+	// bracket, nothing that closes the attribute.
+	//
+	// CHECKED FIRST, NORMALISED SECOND, and that order is the whole
+	// correctness of these two lines. normaliseHost is written for an
+	// incoming Host header, where a port is legal: run first, it turns
+	// `https://paraphe.test` into the perfectly valid one-label domain
+	// `https` — the very confusion validBaseDomain exists to refuse. What
+	// normalising then buys is the form Host headers are matched against:
+	// the check lowercases and trims before judging, so `PARAPHE.TEST `
+	// passes it, and written out raw it puts a space inside the URL the
+	// pre-fill builds.
+	if err := validBaseDomain(domain); err != nil {
+		return nil, err
+	}
+	domain = normaliseHost(domain)
+	if !strings.Contains(page, "</head>") {
+		return nil, fmt.Errorf("%s/index.html has no </head>: the instance "+
+			"cannot be named, and a ?org= link would offer a campaign this "+
+			"build cannot fetch", dir)
+	}
+	marker := fmt.Sprintf(`<meta name="paraphe-instance" content=%q>`, domain)
+	return []byte(strings.Replace(page, "</head>", marker+"\n</head>", 1)), nil
+}
+
 // gzipBytes compresses once, at startup. BestCompression because this runs
 // exactly one time for a document served on every load.
 func gzipBytes(raw []byte) ([]byte, error) {
@@ -106,7 +168,7 @@ func (s *Server) serveInterface(w http.ResponseWriter, r *http.Request) {
 		// never cached: a volunteer holding an index.html from before a
 		// deployment loads asset names that no longer exist
 		w.Header().Set("Cache-Control", "no-store")
-		s.writePage(w, r)
+		writePage(w, r, s.landingPage, s.landingPageGz)
 		return
 	}
 	info, err := os.Stat(abs)
@@ -168,6 +230,26 @@ func (s *Server) serveBrowserVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "/" || path == "." || filepath.Ext(path) == "" {
 		path = "/index.html"
+	}
+	// From MEMORY, like the ordinary interface's own index and for one more
+	// reason: this is the copy carrying the instance marker. Served off the
+	// disk, the page would be the build's, and `?org=` would resolve against
+	// nothing on the very origin that hosts the campaign.
+	if path == "/index.html" {
+		if s.browserPage == nil {
+			// Wording, not style: the isolation canary reads every string
+			// reaching a call, and « … from %s with … » is a WITH statement
+			// naming a table it cannot resolve. The two words are ordinary
+			// English and ordinary SQL at once.
+			s.failure(w, fmt.Errorf("the browser version has no prepared "+
+				"page (browser_web_dir=%s): prepareBrowserVersion did not run",
+				s.browserDir))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		writePage(w, r, s.browserPage, s.browserPageGz)
+		return
 	}
 	file := filepath.Join(s.browserDir, filepath.FromSlash(path))
 	root, err := filepath.Abs(s.browserDir)
@@ -297,22 +379,26 @@ func contentType(name string) string {
 	return "application/octet-stream"
 }
 
-// writePage serves the marked index.html, gzipped when the client accepts
+// writePage serves a page held in memory, gzipped when the client accepts
 // it. Only gzip: the page is compressed once at startup, in memory, and
 // compress/gzip is in the standard library — bringing a brotli encoder into
 // the module to save two kilobytes on one document would be a dependency
 // bought for nothing. The assets, where the bytes actually are, get brotli
 // from the build.
-func (s *Server) writePage(w http.ResponseWriter, r *http.Request) {
-	if s.landingPageGz != nil && acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") {
+//
+// Two callers, one helper: the interface's marked index and the browser
+// version's, which carries the instance marker instead. Written twice, the
+// negotiation would be two places for a Vary header to go missing.
+func writePage(w http.ResponseWriter, r *http.Request, page, gz []byte) {
+	if gz != nil && acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
-		if _, err := w.Write(s.landingPageGz); err != nil {
-			slog.Error("landing page not served", "error", err)
+		if _, err := w.Write(gz); err != nil {
+			slog.Error("page not served", "error", err)
 		}
 		return
 	}
-	if _, err := w.Write(s.landingPage); err != nil {
-		slog.Error("landing page not served", "error", err)
+	if _, err := w.Write(page); err != nil {
+		slog.Error("page not served", "error", err)
 	}
 }

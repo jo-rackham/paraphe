@@ -12,6 +12,7 @@ import {
   type CardDraft,
   Fiche,
   Guide,
+  httpUrl,
   LogoCampagne,
   Marque,
   NavOnglets,
@@ -480,7 +481,10 @@ function Coquille({
           {children}
         </main>
       </RenderGuard>
-      <PiedDePage sourceUrl={cfg.source_url}>
+      <PiedDePage
+        sourceUrl={cfg.source_url}
+        browserUrl={cfg.browser_version_url}
+      >
         <p>
           Le travail est enregistré sur le serveur de la campagne. Vos notes et
           vos réservations restent dans votre équipe. Les statuts, eux, sont lus
@@ -505,6 +509,10 @@ function Connexion({
   // the disclosure that opens the public team-request form, below the
   // sign-in: whoever wants to gather a team around them has no account yet
   const [asking, setAsking] = useState(false);
+  // The account-less way in. Checked here rather than rendered blind: this
+  // is a setting an operator can leave empty, and an <a> with no href is a
+  // link that looks like one and does nothing.
+  const sansCompte = httpUrl(cfg.browser_version_url);
   return (
     <>
       {/* The campaign's mark on the one page a volunteer reaches before the
@@ -532,6 +540,34 @@ function Connexion({
           )}
         </p>
       </FormulaireConnexion>
+      {/* The other door, for whoever has no account and wants none. It sits
+          ABOVE the team-request disclosure on purpose: unfolded, that form
+          is nine fields long and would push this card off the screen.
+
+          A plain <a>, not a button: /navigateur/ is a second build of this
+          application, outside the single page — a real load, and « précédent »
+          from there comes back here. The campaign travels in a QUERY; the
+          fragment belongs to the sign-in link. */}
+      {sansCompte && (
+        <section className="carte">
+          <h2>Sans compte, dans votre navigateur</h2>
+          <p>
+            Les textes de cette campagne — candidat, contacts, signature — vous
+            seront proposés déjà remplis, et vous les verrez avant que rien ne
+            soit enregistré. Tout reste sur votre poste.
+          </p>
+          <p>
+            En échange, <strong>rien n'est coordonné</strong> : cette version
+            ignore qu'un autre bénévole a déjà appelé le même maire. Pour
+            travailler à plusieurs, demandez un accès ci-dessous.
+          </p>
+          <p>
+            <a className="bouton" href={sansCompte}>
+              Ouvrir la version navigateur
+            </a>
+          </p>
+        </section>
+      )}
       {/* The toggle SURVIVES the form it opens: a disclosure that unmounts
           itself would drop focus to <body> on the way in and on the way
           back out. */}

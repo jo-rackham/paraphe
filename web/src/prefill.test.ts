@@ -12,6 +12,7 @@ import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
 import { EMPTY_CFG } from "./common.tsx";
 import {
   fetchCampaign,
+  instanceDomain,
   requestedSlug,
   untouchedCampaign,
   validSlug,
@@ -28,9 +29,25 @@ const withDomain = (domain: string) => {
   vi.stubEnv("PARAPHE_INSTANCE_DOMAIN", domain);
 };
 
+/**
+ * What the server injects into the page it serves (api/pages.go,
+ * markBrowserVersion) — the same mechanism as the mode marker, and the only
+ * thing that makes ?org= work on the build an instance hosts under
+ * /navigateur/, which is published carrying no domain at all.
+ */
+const withMarker = (domain: string) => {
+  const meta = document.createElement("meta");
+  meta.setAttribute("name", "paraphe-instance");
+  meta.setAttribute("content", domain);
+  document.head.appendChild(meta);
+};
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  for (const m of document.querySelectorAll('meta[name="paraphe-instance"]')) {
+    m.remove();
+  }
 });
 
 describe("the slug a link may name", () => {
@@ -68,6 +85,38 @@ describe("the slug a link may name", () => {
     expect(requestedSlug("?org=campagne")).toBe("campagne");
     expect(requestedSlug("?org=https://ailleurs.test")).toBeNull();
   });
+
+  // The published image bakes NO domain — one image serves every operator's
+  // instance, and one carrying paraphe.org would send everybody else's
+  // volunteers to fetch campaigns from there. The instance it actually
+  // stands on is injected into the page it serves.
+  it("takes the instance from the page when the build baked none", () => {
+    withDomain("");
+    withMarker("paraphe.fr");
+    expect(requestedSlug("?org=campagne")).toBe("campagne");
+  });
+
+  // And it OUTRANKS the baked value, which is the publication's guess about
+  // where it would be served. The document's is the server's own answer.
+  it("prefers the page's instance to the one baked in", () => {
+    withDomain("ailleurs.test");
+    withMarker("paraphe.fr");
+    expect(instanceDomain()).toBe("paraphe.fr");
+  });
+
+  // A marker is not a licence for the LINK to name a host: the parameter
+  // still carries a DNS label, and everything else is refused as before.
+  it("still refuses a slug that names anything but a campaign", () => {
+    withMarker("paraphe.fr");
+    for (const forged of [
+      "?org=ailleurs.test",
+      "?org=https://ailleurs.test",
+      "?org=campagne.ailleurs.test",
+      "?org=../autre",
+    ]) {
+      expect(requestedSlug(forged)).toBeNull();
+    }
+  });
 });
 
 describe("fetching the proposed campaign", () => {
@@ -89,6 +138,36 @@ describe("fetching the proposed campaign", () => {
     const offer = await fetchCampaign("campagne");
     expect(seen).toEqual(["https://campagne.paraphe.fr/api/campaign/public"]);
     expect(offer.campaign.candidat).toBe("Camille Réel");
+  });
+
+  // Same rule one source over — the host is the instance the PAGE names,
+  // with the slug as a label under it — and one difference that only a
+  // running instance shows: an instance that named itself SERVED this page,
+  // so it is reachable exactly as this page was reached. Written `https://…`
+  // with no port, the request went to a host nothing answers at; the
+  // end-to-end suite (:8399) and `task try-instance` (:8047) both failed
+  // with « Failed to fetch », and production, on 443, hid it.
+  it("asks the instance the page names, on the scheme and port it came from", async () => {
+    withDomain("");
+    withMarker("paraphe.fr");
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", (url: string) => {
+      seen.push(url);
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            slug: "campagne",
+            name: "Camille Réel",
+            campaign: whole(),
+          }),
+      });
+    });
+    await fetchCampaign("campagne");
+    const { protocol, port } = window.location;
+    expect(seen).toEqual([
+      `${protocol}//campagne.paraphe.fr${port ? `:${port}` : ""}/api/campaign/public`,
+    ]);
   });
 
   // A captive portal answers 200 with HTML, and adopting that would fill

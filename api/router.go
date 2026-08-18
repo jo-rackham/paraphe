@@ -361,19 +361,34 @@ func securityHeaders(next http.Handler) http.Handler {
 
 // contentSecurityPolicy assembles the policy. Split out from the middleware
 // so that it can be read at one glance and tested for what it lets through.
+// The media origin is named TWICE, and the second one is not symmetry.
+// `img-src` is how the header shows a logo. `connect-src` is how the
+// account-less version served under /navigateur/ downloads one: it inlines
+// the bytes as a data URI, because that mode promises nothing leaves the
+// browser and a remote address in its header would make that false at every
+// load. Left out, the campaign was adopted without its mark, in silence —
+// the fetch fails in the console and the code treats a missing logo as
+// costing the picture and nothing else. Published on a static host, that
+// same build has no policy at all and has always worked.
+//
+// It buys one origin, the operator's own object store, for one call. What is
+// still refused there is everything that matters: no script, no frame, no
+// form, and `default-src 'self'` over the rest.
 func contentSecurityPolicy(media string) string {
 	images := "img-src 'self' data:"
+	connect := "connect-src 'self'"
 	if media != "" {
 		images += " " + media
+		connect += " " + media
 	}
 	const policy = "default-src 'self'; " +
 		"style-src 'self' 'unsafe-inline'; " + // React sets style attributes
 		"%s; " +
-		"connect-src 'self'; " +
+		"%s; " +
 		"form-action 'self'; " +
 		"base-uri 'none'; " +
 		"frame-ancestors 'none'"
-	return fmt.Sprintf(policy, images)
+	return fmt.Sprintf(policy, images, connect)
 }
 
 // mediaOrigin: the object store's public origin, or nothing.

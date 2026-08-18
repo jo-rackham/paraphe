@@ -562,12 +562,17 @@ tasks:
     # *.localhost resolves to the loopback in every browser, with no DNS:
     # this is the only way to exercise one campaign per subdomain locally.
     dir: api
-    deps: [db-ready, web-build]
+    # web-build-navigateur too: sans elle, /navigateur/ retombe sur
+    # l'interface ordinaire et le lien « sans compte » de chaque campagne
+    # n'a rien à ouvrir. Construite SANS domaine, comme l'image publiée —
+    # c'est le démarrage qui injecte celui de l'instance.
+    deps: [db-ready, web-build, web-build-navigateur]
     env:
       PARAPHE_HOST: 127.0.0.1
       PARAPHE_CONFIG_DIR: '{{.ROOT_DIR}}/config'
       PARAPHE_CSV: '{{.ROOT_DIR}}/out/04_base_complete.csv'
       PARAPHE_WEB_DIR: '{{.ROOT_DIR}}/web/dist'
+      PARAPHE_BROWSER_WEB_DIR: '{{.ROOT_DIR}}/web/dist-navigateur'
       PARAPHE_DATABASE_URL: '{{.PARAPHE_DATABASE_URL | default "postgresql://paraphe_essai:paraphe_essai@127.0.0.1:5432/paraphe_essai"}}'
       PARAPHE_BASE_DOMAIN: localhost
       PARAPHE_ORG_SLUG: campagne

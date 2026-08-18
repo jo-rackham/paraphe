@@ -108,12 +108,13 @@ les démarches à sa place ».
 
 ## 4. Se répartir le travail avec l'app
 
-**Sans compte, dans votre navigateur.** Si la coordination d'une campagne
-hébergée vous envoie un lien du type `…/?org=nom-de-la-campagne` — il ne
-marche que sur une version de l'application reliée à l'instance qui héberge
-la campagne —, l'application vous propose de reprendre la campagne —
-candidat, contacts, signature — et vous montre ces valeurs AVANT de rien
-enregistrer : ce sont elles que liront les maires.
+**Sans compte, dans votre navigateur.** Sur l'adresse d'une campagne
+hébergée, l'écran de connexion propose « Ouvrir la version navigateur » — et
+le lien est aussi en pied de page, sur tous les écrans. Il emporte la
+campagne avec lui : l'application vous propose de la reprendre — candidat,
+contacts, signature — et vous montre ces valeurs AVANT de rien enregistrer,
+ce sont elles que liront les maires. Un lien `…/?org=nom-de-la-campagne`
+qu'on vous envoie fait la même chose.
 Vous travaillez alors entièrement dans votre navigateur, sans compte.
 Attention à ce que cela implique : cette version **ne coordonne rien**. Elle
 ignore qu'un autre bénévole a déjà appelé le même maire. Convenez d'un

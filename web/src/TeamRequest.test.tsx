@@ -10,9 +10,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import * as API from "./api.ts";
 import Team from "./Team.tsx";
+import { teamConfig } from "./testing/fixtures.ts";
 import type { Me, ServerConfig, TeamRequest } from "./types.ts";
 
 vi.mock("./api.ts", { spy: true });
@@ -26,18 +26,10 @@ const { APIError } =
   await vi.importActual<typeof import("./api.ts")>("./api.ts");
 const noSessionYet = () => new APIError(401, "Session absente ou expirée.");
 
-const CONFIG: ServerConfig = {
-  mode: "team",
-  departments: ["01", "02", "03"],
-  campaign: Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, `valeur ${k}`])),
-  batch_size: 10,
-  unfilled: [],
-  source_url: "",
-  magic_link: false,
-  logo: null,
-  statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],
-  ranks: [{ key: "has_endorsed", label: "A parrainé" }],
-};
+// Through the shared fixture, not a copy: the shape is the API's contract
+// with the interface, and a private literal is one more edit every time the
+// contract gains a field.
+const CONFIG: ServerConfig = teamConfig({ departments: ["01", "02", "03"] });
 
 const PENDING: TeamRequest = {
   id: 7,

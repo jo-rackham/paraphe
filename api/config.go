@@ -156,6 +156,16 @@ func LoadConfig(dir string) (*Config, error) {
 		}
 	}
 
+	// Same posture, one setting over: this one becomes an href on the home
+	// page and on every campaign's sign-in screen, and the interface drops
+	// what is not http(s) rather than render it. A wrong value would then be
+	// indistinguishable from "no browser version here".
+	if raw := strings.TrimSpace(Get("browser_version_url")); raw != "" {
+		if err := validBrowserVersionURL(raw); err != nil {
+			return nil, err
+		}
+	}
+
 	var missing []string
 	for _, k := range CampaignKeys {
 		if strings.TrimSpace(cfg.Campaign[k]) == "" {

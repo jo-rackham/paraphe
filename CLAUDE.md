@@ -77,6 +77,46 @@ buys three things, and the first is why:
   volume; the only ones the chart gives a volume to are the object store's
   (see below), and the application never touches them except over S3.
 
+## The way out, offered by the way in
+
+The same image carries a SECOND build of the interface, served under
+`/navigateur/` on every host: the account-less version, whose index carries
+no mode marker and whose `/api` paths answer HTML — the two conditions that
+make it decide "no API here", on the very origin that serves one. Each
+campaign's sign-in screen links to it, and so does the footer of every screen
+of that campaign. A volunteer who wants no account, or a shared computer, or
+a train, has a door, and it is on the page they already landed on.
+
+- **The link CARRIES the campaign** (`?org=<slug>`, built by
+  `browserVersionFor`), because the alternative is nine fields retyped by
+  hand and a typo going out to mayors under the campaign's name. The
+  parameter is added only where it resolves — a single-campaign instance has
+  no subdomain space, and it gets the plain link rather than a pre-fill that
+  would land on an empty configuration.
+- **The instance the parameter resolves against is injected AT STARTUP**
+  (`markBrowserVersion`), in memory, like the mode marker beside it. It is
+  not baked: one image serves every operator's instance, and one carrying
+  `paraphe.org` would send everybody else's volunteers to fetch campaigns
+  from ours. The static publication, which has no server to inject anything,
+  still bakes it. **Checked first, normalised second**: `normaliseHost` is
+  written for a Host header where a port is legal, so run first it turns
+  `https://paraphe.test` into the perfectly valid one-label domain `https`,
+  which is the confusion `validBaseDomain` exists to refuse.
+- **A link may name a campaign; it may never name a host.** Unchanged, and
+  the marker does not touch it: the domain comes from the DOCUMENT, the
+  parameter still carries a DNS label. What the marker DOES decide is the
+  scheme and the port — an instance that named itself served this page, so
+  it is reachable as this page was reached. Hardcoded `https` and no port,
+  the offer failed with « Failed to fetch » on every instance not listening
+  on 443, and only the end-to-end suite saw it: production hid it.
+- **The media origin is in `connect-src`, beside `img-src`.** That build
+  downloads the logo and inlines it as a data URI, because it promises
+  nothing leaves the browser. Left out of the policy, the campaign was
+  adopted without its mark and the failure showed in a console alone.
+- The e2e suite builds it with `PARAPHE_BASE_DOMAIN` DELIBERATELY EMPTY, as
+  the image is: a green journey there is a statement about the injection and
+  nothing else.
+
 ## Sources (all open)
 
 Public domain for the Conseil constitutionnel endorsements, Etalab open

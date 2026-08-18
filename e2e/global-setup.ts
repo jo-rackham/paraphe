@@ -165,6 +165,15 @@ export default async function globalSetup() {
   // its GitHub Pages publication, and a build without it asks the API for
   // assets under a path it does not serve — a blank page, no error.
   run("pnpm", ["--dir", "web", "run", "build"], { PARAPHE_BASE_PATH: "/" });
+  // The account-less build the API hosts under /navigateur/, and the empty
+  // domain is the POINT. The published image is built with none — one image
+  // serves every operator's instance — so a `?org=` link only works if the
+  // instance injects its own domain into this page at startup. Baked in
+  // here, the journey below would pass on a build production never ships.
+  run("pnpm", ["--dir", "web", "run", "build", "--outDir", "dist-navigateur"], {
+    PARAPHE_BASE_PATH: "/navigateur/",
+    PARAPHE_BASE_DOMAIN: "",
+  });
   const apiBinary = join(WORK_DIR, "paraphe-api");
   run("go", ["build", "-C", "api", "-o", apiBinary, "."]);
 
@@ -192,6 +201,7 @@ export default async function globalSetup() {
       PARAPHE_DATABASE_URL: appDsn(),
       PARAPHE_CSV: join(dataDir, "04_base_complete.csv"),
       PARAPHE_WEB_DIR: join(ROOT, "web", "dist"),
+      PARAPHE_BROWSER_WEB_DIR: join(ROOT, "web", "dist-navigateur"),
       PARAPHE_HOST: "127.0.0.1",
       PARAPHE_PORT: String(API_PORT),
       PARAPHE_BASE_DOMAIN: BASE_DOMAIN,

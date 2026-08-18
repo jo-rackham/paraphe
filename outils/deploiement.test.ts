@@ -429,9 +429,20 @@ describe("the deployment files", () => {
         "and every campaign logo would be refused by the browser",
     ).toContain("img-src 'self' data:");
 
-    // …and the media origin reaches THAT directive and no other. Widened
-    // into default-src or script-src it stops being a place images come
-    // from and becomes a place code can.
+    expect(
+      go,
+      "connect-src is no longer declared: the account-less version " +
+        "downloads the campaign logo to inline it, and nothing else in this " +
+        "application talks to another origin",
+    ).toContain("connect-src 'self'");
+
+    // …and the media origin reaches THOSE TWO directives and no other.
+    // Widened into default-src or script-src it stops being a place images
+    // come from — and one fetch goes to — and becomes a place code can.
+    //
+    // WHICH directives, not how many mentions. The count said "it belongs
+    // to img-src alone", and the day the self-hosted browser version needed
+    // to download a logo the only thing to do with a number was bump it.
     const assembled =
       /func contentSecurityPolicy\(media string\) string \{([\s\S]*?)\n\}/.exec(
         go,
@@ -440,12 +451,21 @@ describe("the deployment files", () => {
       assembled,
       "contentSecurityPolicy is no longer where this test " + "reads it",
     ).toBeTruthy();
-    const uses = [...assembled![1].matchAll(/\bmedia\b/g)].length;
+    const lines = assembled![1].split("\n").filter((l) => /\bmedia\b/.test(l));
+    const appended = lines
+      .filter((l) => /\+=/.test(l))
+      .map((l) => /^\s*(\w+)\s*\+=/.exec(l)?.[1])
+      .sort();
     expect(
-      uses,
-      "the media origin is read more than once in the policy: it belongs to " +
-        "img-src alone",
-    ).toBe(2); // the `if media != ""` guard, and the append beside it
+      appended,
+      "the media origin no longer reaches both the images and the connect " +
+        "directive: a logo it cannot be fetched from, or cannot be shown from",
+    ).toEqual(["connect", "images"]);
+    expect(
+      lines.filter((l) => !/\+=/.test(l) && !/if media != ""/.test(l)),
+      "the media origin is read somewhere other than the two directives it " +
+        "belongs to",
+    ).toEqual([]);
   });
 
   // The interface picks its mode at load: an API answers /api/config → team

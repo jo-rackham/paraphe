@@ -307,6 +307,10 @@ pre.lettre { background: var(--fond); border: 1px solid var(--trait);
              border-radius: .45rem; padding: 1rem; }
 footer { max-width: 64rem; margin: 2rem auto 0; padding: 1rem;
          color: var(--texte-sec); font-size: .85rem; }
+/* The account-less version, reachable from every screen: a line, not a
+   button. It is an alternative to the tool the volunteer is already using,
+   never the action of the page they are on. */
+footer .sans-compte { margin: .6rem 0 0; }
 /* The source line carries the GitHub mark; the icon takes the link's colour
    (fill: currentColor) and sits on the text baseline. */
 footer .source a { display: inline-flex; align-items: center; gap: .35em; }

@@ -26,7 +26,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -81,6 +80,35 @@ type Server struct {
 	// the same page, gzipped once at startup: it is served on every load
 	// and compressing it per request would be work repeated for nothing
 	landingPageGz []byte
+	// the browser version's index.html, carrying the INSTANCE marker and no
+	// mode marker: see markBrowserVersion. Nil when browserDir is empty.
+	browserPage   []byte
+	browserPageGz []byte
+}
+
+// prepareBrowserVersion reads the /navigateur/ build and holds its page in
+// memory, told which instance it stands on.
+//
+// Called at startup and by the tests that serve it, so what a test exercises
+// is the page production answers with — the build on disk carries neither
+// marker, and serving it straight from there is how `?org=` would go inert
+// on the one origin that can resolve it.
+func (s *Server) prepareBrowserVersion() error {
+	if s.browserDir == "" {
+		return nil
+	}
+	page, err := markBrowserVersion(s.browserDir, BaseDomain())
+	if err != nil {
+		return fmt.Errorf("browser version unreadable in %s: %w\n"+
+			"Build one with `task web-build-navigateur`, or set "+
+			"browser_web_dir empty to serve none", s.browserDir, err)
+	}
+	s.browserPage = page
+	s.browserPageGz, err = gzipBytes(page)
+	if err != nil {
+		return fmt.Errorf("compressing the browser version's page: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -313,19 +341,11 @@ func run() error {
 
 	// Same rule for the browser version: set and unreadable is a broken
 	// image, not a deployment shape. Its index must NOT carry the mode
-	// marker — the absence is what lets it fall into browser mode.
-	if s.browserDir != "" {
-		raw, err := os.ReadFile(filepath.Join(s.browserDir, "index.html"))
-		if err != nil {
-			return fmt.Errorf("browser version unreadable in %s: %w\n"+
-				"Build one with `task web-build-navigateur`, or set "+
-				"browser_web_dir empty to serve none", s.browserDir, err)
-		}
-		if strings.Contains(string(raw), `name="paraphe-mode"`) {
-			return fmt.Errorf("%s/index.html carries the mode marker: this "+
-				"build would never switch to browser mode. Point browser_web_dir "+
-				"at a build made for /navigateur/, not at web_dir", s.browserDir)
-		}
+	// marker — the absence is what lets it fall into browser mode — and it
+	// is told this instance's domain here, so that a ?org= link works on the
+	// origin serving it.
+	if err := s.prepareBrowserVersion(); err != nil {
+		return err
 	}
 
 	addr := Get("host") + ":" + Get("port")

@@ -6,11 +6,11 @@
 //
 // The reason it is a SLUG and not a URL is the whole design. A link is free
 // to name a campaign; it is never free to name a host — the instance domain
-// is baked at build time. So the data can only come from a campaign that
-// was requested, moderated and approved on that instance, and a forged
-// link cannot slip an attacker's contact details into messages sent to
-// elected officials. A parameter carrying the configuration itself, or a
-// URL to fetch it from, would have exactly that hole.
+// comes from the DOCUMENT, never from the URL. So the data can only come
+// from a campaign that was requested, moderated and approved on that
+// instance, and a forged link cannot slip an attacker's contact details into
+// messages sent to elected officials. A parameter carrying the configuration
+// itself, or a URL to fetch it from, would have exactly that hole.
 
 import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
 import { LOGO_MAX_BYTES } from "./common.tsx";
@@ -79,8 +79,61 @@ export function validSlug(slug: string): boolean {
 export const untouchedCampaign = (cfg: Campaign): boolean =>
   unfilledKeys(cfg).length === CAMPAIGN_KEYS.length;
 
+/**
+ * The instance a `?org=` may name a campaign of.
+ *
+ * TWO sources, in this order, and the order is the whole point.
+ *
+ * The MARKER is injected in memory at startup by the server serving this
+ * page (api/pages.go, markBrowserVersion) — the same mechanism, and the same
+ * trust, as the mode marker one screen over. It exists because this build is
+ * also served BY an instance, under /navigateur/, from an image that carries
+ * no domain: baking one would send every other operator's volunteers to
+ * fetch campaigns from ours.
+ *
+ * The BAKED value is the static publication's, where there is no server to
+ * inject anything (GitHub Pages, a local file).
+ *
+ * Neither changes what a LINK may say: the marker comes from the document,
+ * the parameter still carries a slug, and `validSlug` refuses anything that
+ * could name a host. Empty either way and `?org=` does nothing at all.
+ */
+const markedInstance = (): string =>
+  document
+    .querySelector('meta[name="paraphe-instance"]')
+    ?.getAttribute("content")
+    ?.trim() ?? "";
+
 export const instanceDomain = (): string =>
-  (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
+  markedInstance() || (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
+
+/**
+ * Where a campaign of this instance publishes itself.
+ *
+ * The HOST is `<slug>.<instance>` and nothing else — that is the whole
+ * security of the pre-fill. The SCHEME and the PORT are a different
+ * question, and the answer depends on which of the two sources named the
+ * instance.
+ *
+ * MARKED: the instance served this very page, so it is reachable exactly as
+ * this page was reached. Hardcoding `https` and no port sent an instance
+ * running on any other — a local trial on :8047, this project's own
+ * end-to-end suite on :8399 — to a host nothing answers at, and the offer
+ * failed with « Failed to fetch ».
+ *
+ * BAKED: a static publication, which knows nothing about where the instance
+ * listens. `https`, no port: a public instance carrying campaign data over
+ * anything else is not a fallback worth writing.
+ */
+function publicCampaignUrl(slug: string): string {
+  const marked = markedInstance();
+  if (marked) {
+    const port = window.location.port ? `:${window.location.port}` : "";
+    return `${window.location.protocol}//${slug}.${marked}${port}/api/campaign/public`;
+  }
+  const baked = (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
+  return `https://${slug}.${baked}/api/campaign/public`;
+}
 
 /** The slug asked for in the address bar, or null. */
 export function requestedSlug(search: string): string | null {
@@ -96,9 +149,9 @@ export function requestedSlug(search: string): string | null {
  * credentials.
  */
 export async function fetchCampaign(slug: string): Promise<Offer> {
-  const url = `https://${slug}.${instanceDomain()}/api/campaign/public`;
+  const url = publicCampaignUrl(slug);
   // `redirect: "error"`: the default follows, and CORS is then evaluated on
-  // the FINAL response — a redirect would take the answer off the baked host.
+  // the FINAL response — a redirect would take the answer off the named host.
   const response = await fetch(url, {
     credentials: "omit",
     mode: "cors",
