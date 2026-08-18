@@ -49,7 +49,7 @@ type hostingRequest struct {
 	Listed *bool `json:"listed"`
 }
 
-// POST /api/demande — public form to host a campaign.
+// POST /api/request — public form to host a campaign, apex only.
 func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 	var d hostingRequest
 	if !readBody(w, r, &d) {
@@ -199,15 +199,26 @@ func (s *Server) routeHostingRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// Nothing else watches this queue: without a notice, a request waits for
+	// an administrator to happen to open the screen — and the answer above
+	// promises that administration will reply.
+	recipients, err := s.noticeRecipients(r, RoleAdministration)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return
 	}
+	// the pool connection has no business waiting on a relay
+	s.release(r)
 	replyJSON(w, http.StatusCreated, map[string]any{
 		"id": id, "slug": slug,
 		"message": fmt.Sprintf("Demande enregistrée. Elle sera examinée par "+
 			"l'administration de %s, qui vous répondra à %s.", BaseDomain(), email),
 	})
+	s.notifyHostingRequest(name, slug+"."+BaseDomain(), requester, email, recipients)
 }
 
 // GET /api/admin/requests — the moderation queue, and the campaigns in place.

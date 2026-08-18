@@ -512,6 +512,23 @@ One instance can host several campaigns, one per subdomain.
   ever bringing them back. `TestEveryReadOfAnAppendOnlyTableIsBounded` knows
   the exemption by name: the pending set is bounded by the insert, whatever
   is not pending keeps a LIMIT of its own.
+- **A queue nobody is told about is a queue nobody reads.** Both public forms
+  — a campaign asked of the instance, a team asked of a campaign — mail every
+  ACTIVE access that can decide, and they share one reader
+  (`noticeRecipients`) and one sender (`sendNotice`): written twice, it is the
+  second copy that stops saying `active`, or answers the visitor a relay's
+  failure. The instance form had no notice at all, so a request sat there
+  until an administrator happened to open the screen, while the answer it gave
+  promised that administration would reply.
+  The three rules are the same as everywhere a public form talks to a relay.
+  The SUBJECT is a constant — the campaign, team and requester names are
+  visitor-chosen text, and so is the free-text message, which is in NEITHER
+  body: 5000 runes of it belong to the screen that decides. The send is
+  DETACHED and the pool connection handed back first — the caller is
+  anonymous, and neither the relay's slowness nor its existence is theirs to
+  observe (`TestAHeldRelayDoesNotHoldTheVisitor`). And a relay that is absent,
+  refusing or hung changes nothing about the request: it is committed before
+  any of this, and it is in the queue whoever reads it.
 
 ## Accounts and teams
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -352,6 +353,148 @@ func TestRequestThenApprovalCreatesCampaign(t *testing.T) {
 	account, _ := me["account"].(map[string]any)
 	if account["role"] != RoleCoordination {
 		t.Errorf("the requester enters with role %v", account["role"])
+	}
+}
+
+// --- the notice a hosting request sends -------------------------------------
+
+// administrations seeds instance administrators, the way bootstrap makes one.
+// ONE hash for all of them: no test below signs in with it, and hashing is
+// deliberately expensive.
+func administrations(t *testing.T, s *Server, emails ...string) {
+	t.Helper()
+	hash := testHash(t, "mot-de-passe-admin")
+	for _, email := range emails {
+		execAsMaintenance(t, s,
+			"INSERT INTO accounts(org_id, email, name, password_hash, role) "+
+				"VALUES($1,$2,$3,$4,$5)",
+			OrgInstance, email, "Administration", hash, RoleAdministration)
+	}
+}
+
+func hostingRequestBody(slug string) map[string]any {
+	return map[string]any{
+		"slug": slug, "name": "Nouvelle campagne",
+		"requester_email": "porteur@exemple.fr", "requester_name": "Porteur",
+		"message": "on présente quelqu'un",
+	}
+}
+
+// Nothing else watches that queue: a request nobody is told about waits until
+// an administrator happens to open the screen, while the answer the visitor
+// just read promises that administration will reply to them.
+func TestAHostingRequestWritesToEveryActiveAdministrationAndNobodyElse(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	mails := withMailer(t, s, "https://paraphe.test")
+	administrations(t, s, "admin@paraphe.test", "admin2@paraphe.test",
+		"partie@paraphe.test")
+	execAsMaintenance(t, s,
+		"UPDATE accounts SET active=FALSE WHERE org_id=$1 AND email=$2",
+		OrgInstance, "partie@paraphe.test")
+	// A campaign's coordination moderates its own teams, not this instance,
+	// and it is in another scope entirely. Its address has no business in a
+	// message about a campaign somebody else asked for.
+	createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+
+	code, rep := clientOn(t, srv, "paraphe.test").
+		call(http.MethodPost, "/api/request", hostingRequestBody("nouvelle"))
+	if code != http.StatusCreated {
+		t.Fatalf("the public form: %d %v", code, rep)
+	}
+	s.outbound.Wait()
+
+	sent := mails.all()
+	got := map[string]bool{}
+	for _, m := range sent {
+		got[m.to] = true
+		if m.subject != hostingRequestSubject {
+			t.Errorf("subject %q, want the constant one — visitor text belongs "+
+				"in no header", m.subject)
+		}
+		for _, needle := range []string{"Nouvelle campagne", "nouvelle.paraphe.test",
+			"Porteur", "porteur@exemple.fr", "https://paraphe.test"} {
+			if !strings.Contains(m.body, needle) {
+				t.Errorf("the notice to %s does not carry %q:\n%s", m.to, needle, m.body)
+			}
+		}
+	}
+	if len(sent) != 2 || !got["admin@paraphe.test"] || !got["admin2@paraphe.test"] {
+		t.Fatalf("the notice went to %v: want exactly the two ACTIVE "+
+			"administration accesses", got)
+	}
+}
+
+// The relay is the administration's convenience, never the request's
+// condition: an instance with none, or with one that refuses, still files what
+// an anonymous visitor came to file.
+func TestARelaylessInstanceStillTakesHostingRequests(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	administrations(t, s, "admin@paraphe.test")
+
+	code, rep := clientOn(t, srv, "paraphe.test").
+		call(http.MethodPost, "/api/request", hostingRequestBody("sans-relais"))
+	if code != http.StatusCreated {
+		t.Fatalf("without a relay: %d %v", code, rep)
+	}
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM hosting_requests "+
+		"WHERE slug=$1 AND state=$2", "sans-relais", RequestPending); n != 1 {
+		t.Fatalf("%d pending requests, want 1", n)
+	}
+}
+
+func TestARelayFailureLeavesTheHostingRequestInTheQueue(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	mails := withMailer(t, s, "https://paraphe.test")
+	mails.fail = errNoRelay
+	administrations(t, s, "admin@paraphe.test")
+
+	code, rep := clientOn(t, srv, "paraphe.test").
+		call(http.MethodPost, "/api/request", hostingRequestBody("malgre-tout"))
+	if code != http.StatusCreated {
+		t.Fatalf("a dead relay must not refuse the request: %d %v", code, rep)
+	}
+	s.outbound.Wait()
+	if n := scalar[int](t, s, "SELECT COUNT(*) FROM hosting_requests "+
+		"WHERE slug=$1 AND state=$2", "malgre-tout", RequestPending); n != 1 {
+		t.Fatalf("%d pending requests, want 1", n)
+	}
+}
+
+// The visitor does not wait on the relay, and does not learn it exists.
+//
+// Sent inside the handler, an SMTP exchange that drags puts the whole of it in
+// front of the answer — up to the thirty seconds the send is bounded by — and
+// the anonymous caller reads the state of the instance's mail in their own
+// stopwatch. Answering first is only half of it: the pool connection goes back
+// before the message leaves, which is the shape TestASlowRelayHoldsNoConnection
+// refuses on the sign-in path. This route's own ceiling is three an hour per
+// source, so it cannot be burst against the pool — one held send is the whole
+// assertion available here, and it is the one that matters.
+func TestAHeldRelayDoesNotHoldTheVisitor(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	mails := withMailer(t, s, "https://paraphe.test")
+	mails.hold = make(chan struct{})
+	defer close(mails.hold)
+	administrations(t, s, "admin@paraphe.test")
+
+	answered := make(chan int, 1)
+	go func() {
+		code, _ := clientOn(t, srv, "paraphe.test").
+			call(http.MethodPost, "/api/request", hostingRequestBody("pressee"))
+		answered <- code
+	}()
+	select {
+	case code := <-answered:
+		if code != http.StatusCreated {
+			t.Fatalf("the public form: %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the answer waited on a relay that never replied: the send " +
+			"is in front of the response, and the visitor is timing the instance")
 	}
 }
 

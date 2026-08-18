@@ -190,30 +190,10 @@ func (s *Server) routeTeamRequest(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	// The recipients of the notice, read while the transaction is open: the
-	// coordination this request lands on is the one of this snapshot.
-	var recipients []string
-	if s.mailer != nil {
-		rows, err := s.tx(r).Query(r.Context(),
-			"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active",
-			scopeOrg(r), RoleCoordination)
-		if err != nil {
-			s.failure(w, err)
-			return
-		}
-		for rows.Next() {
-			var e string
-			if err := rows.Scan(&e); err != nil {
-				rows.Close()
-				s.failure(w, err)
-				return
-			}
-			recipients = append(recipients, e)
-		}
-		if err := rows.Err(); err != nil {
-			s.failure(w, err)
-			return
-		}
+	recipients, err := s.noticeRecipients(r, RoleCoordination)
+	if err != nil {
+		s.failure(w, err)
+		return
 	}
 	campaign, slug := campaignName(r), campaignSlug(r)
 	if err := s.commit(r); err != nil {

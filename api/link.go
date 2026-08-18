@@ -539,54 +539,6 @@ func (s *Server) mintInvitation(ctx context.Context, tx pgx.Tx, org int,
 // whether the message left. The generated password stays on their screen
 // either way — relay down, the lead reads it out as they always have, and
 // nothing about today's path gets worse.
-// A team request is moderation work: every active coordination access is
-// told one arrived. The SUBJECT is a constant on purpose — the team and
-// requester names are visitor-chosen text, and visitor text belongs in the
-// body, never in a header.
-const teamRequestSubject = "Nouvelle demande d'équipe pour votre campagne"
-
-func teamRequestMailBody(campaign, team, departments, requester, email, url string) string {
-	if departments == "" {
-		departments = "aucun département précisé"
-	}
-	return fmt.Sprintf(`Bonjour,
-
-%s demande l'ouverture d'une équipe locale sur %s :
-
-  Équipe : %s
-  Départements : %s
-  À recontacter : %s
-
-Connectez-vous puis ouvrez « Mon équipe » pour accepter ou refuser :
-
-%s
-
-— l'application de campagne`, requester, campaign, team, departments, email, url)
-}
-
-// notifyTeamRequest sends it to every recipient, DETACHED from the request:
-// the caller is an anonymous visitor, and neither the relay's slowness nor
-// its existence is theirs to observe. Failures are logged and nothing more —
-// the request itself is committed either way, and the coordination still
-// finds it in the queue.
-func (s *Server) notifyTeamRequest(campaign, slug, team, departments,
-	requester, email string, recipients []string) {
-	if s.mailer == nil || len(recipients) == 0 {
-		return
-	}
-	body := teamRequestMailBody(campaign, team, departments, requester, email,
-		campaignURL(s.publicURL, slug).String())
-	s.detach(smtpDialTimeout+smtpIOTimeout, func(ctx context.Context) {
-		for _, to := range recipients {
-			if err := s.mailer.Send(ctx, to, teamRequestSubject, body); err != nil {
-				slog.Error("team request notice not sent",
-					"account", s.accountPseudonym(to),
-					"error", s.withoutAddress(err, to))
-			}
-		}
-	})
-}
-
 func (s *Server) sendInvitation(inv invitation) (bool, string) {
 	if inv.token == "" || s.mailer == nil {
 		return false, ""
@@ -614,4 +566,136 @@ func (s *Server) sendInvitation(inv invitation) (bool, string) {
 			"le mot de passe ci-dessus par un autre moyen."
 	}
 	return true, ""
+}
+
+// --- the notice a public form sends ----------------------------------------
+
+// Two public forms file moderation work — a team on a campaign, a campaign on
+// the instance — and neither queue is watched by anything else: whoever
+// decides either happens to open the screen, or the request waits there. The
+// three rules below are the same for both, and they are written once because
+// the copy is what stops saying `active`, or answers the visitor a relay's
+// failure.
+
+// noticeRecipients: the accesses to tell, read WHILE THE TRANSACTION IS OPEN
+// — the moderation a request lands on is the one of its own snapshot.
+// Deactivated accounts are left out: a deactivated access decides nothing,
+// and it is often switched off precisely because nobody is behind it.
+//
+// Empty with no relay, so a caller that has one asks the database nothing.
+func (s *Server) noticeRecipients(r *http.Request, role string) ([]string, error) {
+	if s.mailer == nil {
+		return nil, nil
+	}
+	rows, err := s.tx(r).Query(r.Context(),
+		"SELECT email FROM accounts WHERE org_id=$1 AND role=$2 AND active",
+		scopeOrg(r), role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var recipients []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		recipients = append(recipients, email)
+	}
+	return recipients, rows.Err()
+}
+
+// sendNotice fans one message out, DETACHED from the request: the caller is
+// an anonymous visitor, and neither the relay's slowness nor its existence is
+// theirs to observe. Failures are logged and nothing more — the request is
+// committed either way, and it is still in the queue whoever reads it.
+func (s *Server) sendNotice(recipients []string, subject, body, kind string) {
+	if s.mailer == nil || len(recipients) == 0 {
+		return
+	}
+	s.detach(smtpDialTimeout+smtpIOTimeout, func(ctx context.Context) {
+		for _, to := range recipients {
+			if err := s.mailer.Send(ctx, to, subject, body); err != nil {
+				slog.Error(kind+" notice not sent",
+					"account", s.accountPseudonym(to),
+					"error", s.withoutAddress(err, to))
+			}
+		}
+	})
+}
+
+// The SUBJECTS are constants on purpose — the campaign, team and requester
+// names are visitor-chosen text, and visitor text belongs in the body, never
+// in a header. So is the free-text message the forms accept, and it is in
+// neither: 5000 runes of it are for the screen that decides, not for an
+// inbox that only has to learn something arrived.
+const (
+	teamRequestSubject    = "Nouvelle demande d'équipe pour votre campagne"
+	hostingRequestSubject = "Nouvelle demande d'hébergement de campagne"
+)
+
+func teamRequestMailBody(campaign, team, departments, requester, email, url string) string {
+	if departments == "" {
+		departments = "aucun département précisé"
+	}
+	return fmt.Sprintf(`Bonjour,
+
+%s demande l'ouverture d'une équipe locale sur %s :
+
+  Équipe : %s
+  Départements : %s
+  À recontacter : %s
+
+Connectez-vous puis ouvrez « Mon équipe » pour accepter ou refuser :
+
+%s
+
+— l'application de campagne`, requester, campaign, team, departments, email, url)
+}
+
+func hostingRequestMailBody(campaign, address, requester, email, url string) string {
+	return fmt.Sprintf(`Bonjour,
+
+%s demande l'hébergement d'une campagne sur cette instance :
+
+  Campagne : %s
+  Adresse demandée : %s
+  À recontacter : %s
+
+Connectez-vous à l'administration de l'instance pour accepter ou refuser :
+
+%s
+
+— l'application de campagne`, requester, campaign, address, email, url)
+}
+
+// Both check the relay BEFORE building their body, on top of the check
+// sendNotice makes: setupMail hands back the relay and the origin together or
+// neither, so with no relay there is no s.publicURL to build a link from.
+func (s *Server) notifyTeamRequest(campaign, slug, team, departments,
+	requester, email string, recipients []string) {
+	if s.mailer == nil || len(recipients) == 0 {
+		return
+	}
+	s.sendNotice(recipients, teamRequestSubject,
+		teamRequestMailBody(campaign, team, departments, requester, email,
+			campaignURL(s.publicURL, slug).String()),
+		"team request")
+}
+
+// notifyHostingRequest: the same, for the queue one level up.
+//
+// The link is s.publicURL ITSELF, prefixed by nothing. Multi-campaign — the
+// only mode where this form exists — that setting names the apex and
+// campaignURL prefixes a slug to it for a campaign's own messages; the apex
+// is what this one is about.
+func (s *Server) notifyHostingRequest(campaign, address, requester,
+	email string, recipients []string) {
+	if s.mailer == nil || len(recipients) == 0 {
+		return
+	}
+	s.sendNotice(recipients, hostingRequestSubject,
+		hostingRequestMailBody(campaign, address, requester, email,
+			s.publicURL.String()),
+		"hosting request")
 }
