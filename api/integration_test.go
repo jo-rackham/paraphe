@@ -1827,9 +1827,12 @@ func TestTheCampaignNameIsItsOwnAndTheCandidateDoesNotMoveIt(t *testing.T) {
 			"until the next load", body["name"])
 	}
 	// a name of nothing but zero-width runes survives TrimSpace and would
-	// reach the apex directory as a blank line
+	// reach the apex directory as a blank line. WRITTEN AS ESCAPES: such a
+	// rune typed into the source is invisible to whoever reads the test —
+	// which is the very property under test — and staticcheck (ST1018)
+	// refuses one inside a literal for that reason.
 	if code, _ := c.call(http.MethodPost, "/api/campaign",
-		map[string]any{"campaign": campaign, "name": "​​"}); code != http.StatusBadRequest {
+		map[string]any{"campaign": campaign, "name": "\u200b\u200b"}); code != http.StatusBadRequest {
 		t.Errorf("a name of invisible runes: %d, want 400", code)
 	}
 	if got := nameOf(); got != "Alliance verte" {
