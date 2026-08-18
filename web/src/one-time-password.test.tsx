@@ -155,4 +155,121 @@ describe("a one-time password survives a double press", () => {
         "second password — the first coordinator's is gone",
     ).toBe(1);
   });
+
+  // The THIRD flow that mints one. The rule is written once in the screen's
+  // `showPassword`, and this is what keeps the next flow from re-deriving it.
+  it("opens ONE coordination access however many times the button is pressed", async () => {
+    mockHostedCampaign();
+    let n = 0;
+    vi.mocked(API.grantCoordination).mockImplementation(async () => {
+      n += 1;
+      return {
+        slug: "alpha",
+        address: "alpha.paraphe.test",
+        coordination: `c${n}@exemple.fr`,
+        password: `MOTDEPASSE-${n}`,
+        invitation_sent: false,
+      };
+    });
+
+    await act(async () => {
+      root.render(<Moderation onMessage={() => {}} />);
+    });
+    const form = grantForm();
+    await act(async () => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(
+      vi.mocked(API.grantCoordination).mock.calls.length,
+      "two presses in one tick opened two accesses, and the screen kept the " +
+        "second password — the first is gone from the only place it existed",
+    ).toBe(1);
+  });
+
+  // Two cards CAN name one campaign: an access opened on a campaign created a
+  // moment ago, or a second one opened after the first was mislaid. So the
+  // card's key is a counter, not the address.
+  //
+  // What this asserts is React's own complaint, and that is deliberate. Keyed
+  // by the address the two cards still rendered, and dismissing one still
+  // left the other — measured, both ways. The defect is the one React states:
+  // duplicate keys are "unsupported and could change", so the loss is a
+  // version away rather than here today. An assertion about passwords on
+  // screen would have been green under the bug and would have taught the next
+  // reader that the key does not matter.
+  it("gives each password card a key of its own", async () => {
+    const complaints: string[] = [];
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...a: unknown[]) => complaints.push(String(a[0])));
+    mockHostedCampaign();
+    let n = 0;
+    vi.mocked(API.grantCoordination).mockImplementation(async () => {
+      n += 1;
+      return {
+        slug: "alpha",
+        address: "alpha.paraphe.test",
+        coordination: `c${n}@exemple.fr`,
+        password: `MOTDEPASSE-${n}`,
+        invitation_sent: false,
+      };
+    });
+
+    await act(async () => {
+      root.render(<Moderation onMessage={() => {}} />);
+    });
+    for (let i = 0; i < 2; i++) {
+      const form = grantForm();
+      await act(async () => {
+        form.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      });
+    }
+
+    expect(vi.mocked(API.grantCoordination).mock.calls.length).toBe(2);
+    expect(text()).toContain("MOTDEPASSE-1");
+    expect(text()).toContain("MOTDEPASSE-2");
+    expect(
+      complaints.filter((c) => c.includes("same key")),
+      "two password cards share a React key: the address repeats across the " +
+        "three flows that mint one, so the key cannot be the address",
+    ).toEqual([]);
+    spy.mockRestore();
+  });
 });
+
+// A queue with one hosted campaign, which is what the access form needs to
+// offer anything at all.
+function mockHostedCampaign() {
+  vi.mocked(API.moderationQueue).mockResolvedValue({
+    requests: [],
+    organisations: [
+      {
+        id: 1,
+        slug: "alpha",
+        name: "Alpha",
+        state: "active",
+        created_at: "2026-08-16",
+      },
+    ],
+    base_domain: "paraphe.test",
+  } as never);
+}
+
+// The access form is the one with a campaign chooser: the creation form
+// beside it has none, and picking « the second form » would follow whichever
+// order the screen happens to render them in.
+function grantForm(): HTMLFormElement {
+  const form = [...host.querySelectorAll("form")].find((f) =>
+    f.querySelector("select"),
+  );
+  if (!form) throw new Error(`no access form on screen: ${text()}`);
+  return form;
+}

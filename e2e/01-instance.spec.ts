@@ -135,13 +135,19 @@ test.describe
         page.getByRole("heading", { name: "Créer une campagne" }),
       ).toBeVisible();
 
-      await page.getByLabel("Adresse (sous-domaine)").fill("directe");
-      await page
+      // Scoped to the form, which carries an accessible name of its own: the
+      // screen holds a second one — opening an access on an existing campaign
+      // — and it has a « Nom » and an « Adresse email » too. Unscoped, these
+      // resolve to two elements and the journey fails on the ambiguity rather
+      // than on anything being wrong.
+      const creation = page.getByRole("form", { name: "Créer une campagne" });
+      await creation.getByLabel("Adresse (sous-domaine)").fill("directe");
+      await creation
         .getByLabel("Nom de la campagne")
         .fill("Campagne ouverte en direct");
       // the coordination account's own two fields, under their group heading
-      await page.getByLabel("Nom", { exact: true }).fill("Coordination");
-      await page.getByLabel("Adresse email").fill("coord@directe.test");
+      await creation.getByLabel("Nom", { exact: true }).fill("Coordination");
+      await creation.getByLabel("Adresse email").fill("coord@directe.test");
       await page.getByRole("button", { name: "Créer la campagne" }).click();
 
       // same one-time password card as an approval, whatever the door

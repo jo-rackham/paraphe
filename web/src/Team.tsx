@@ -519,29 +519,58 @@ export function equipeAyantEcrit(mayor: MayorCard, me: Account): string | null {
     : "une autre équipe";
 }
 
+/**
+ * Who has this card, as TEXT — never as a truthy test. `"0"` is the national
+ * scope, a real scope held by every account with no team and having no row in
+ * `teams`, hence no name: read through `team_name` alone, a card the
+ * coordination had taken showed as « personne n'est encore dessus », and the
+ * volunteer who then tried to work it was the second caller. Same shape, same
+ * remedy as `equipeAyantEcrit` one function down.
+ */
+export function equipeQuiTravaille(mayor: MayorCard): string | null {
+  if (!mayor.taken_by) return null;
+  if (mayor.taken_by === "0") return "l'équipe nationale";
+  return mayor.team_name ? `l'équipe ${mayor.team_name}` : "une autre équipe";
+}
+
+// What the card says about who is on it. INFORMATIVE, every way: no card of a
+// campaign is refused to a team of it and no write on one is refused either,
+// so none of these sentences announces a refusal. They say what a volunteer
+// needs in order to DECIDE, which is a different job from a wall — and a
+// sentence that promised more than the server allowed was worse than the wall
+// it replaced, because it was discovered by paying for it.
 function EtatDeLaFiche({ mayor, me }: { mayor: MayorCard; me: Account }) {
-  // « vous l'attribue » was true when writing a status claimed the card, and
-  // it stopped being true when that claim was removed. Left standing it was
-  // worse than a stale sentence: two volunteers each read that the fiche was
-  // about to become theirs, both wrote, and both called the same mayor —
-  // dressing the one case the new rule accepts up as a reservation. Taking a
-  // lot is what reserves, and it is where this sends them.
-  if (!mayor.volunteer) {
-    return (
-      <p className="gris">
-        Fiche libre. Enregistrer un statut le note pour toute la campagne, sans
-        vous réserver la fiche : pour cela, prenez un lot depuis « Mon tableau
-        ».
-      </p>
-    );
-  }
   if (mayor.volunteer === me.email) {
     return <p className="gris">Cette fiche est la vôtre.</p>;
   }
+  // A person is named only where the person is this account's to see:
+  // elsewhere the server sends the team and no name.
+  if (mayor.volunteer) {
+    const ou = equipeQuiTravaille(mayor);
+    return (
+      <p className="gris">
+        Prise par <strong>{mayor.volunteer_name ?? mayor.volunteer}</strong>
+        {ou ? ` (${ou})` : ""}. Vous pouvez la consulter et enregistrer ce que
+        vous apprenez ; accordez-vous avec {mayor.volunteer_name ?? "cette"}
+        {mayor.volunteer_name ? "" : " personne"} pour ne pas appeler deux fois.
+      </p>
+    );
+  }
+  const ou = equipeQuiTravaille(mayor);
+  if (ou) {
+    return (
+      <p className="gris">
+        Travaillée par <strong>{ou}</strong>. Rien ne vous est interdit ici :
+        vous pouvez la consulter et enregistrer ce que vous apprenez.
+        Accordez-vous avec eux pour ne pas contacter le maire deux fois.
+      </p>
+    );
+  }
   return (
-    <p className="alerte">
-      Réservée par <strong>{mayor.volunteer_name ?? mayor.volunteer}</strong>.
-      Ne la contactez pas : votre enregistrement serait refusé.
+    <p className="gris">
+      Personne n'est encore dessus. Enregistrer un statut la note pour toute la
+      campagne ; pour recevoir des fiches à traiter, prenez un lot depuis « Mon
+      tableau ».
     </p>
   );
 }

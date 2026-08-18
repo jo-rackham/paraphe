@@ -690,6 +690,10 @@ var queryCalls = map[string]bool{
 	"Query": true, "QueryRow": true, "Exec": true,
 	"rows": true, "column": true, "counters": true, "orderedCounters": true,
 	"textColumn": true,
+	// `cards` is `rows` plus the person-masking every card query owes. It
+	// forwards its SQL like the others, so like the others it is judged at
+	// its callers and not where it stands.
+	"cards": true,
 	// CopyFrom names its table as a pgx.Identifier, not as SQL: there is no
 	// statement for any rule to read, so it streams rows into whatever table
 	// it is given with nothing bounding the campaign. Declared here it can
@@ -1688,6 +1692,10 @@ func TestNoQueryIsInvisibleToTheCanary(t *testing.T) {
 		"queries.go:counters":        true,
 		"queries.go:orderedCounters": true,
 		"import.go:textColumn":       true,
+		// `cards` is `rows` with the person-masking every card query owes,
+		// so it forwards a statement for the same reason and is judged in
+		// the same place — at its callers.
+		"routes_mayors.go:cards": true,
 		// Not SQL at all: valkey-go's Lua Exec, running the rate-limit
 		// counter script against Valkey. No PostgreSQL driver is in reach of
 		// that call, so there is no walled table it could touch.

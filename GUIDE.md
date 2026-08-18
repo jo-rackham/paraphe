@@ -30,15 +30,22 @@ passe provisoire affiché **une seule fois**, à transmettre de vive voix.
 
 Ce que chacun voit :
 
-- **Vous** : vos maires, et le travail de votre équipe (qui a réservé quoi,
-  combien de fiches traitées).
-- **Vous ne voyez pas** le détail nominatif des autres équipes — leurs
-  réservations vous sont invisibles, et une fiche réservée ailleurs vous est
-  refusée. C'est voulu : cela évite les doublons sans exposer le travail de
-  tout le monde à tout le monde.
+- **Vous voyez toute la liste**, tous départements confondus, et vous pouvez
+  ouvrir n'importe quelle fiche et y enregistrer ce que vous apprenez. Rien
+  ne vous est refusé parce qu'une autre équipe est passée avant : l'outil
+  vous informe, il ne vous bloque pas.
+- **Une fiche que quelqu'un travaille le dit** : « travaillée par l'équipe
+  Nord ». C'est ce qui évite les doublons — pas un verrou. Si la fiche est
+  prise, accordez-vous avec eux avant d'appeler.
+- **Vous ne voyez pas QUI**, dans les autres équipes. Le nom de l'équipe
+  traverse, le nom de la personne non. Dans la vôtre, vous voyez qui fait
+  quoi.
 - **Tout le monde voit** les compteurs de la campagne entière (combien de
   promesses, dans combien de départements), sans aucun nom. C'est la boussole
   commune.
+- **Votre équipe a un périmètre** (des départements). Il décide seulement
+  d'où viennent les lots qu'on vous distribue — pas de ce que vous avez le
+  droit de lire ni d'enregistrer.
 
 Un bénévole qui s'en va : le référent désactive son compte, l'effet est
 immédiat, et ses maires restent dans l'équipe.
@@ -120,8 +127,10 @@ même campagne, c'est une maladresse, pas une faute.
    vous engagez. Elle s'insère automatiquement dans vos emails, signés de
    votre prénom.
 2. Sur le tableau de bord, **« Me réserver un lot »** : 10 maires vous sont
-   attribués (choisissez votre département si vous voulez appeler près de
-   chez vous — un accent local aide). Personne d'autre ne les contactera.
+   distribués (choisissez votre département si vous voulez appeler près de
+   chez vous — un accent local aide). Ce sont des maires que personne d'autre
+   n'a encore pris ; votre lot n'est pas un verrou, il vous évite de tomber
+   sur le travail d'un collègue.
 3. Ouvrez chaque **fiche** : tout y est — le téléphone en gros, les horaires,
    l'email prêt (retouchable librement avant envoi), la lettre imprimable
    (modifiable au clic), le déroulé d'appel avec les réponses aux objections.

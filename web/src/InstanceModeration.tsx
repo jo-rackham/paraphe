@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as API from "./api.ts";
 import {
   focusContenu,
@@ -8,10 +8,26 @@ import {
   REQUEST_STATES,
   useSubmitGuard,
 } from "./common.tsx";
-import type { Message, ModerationQueue, QueuedRequest } from "./types.ts";
+import type {
+  HostedOrganisation,
+  Message,
+  ModerationQueue,
+  QueuedRequest,
+} from "./types.ts";
 
-/** A campaign just opened, whose password is shown once and never again. */
+/** An access just opened, whose password is shown once and never again. */
 interface OpenedCampaign {
+  // Unique per CARD, not per campaign: three flows land here, and two of
+  // them can name the same address — an access opened on a campaign created
+  // a moment ago, or a second one opened after the first was mislaid. Keyed
+  // by the address, the two cards collided on one React key and the second
+  // password never appeared, which is the very loss the list exists to
+  // prevent.
+  id: number;
+  // A campaign that did not exist before, or a way back into one that did.
+  // The distinction is the sentence, and the sentence is what the
+  // administrator relays.
+  kind: "campaign" | "access";
   address: string;
   coordination: string;
   password: string;
@@ -19,11 +35,13 @@ interface OpenedCampaign {
   invitation_error?: string;
 }
 
-// What the live region says when a campaign opens. It names the campaign, so
-// two openings never produce the same sentence and the second is read.
+// What the live region says. It names the campaign, so two openings never
+// produce the same sentence and the second is read.
 function opening(o: OpenedCampaign): string {
   return (
-    `La campagne ${o.address} vient d'être ouverte. ` +
+    (o.kind === "campaign"
+      ? `La campagne ${o.address} vient d'être ouverte. `
+      : `Un accès de coordination vient d'être ouvert sur ${o.address}. `) +
     (o.invitation_sent
       ? `Une invitation est partie à ${o.coordination}. `
       : "") +
@@ -75,6 +93,29 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // `status` implies aria-atomic, and a count that moves re-reads the whole
   // sentence at every dismissal.
   const [announced, setAnnounced] = useState("");
+  // The card key. A counter rather than the address, which three flows can
+  // now repeat, and rather than a clock, which two cards opened in the same
+  // millisecond share.
+  const nextCard = useRef(0);
+
+  // One door for the three flows: appended, never assigned, and announced at
+  // the moment the password ARRIVES. Written once so a fourth flow cannot
+  // half-implement the rule.
+  const showPassword = (
+    kind: OpenedCampaign["kind"],
+    rep: {
+      address: string;
+      coordination: string;
+      password: string;
+      invitation_sent?: boolean;
+      invitation_error?: string;
+    },
+  ) => {
+    nextCard.current += 1;
+    const o: OpenedCampaign = { id: nextCard.current, kind, ...rep };
+    setOpened((shown) => [...shown, o]);
+    setAnnounced(opening(o));
+  };
 
   const load = async () => {
     try {
@@ -127,15 +168,13 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
           },
       );
       if (rep.password && rep.address && rep.coordination) {
-        const o: OpenedCampaign = {
+        showPassword("campaign", {
           address: rep.address,
           coordination: rep.coordination,
           password: rep.password,
           invitation_sent: rep.invitation_sent,
           invitation_error: rep.invitation_error,
-        };
-        setOpened((shown) => [...shown, o]);
-        setAnnounced(opening(o));
+        });
       } else {
         onMessage({ tone: "ok", text: `Demande ${d.slug} refusée.` });
       }
@@ -155,16 +194,15 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
   // Direct creation ends on the same one-time password card as an approval:
   // one display, whatever the door the campaign came through.
   const create = async (creation: Parameters<typeof API.createCampaign>[0]) => {
-    const rep = await API.createCampaign(creation);
-    const o: OpenedCampaign = {
-      address: rep.address,
-      coordination: rep.coordination,
-      password: rep.password,
-      invitation_sent: rep.invitation_sent,
-      invitation_error: rep.invitation_error,
-    };
-    setOpened((shown) => [...shown, o]);
-    setAnnounced(opening(o));
+    showPassword("campaign", await API.createCampaign(creation));
+    await load();
+  };
+
+  // The way back into a campaign that already exists. It opens a door; it
+  // reads nothing behind it — the answer carries the new account and its
+  // password, and no work of the campaign it was opened on.
+  const grant = async (slug: string, who: { email: string; name: string }) => {
+    showPassword("access", await API.grantCoordination(slug, who));
     await load();
   };
 
@@ -194,8 +232,12 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
         </p>
       )}
       {opened.map((o) => (
-        <div className="carte" key={o.address}>
-          <h2>Campagne ouverte : {o.address}</h2>
+        <div className="carte" key={o.id}>
+          <h2>
+            {o.kind === "campaign"
+              ? `Campagne ouverte : ${o.address}`
+              : `Accès de coordination ouvert sur ${o.address}`}
+          </h2>
           {o.invitation_sent ? (
             <p>
               Une invitation vient de partir à {o.coordination} : le lien
@@ -331,6 +373,20 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
         onMessage={onMessage}
       />
 
+      <h2>Ouvrir un accès de coordination</h2>
+      <p>
+        Pour une campagne dont la coordination ne peut plus entrer — adresse
+        hors service, mot de passe perdu. Un <strong>nouveau</strong> compte de
+        coordination est créé : aucun compte existant n'est repris, promu ni
+        réactivé, et cette ouverture apparaît chez la campagne, à votre nom.
+      </p>
+      <Ouverture
+        organisations={queue.organisations}
+        baseDomain={queue.base_domain}
+        onGrant={grant}
+        onMessage={onMessage}
+      />
+
       <h2>Campagnes hébergées</h2>
       {/* in a card like every other table: it is also what lets a narrow
           screen scroll the table instead of the page */}
@@ -419,7 +475,7 @@ function Creation({
   };
 
   return (
-    <form className="carte" onSubmit={submit}>
+    <form className="carte" aria-label="Créer une campagne" onSubmit={submit}>
       <p>
         <label>
           Adresse (sous-domaine)
@@ -489,6 +545,107 @@ function Creation({
       </p>
       <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Création…" : "Créer la campagne"}
+      </button>
+    </form>
+  );
+}
+
+// The campaign is CHOSEN, not typed. The list is already on the screen, and
+// a slug typed by hand turns a recovery into a 404 the administrator reads as
+// "this campaign is gone".
+function Ouverture({
+  organisations,
+  baseDomain,
+  onGrant,
+  onMessage,
+}: {
+  organisations: HostedOrganisation[];
+  baseDomain: string;
+  onGrant: (
+    slug: string,
+    who: { email: string; name: string },
+  ) => Promise<void>;
+  onMessage: (m: Message) => void;
+}) {
+  const [slug, setSlug] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [granting, granted] = useSubmitGuard();
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // A REF, like the two flows above and for the same reason: `sending` is a
+    // render behind, and two presses in one tick mint two passwords where the
+    // screen shows the second.
+    if (granting()) return;
+    setSending(true);
+    try {
+      await onGrant(slug, { email: email.trim(), name: name.trim() });
+      setName("");
+      setEmail("");
+    } catch (err) {
+      onMessage({ tone: "erreur", text: (err as Error).message });
+    } finally {
+      granted();
+      setSending(false);
+    }
+  };
+
+  if (organisations.length === 0) {
+    return <p className="gris">Aucune campagne hébergée pour l'instant.</p>;
+  }
+  return (
+    <form
+      className="carte"
+      aria-label="Ouvrir un accès de coordination"
+      onSubmit={submit}
+    >
+      <p>
+        <label>
+          Campagne
+          <select
+            required
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+          >
+            <option value="">— choisir —</option>
+            {organisations.map((o) => (
+              <option key={o.id} value={o.slug}>
+                {o.name} ({o.slug}.{baseDomain})
+              </option>
+            ))}
+          </select>
+        </label>
+      </p>
+      <p>
+        <label>
+          Nom
+          <input
+            type="text"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+      </p>
+      <p>
+        <label>
+          Adresse email
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            aria-describedby="ouverture-adresse"
+          />
+        </label>
+        <span id="ouverture-adresse" className="gris">
+          Une adresse qui n'a pas encore de compte sur cette campagne.
+        </span>
+      </p>
+      <button type="submit" aria-disabled={sending || undefined}>
+        {sending ? "Ouverture…" : "Ouvrir l'accès"}
       </button>
     </form>
   );

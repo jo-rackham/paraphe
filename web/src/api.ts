@@ -476,3 +476,25 @@ export const createCampaign = (creation: {
   invitation_sent: boolean;
   invitation_error?: string;
 }> => call("admin/campaigns", { method: "POST", body: creation });
+
+/**
+ * Opens a coordination access on a campaign that already exists — the way
+ * back in when its own coordination cannot get in any more. It GRANTS and
+ * reads nothing: the answer carries the new account and its one-time
+ * password, never anything of the campaign's work.
+ */
+export const grantCoordination = (
+  slug: string,
+  who: { email: string; name: string },
+): Promise<{
+  slug: string;
+  address: string;
+  coordination: string;
+  password: string;
+  invitation_sent: boolean;
+  invitation_error?: string;
+}> =>
+  call(`admin/campaigns/${encodeURIComponent(slug)}/coordination`, {
+    method: "POST",
+    body: who,
+  });

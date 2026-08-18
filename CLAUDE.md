@@ -374,7 +374,38 @@ One instance can host several campaigns, one per subdomain.
 - Role `administration` validates hosting requests, lives in the instance
   scope and reads no campaign data. It is obtained by bootstrap only —
   `validRole` knows the three campaign roles and nothing else, so a
-  coordination cannot mint one.
+  coordination cannot mint one. It is not an account on any campaign either:
+  `accounts` is keyed `(org_id, email)` and every read names the campaign, so
+  the instance administrator's credentials open nothing on a subdomain. That
+  is the design, not a gap — the host cannot read what a campaign organises.
+- **The host GRANTS an access; it never READS behind it.** A campaign whose
+  coordination cannot get in any more — address out of service, password
+  nobody wrote down, no relay to send a link with — had no way back:
+  `PARAPHE_ADMIN_*` only bootstrap the FIRST campaign, and one born from an
+  approved request showed its one-time password once. The remedy left was an
+  INSERT typed against production, which is the one kind of access nobody can
+  audit. `POST /api/admin/campaigns/{slug}/coordination` opens a NEW
+  coordination account in the named campaign and reads nothing else — no
+  card, no note, no counter, and `TestGrantingAnAccessReadsNoneOfTheCampaigns
+  Work` seeds all three and greps the answer for them.
+  **It never takes over an account somebody already holds**: an address that
+  already has one there is refused 409, never promoted, never repassworded
+  and never REACTIVATED — deactivation is the lever a campaign keeps against
+  its own host, and the address of a phished account is the one an
+  administrator would naturally reuse. Seeding refuses the same thing for the
+  same reason. A suspended campaign is refused too: every one of its routes
+  answers 503, so a credential minted there opens nothing and says it worked.
+  **The act is visible to the campaign it was done to**: `created_by` carries
+  the administrator's address, which "Mon équipe" shows. A door opened behind
+  somebody's back is what this route must not become.
+  It is the THIRD flow minting a one-time password on that screen, so the
+  rule those flows share — appended to a LIST, never assigned — is written
+  once in `showPassword`. Its card key is a COUNTER: two cards can now name
+  one address, and React calls duplicate keys unsupported. That last one is
+  asserted through React's own complaint on purpose — keyed by the address
+  the cards still rendered and still dismissed correctly, measured both ways,
+  so any assertion about passwords on screen would have been green under the
+  bug.
 - Campaign configuration lives **in the database, per organisation**, edited
   by coordination ("Mon équipe"). The campaign `PARAPHE_*` only bootstrap the
   first one.
@@ -396,11 +427,83 @@ One instance can host several campaigns, one per subdomain.
 Access is by individual account (email + hashed password), three roles:
 coordination (sees everything, creates teams and leads), lead (opens
 volunteer access for THEIR team), volunteer. A team is a name plus
-departments; it draws only within its perimeter, sees only its own
-reservations, and a card reserved elsewhere is refused (403). Campaign
-counters stay visible to all, without names. `PARAPHE_ADMIN_EMAIL` /
-`_PASSWORD` bootstrap coordination: with no coordination account the app
-refuses to open rather than let anyone in.
+departments. Campaign counters stay visible to all, without names.
+`PARAPHE_ADMIN_EMAIL` / `_PASSWORD` bootstrap coordination: with no
+coordination account the app refuses to open rather than let anyone in.
+
+**NO CARD IS ANY TEAM'S TO HOLD, AND THE CARD CROSSES WHERE THE PERSON DOES
+NOT.** The two halves of one decision, and the second is what makes the first
+safe.
+
+Every team of a campaign reads every card of it. Nothing is hidden and
+nothing is refused: no 403 on opening a card another team is working, no
+card missing from a list or an export, no refusal to record a status. A team
+wall between colleagues of one campaign cost more than it bought — two teams
+called the same mayor with no way to find out, a volunteer could not look up
+a commune somebody had mentioned to them, and a status the caller had
+actually collected was refused because of the department it was in. **A
+limitation nobody asked the tool for is a limitation the tool does not
+have.**
+
+What crosses is the CARD. What does not is the INDIVIDUAL: a card another
+team is working comes back with `team_name` on it and with `volunteer` and
+`volunteer_name` NULL — « travaillée par l'équipe Nord », informative, and
+attributable to no person. The same line the campaign's counters have always
+drawn: visible to all, nominative to nobody. Coordination sees the names.
+That rule is `hidePerson`, and every card query comes through `s.cards`,
+which applies it before returning a single row. Applied by HAND at three
+sites it was kept by nothing: a fourth card query — a leaderboard, a
+« recently statused » tab — would have shipped every other team's volunteer
+addresses with the whole suite green, which is the same silence the team wall
+used to fail in. `TestEveryCardQueryMasksThePerson` reads the package and
+demands that a function naming `mayorSelection` come through `s.cards` or
+call `hidePerson` itself. **Assumed limit, stated rather than implied**: it
+walks the IDENTIFIER, so it does not see a query spelling the person's
+columns out by hand — `routeExport` is exactly that, and it is pinned by a
+test of its own. Matching the string `t.volunteer` instead would cry on
+`mayorAvailable` and on counters that name nobody, and a canary that cries on
+prose is one the next author routes around.
+`s.cards` is in `queryCalls` and in the invisible-SQL exemptions, like every
+other pass-through helper: it forwards a statement, so it is judged at its
+callers.
+**That canary's FIRST shape was one line from useless, twice over**, and an
+adversarial round walked past both halves in a minute. It matched the
+IDENTIFIER `mayorSelection`, so `const cardColumns = mayorSelection` renamed
+the marker away; and it accepted any identifier named `hidePerson` or
+`cards`, so a local `cards, err := s.rows(…)` — the most natural name there
+is for a slice of card rows — read as the guard being satisfied. **A marker
+must be what the DRIVER runs, and a requirement must be a CALL**: the walk
+now resolves the SQL through the isolation canary's own reader, which follows
+a const alias, and demands an `*ast.CallExpr`. That also retired the assumed
+limit: `routeExport` spells the columns out by hand and is now walked like
+the rest, so it calls `hidePerson` — through ONE probe map reused across the
+whole stream, because the rule stated a second time inline is the copy that
+drifts.
+**`personColumn` matches the person's columns where they are SELECTED, never
+where they are tested.** The join says `= t.volunteer AND`, `mayorAvailable`
+says `t.volunteer IS NULL`, and the dashboard's own counter says
+`COALESCE(c.name, t.volunteer) AS who` — bounded to the reader's team and
+naming nobody else. A canary that cried on those is one the next author would
+route around.
+**In Go, not as a CASE in the SELECT.** Written in SQL it made the statement
+a string the isolation canary could no longer read — and an unreadable
+statement is one nothing can say the campaign is named in, which is how a
+wall gets certified by a reader that gave up. It also put a parameter in a
+SELECT list whose `COUNT(*)` sibling does not mention it, which PostgreSQL
+refuses outright.
+
+**The perimeter bounds ONE act: where a team is handed its work.**
+`/api/batch` draws inside the departments a team was given. Reading and
+recording are bounded by nothing — `/api/mayors`, `/api/facets`, a card
+opened by INSEE code and the export carry no department predicate and no
+team predicate. Nothing held that: adding `m.department = ANY(mine)` to the
+list, for symmetry with the batch — which is exactly how it would be argued
+— is one line nothing else refuses. `team_perimeter_test.go` pins both
+halves in one file, so widening one cannot quietly widen the other.
+
+**The wall that did not move is the CAMPAIGN's**, and it is absolute: the
+`org_id` predicate every query carries, and the canary that reads them.
+Between teams there is now information; between campaigns there is nothing.
 
 **A team can also be ASKED FOR**, from a public form on the campaign's own
 sign-in screen — the instance's hosting request, one level down, and for the
@@ -801,17 +904,30 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   Work lives in `assignments`, so a free card has NO row to lock: the
   assignment IS the insert, with `ON CONFLICT (org_id, insee_code) DO UPDATE
   … WHERE volunteer IS NULL`. PostgreSQL lets exactly one through.
-- **Writing a status TELLS, it does not TAKE.** Reserving is a deliberate
-  act and it has one door, `/api/batch`. Recording a status used to claim
-  the card on the way past — volunteer and `team_id` stamped — so a note
-  taken in passing removed the mayor from everyone else's list for good,
-  with no screen able to give it back. What keeps two volunteers off the
-  same person is the status being SEEN: whoever opens the card next reads
-  « refusé » and moves on. **Assumed limit**, and it is the whole trade:
-  two people looking at the same free card in the same moment can both
-  call, where the lock made the second lose the race and be told so. A card
-  somebody HAS reserved is still theirs, and a write over it is still
-  refused.
+- **Writing a status TELLS, it does not TAKE**, and taking a batch does not
+  take either. `/api/batch` hands a volunteer cards to work through; it
+  grants nothing exclusive, and a card it handed to somebody else is still
+  open to everyone — visible, readable, writable. What keeps two volunteers
+  off the same person is the state being SEEN: whoever opens the card next
+  reads « refusé », or « travaillée par l'équipe Nord », and decides.
+  **Assumed limit**, and it is the whole trade: two people looking at the
+  same card in the same moment can both call. A lock made the second lose a
+  race and be told so, which cost more than the duplicate call it prevented
+  — it is the coordination between volunteers that this application informs,
+  not one it enforces.
+  The one refusal left on a write is `seen`: a status is written against the
+  state its writer READ, and a card somebody has moved since is a 409 rather
+  than a silent overwrite. That refuses nobody a mayor; it refuses writing
+  over an answer nobody saw.
+  **The write lock outlived the wall by one round, and the screen is what
+  caught it.** Removing the team wall from the READS left
+  `assignments.volunteer IS NULL OR assignments.volunteer=$n` standing in the
+  status write, so the card opened, said « travaillée par l'équipe Nord », and
+  answered 409 to the save — a promise discovered by paying for it, which is
+  worse than the wall it replaced. An adversarial pass found it by reading the
+  new SENTENCES against the old SQL, not by reading either alone: when a
+  product rule changes, the text that states it and the predicate that
+  enforces it are two places, and only one of them was edited.
 - **A status names the TEAM that wrote it, and nobody in it.** The other half
   of the same decision: once a status claims nothing, `assignments.team_id` —
   which names who RESERVED — is null on a card carrying a status every team
@@ -831,6 +947,14 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   testing for truthiness. `equipeAyantEcrit` compares against
   `String(me.team_id ?? 0)`: the account says null where the card says `"0"`,
   and comparing them unnormalised makes the national scope foreign to itself.
+  **The same trap, one column over, cost a second round.** The team WORKING a
+  card was sent as `w.name` alone, and the national scope has no row in
+  `teams` — so a batch the coordination had taken came back with a null name
+  and read as « personne n'est encore dessus » on every local team's screen,
+  which is how the volunteer who then worked it became the second caller. Two
+  columns, like the writer: `taken_by` as TEXT decides (null nobody, `"0"`
+  national, a number a team), `team_name` labels, and `equipeQuiTravaille`
+  normalises. Whoever adds a third attribution adds both columns.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit

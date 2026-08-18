@@ -589,7 +589,7 @@ func TestBatchNeverGivesSameMayorTwice(t *testing.T) {
 // same person is now the status being visible to the next one who opens the
 // card. Reserving stays a deliberate act, through /api/batch, and a card
 // somebody HAS taken is still refused to anyone else.
-func TestAStatusTellsWithoutTakingAndAReservationStillHolds(t *testing.T) {
+func TestAStatusTellsWithoutTakingAndNoCardIsHeldAgainstAnybody(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 3, "02")
 	gid := createTeam(t, s, "Ain", "02")
@@ -636,7 +636,11 @@ func TestAStatusTellsWithoutTakingAndAReservationStillHolds(t *testing.T) {
 			"who had read it: %d %v", code, rep)
 	}
 
-	// …but a card someone RESERVED is theirs: that door is untouched.
+	// …AND a card somebody has taken is not theirs to hold. A batch hands a
+	// volunteer cards to work through; it is not a claim on the mayor. The
+	// write lock that used to sit here made every screen a lie — « prise par
+	// X » beside a save button answering 409 — and it refused the one thing
+	// worth recording: somebody made the call.
 	if code, rep := ca.call(http.MethodPost, "/api/batch",
 		map[string]any{}); code != http.StatusOK {
 		t.Fatalf("batch refused: %d %v", code, rep)
@@ -645,16 +649,36 @@ func TestAStatusTellsWithoutTakingAndAReservationStillHolds(t *testing.T) {
 		"SELECT insee_code FROM assignments WHERE org_id=$1 AND volunteer=$2 "+
 			"LIMIT 1", orgID(t, s, testSlug), "a@exemple.fr")
 	if code, rep := cb.call(http.MethodPost, "/api/mayors/"+taken+"/status",
-		map[string]string{"status": "refused", "note": "doublon"}); code != http.StatusConflict {
-		t.Errorf("a reserved card was written over by somebody else: %d %v",
+		map[string]string{"status": "refused", "note": "je l'ai eu aussi",
+			"seen": "to_contact"}); code != http.StatusOK {
+		t.Errorf("a card somebody had taken refused another volunteer's "+
+			"record: %d %v", code, rep)
+	}
+	// and the ONE refusal left applies to that card like any other: it is
+	// about the state read, not about who holds it
+	if code, rep := cb.call(http.MethodPost, "/api/mayors/"+taken+"/status",
+		map[string]string{"status": "signed", "note": "à l'aveugle",
+			"seen": "to_contact"}); code != http.StatusConflict {
+		t.Errorf("a write announcing a state nobody read was accepted: %d %v",
 			code, rep)
+	}
+	// the taker keeps the card on their own board — informative, not a claim
+	if v := scalar[string](t, s,
+		"SELECT volunteer FROM assignments WHERE org_id=$1 AND insee_code=$2",
+		orgID(t, s, testSlug), taken); v != "a@exemple.fr" {
+		t.Errorf("the second writer took the card from %q: recording still "+
+			"must not claim", v)
 	}
 }
 
-// The export has followed the same wall as the screen ever since it was
-// possible to read, by downloading it, who in the other teams contacted
-// whom.
-func TestTeamWallHoldsInExport(t *testing.T) {
+// THE CARD CROSSES, THE PERSON DOES NOT — on the screen, and in the file
+// that bypasses it. Every team of a campaign reads every card: nothing is
+// hidden, nothing is refused, and a card another team is working says so by
+// naming the TEAM. What never crosses is the individual.
+//
+// The export is the half that matters, because downloading it used to be the
+// way round whatever the page decided.
+func TestACardCrossesTeamsAndThePersonOnItDoesNot(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 6, "03")
 	north := createTeam(t, s, "Nord", "03")
@@ -673,21 +697,31 @@ func TestTeamWallHoldsInExport(t *testing.T) {
 	taken := maintenanceColumn(t, s,
 		"SELECT insee_code FROM assignments WHERE volunteer='nord@exemple.fr'")
 	if len(taken) == 0 {
-		t.Fatal("no mayor reserved")
+		t.Fatal("no mayor taken")
 	}
 
-	if code, _ := cs.call(http.MethodGet, "/api/mayors/"+taken[0], nil); code != http.StatusForbidden {
-		t.Errorf("another team's card accessible: %d", code)
+	// the card OPENS, and says which team is on it, and names nobody
+	code, card := cs.call(http.MethodGet, "/api/mayors/"+taken[0], nil)
+	if code != http.StatusOK {
+		t.Fatalf("a card another team is working: %d, want 200 — no card of a "+
+			"campaign is hidden from a team of it", code)
 	}
+	raw, _ := json.Marshal(card)
+	if strings.Contains(string(raw), "nord@exemple.fr") {
+		t.Errorf("the card carries the other team's volunteer: %s", raw)
+	}
+	if !strings.Contains(string(raw), "Nord") {
+		t.Errorf("the card does not say which team is on it: %s", raw)
+	}
+
+	// and the list carries every mayor, not the leftovers
 	if code, rep := cs.call(http.MethodGet, "/api/mayors", nil); code == http.StatusOK {
-		total := int(rep["total"].(float64))
-		if total != 6-len(taken) {
-			t.Errorf("the Sud team's list shows %d mayors, %d expected",
-				total, 6-len(taken))
+		if total := int(rep["total"].(float64)); total != 6 {
+			t.Errorf("the Sud team's list shows %d mayors of 6: cards are being "+
+				"hidden from a team of the same campaign", total)
 		}
 	}
 
-	// the export: the real test, because it bypasses the screen
 	resp, err := cs.http.Do(cs.request(http.MethodGet, "/api/export.csv", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -699,13 +733,54 @@ func TestTeamWallHoldsInExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(rows) != 7 {
+		t.Errorf("the export has %d rows for 6 mayors and a header", len(rows))
+	}
+	body := ""
 	for _, row := range rows[1:] {
-		for _, insee := range taken {
-			if strings.Contains(strings.Join(row, ";"), insee) {
-				t.Errorf("the Sud team's export contains %s, reserved by Nord",
-					insee)
-			}
+		body += strings.Join(row, ";") + "\n"
+	}
+	for _, insee := range taken {
+		if !strings.Contains(body, insee) {
+			t.Errorf("the export drops %s because another team is on it", insee)
 		}
+	}
+	if strings.Contains(body, "nord@exemple.fr") {
+		t.Error("the export names the other team's volunteer — the download is " +
+			"the way round what the screen does not show")
+	}
+	if !strings.Contains(body, "Nord") {
+		t.Error("the export does not say which team is on those cards")
+	}
+}
+
+// Coordination sees everything, names included: it is the one role the
+// campaign's own privacy line does not run through, and the export is where
+// that is worth stating — a coordination reading it is reading its own
+// campaign's work.
+func TestCoordinationReadsTheNamesTheTeamsDoNot(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 3, "03")
+	north := createTeam(t, s, "Nord", "03")
+	pwN := createAccount(t, s, "nord@exemple.fr", RoleVolunteer, &north)
+	pwC := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+	cn, cc := newClient(t, srv), newClient(t, srv)
+	cn.signIn("nord@exemple.fr", pwN)
+	cc.signIn("coord@exemple.fr", pwC)
+	if code, rep := cn.call(http.MethodPost, "/api/batch",
+		map[string]any{}); code != http.StatusOK {
+		t.Fatalf("batch refused: %d %v", code, rep)
+	}
+	taken := maintenanceColumn(t, s,
+		"SELECT insee_code FROM assignments WHERE volunteer='nord@exemple.fr'")
+	if len(taken) == 0 {
+		t.Fatal("no mayor taken")
+	}
+	_, card := cc.call(http.MethodGet, "/api/mayors/"+taken[0], nil)
+	raw, _ := json.Marshal(card)
+	if !strings.Contains(string(raw), "nord@exemple.fr") {
+		t.Errorf("coordination cannot see who is on a card of its own "+
+			"campaign: %s", raw)
 	}
 }
 
@@ -836,11 +911,15 @@ func TestProtectedRoutesWithoutSession(t *testing.T) {
 	}
 }
 
-// Setting a status on a free card claims it: the geographic scope must
-// apply there as it applies to /lot. Without that, a team annexes another
-// department's cards one by one, and the legitimate team gets turned away
-// from an elected official of their own.
-func TestStatusRespectsGeographicScope(t *testing.T) {
+// A PERIMETER SAYS WHERE A TEAM DRAWS ITS WORK. It is not a claim on the
+// mayors inside it, and recording a status is not an annexation — writing one
+// takes nothing. So `/api/batch` stays inside the departments a team was
+// given, and `/status` refuses nobody: a volunteer who has actually spoken to
+// a mayor records it, whichever department that mayor is in, and the status
+// names the team that wrote it.
+//
+// Refusing it stopped the one thing this application exists to write down.
+func TestAPerimeterBoundsTheDrawAndNotTheRecord(t *testing.T) {
 	s, srv := testServer(t)
 	seedMayors(t, s, 3, "59")
 	seedMayors(t, s, 3, "13")
@@ -853,23 +932,32 @@ func TestStatusRespectsGeographicScope(t *testing.T) {
 	cn.signIn("nord@exemple.fr", pwN)
 	cs.signIn("sud@exemple.fr", pwS)
 
-	// the batch already refuses the other department
+	// drawing outside the perimeter is still refused: a batch is what the
+	// team was given to work through
 	if code, _ := cn.call(http.MethodPost, "/api/batch",
 		map[string]any{"department": "13"}); code != http.StatusForbidden {
-		t.Errorf("/lot outside the scope accepted: %d", code)
+		t.Errorf("/batch outside the perimeter accepted: %d", code)
 	}
-	// /status must refuse the same
-	code, rep := cn.call(http.MethodPost, "/api/mayors/13000/status",
-		map[string]string{"status": "email_sent", "note": "annexion"})
-	if code != http.StatusForbidden {
-		t.Errorf("another department's card annexed via /status: %d %v", code, rep)
+	// recording is not
+	if code, rep := cn.call(http.MethodPost, "/api/mayors/13000/status",
+		map[string]string{"status": "email_sent", "note": "je l'ai eu au téléphone"}); code !=
+		http.StatusOK {
+		t.Errorf("a status outside the perimeter: %d %v, want 200 — a call "+
+			"that happened must be recordable", code, rep)
 	}
-	// and the legitimate team keeps the hand
-	if code, rep := cs.call(http.MethodPost, "/api/mayors/13000/status",
+	// and it names the team that wrote it, which is what makes it readable
+	// to everybody else
+	if by := scalar[int](t, s, "SELECT updated_by_team FROM assignments "+
+		"WHERE org_id=$1 AND insee_code=$2", orgID(t, s, testSlug), "13000"); by != north {
+		t.Errorf("the status names team %d, want %d: a record nobody can "+
+			"attribute is the reason the refusal existed", by, north)
+	}
+	// the team whose department it is is not locked out by that record
+	if code, rep := cs.call(http.MethodPost, "/api/mayors/13001/status",
 		map[string]string{"status": "email_sent", "note": "chez moi"}); code != http.StatusOK {
-		t.Errorf("the legitimate team turned away from its department: %d %v", code, rep)
+		t.Errorf("the team of that department turned away: %d %v", code, rep)
 	}
-	// a team without a scope (national) is not restricted
+	// a team without a perimeter (national) draws from the whole country
 	pw := createAccount(t, s, "national@exemple.fr", RoleVolunteer, nil)
 	c := newClient(t, srv)
 	c.signIn("national@exemple.fr", pw)

@@ -210,6 +210,11 @@ func (s *Server) router() chi.Router {
 		r.With(guard(s.administrationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/admin/campaigns", s.routeCreateCampaign)
+		// The way back into a campaign nobody can enter. Same scope and same
+		// ceiling: it writes one account, exactly as creation does.
+		r.With(guard(s.administrationOnly),
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+			Post("/admin/campaigns/{slug}/coordination", s.routeGrantCoordination)
 		// The public directory of the hosted campaigns, apex only. Names
 		// and addresses are public by construction: every subdomain answers.
 		// Public does not mean free: this one queries the database, is the

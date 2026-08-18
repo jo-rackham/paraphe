@@ -147,15 +147,23 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 		run  func(t *testing.T)
 	}{
 		"GET /api/mayors/{insee}": {
-			{"another team's card is refused, not hidden", func(t *testing.T) {
+			// The team boundary is no longer a refusal: every team of a
+			// campaign reads every card of it. What the card must NOT carry
+			// is the other team's people and the other team's notes — the
+			// campaign's counters have always been visible to all and
+			// nominative to nobody, and this is that line on one card.
+			{"another team's card opens, and names nobody", func(t *testing.T) {
 				c := f.signedInClient(t, idorHostA, idorVol1)
 				code, body := c.call(http.MethodGet, "/api/mayors/"+idorOwnedCard, nil)
-				if code != http.StatusForbidden {
-					t.Fatalf("read of another team's card: %d, want 403", code)
+				if code != http.StatusOK {
+					t.Fatalf("read of another team's card: %d, want 200", code)
 				}
 				raw, _ := json.Marshal(body)
 				if strings.Contains(string(raw), "NOTE DE L'ÉQUIPE 02") {
-					t.Fatal("the refusal body carries the other team's note")
+					t.Fatal("the card carries the other team's note")
+				}
+				if strings.Contains(string(raw), idorVol2) {
+					t.Fatalf("the card names the other team's volunteer: %s", raw)
 				}
 			}},
 			{"another campaign's work on the same card is invisible", func(t *testing.T) {
@@ -172,27 +180,47 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 			}},
 		},
 		"POST /api/mayors/{insee}/status": {
-			{"writing on another team's card is refused and writes nothing", func(t *testing.T) {
+			// The refusal that stayed, and it is the only one: a status is
+			// written against the state the writer SAW. Two teams on one
+			// mayor is allowed — that is the point — but neither may write
+			// over a state it never read.
+			{"a card somebody else has moved is not written over blind",
+				func(t *testing.T) {
+					c := f.signedInClient(t, idorHostA, idorVol1)
+					code, _ := c.call(http.MethodPost,
+						"/api/mayors/"+idorOwnedCard+"/status",
+						map[string]string{"status": "signed", "note": "à l'aveugle",
+							"seen": "to_contact"})
+					if code != http.StatusConflict {
+						t.Fatalf("writing over an unseen state: %d, want 409", code)
+					}
+					status := scalar[string](t, s, "SELECT status FROM assignments "+
+						"WHERE org_id=$1 AND insee_code=$2", f.orgA, idorOwnedCard)
+					if status != "called" {
+						t.Fatalf("the card's status became %q through a refused write", status)
+					}
+					notes := scalar[int](t, s, "SELECT COUNT(*) FROM notes "+
+						"WHERE org_id=$1 AND insee_code=$2", f.orgA, idorOwnedCard)
+					if notes != 1 {
+						t.Fatalf("%d notes on the card: the refused write left a trace", notes)
+					}
+				}},
+			// And the neighbour CAMPAIGN's card is not this campaign's to
+			// write on, whatever the team. That wall did not move.
+			{"a card of the neighbouring campaign is untouched", func(t *testing.T) {
+				before := scalar[int](t, s, "SELECT COUNT(*) FROM assignments "+
+					"WHERE org_id=$1", f.orgB)
 				c := f.signedInClient(t, idorHostA, idorVol1)
-				code, _ := c.call(http.MethodPost, "/api/mayors/"+idorOwnedCard+"/status",
-					map[string]string{"status": "signed", "note": "annexion"})
-				if code != http.StatusForbidden {
-					t.Fatalf("write on another team's card: %d, want 403", code)
+				if code, _ := c.call(http.MethodPost, "/api/mayors/01001/status",
+					map[string]string{"status": "signed", "note": "chez le voisin"}); code !=
+					http.StatusOK {
+					t.Fatalf("writing on a card of MY campaign: %d, want 200", code)
 				}
-				owner := scalar[string](t, s, "SELECT volunteer FROM assignments "+
-					"WHERE org_id=$1 AND insee_code=$2", f.orgA, idorOwnedCard)
-				if owner != idorVol2 {
-					t.Fatalf("the card changed hands to %q through a refused write", owner)
-				}
-				status := scalar[string](t, s, "SELECT status FROM assignments "+
-					"WHERE org_id=$1 AND insee_code=$2", f.orgA, idorOwnedCard)
-				if status != "called" {
-					t.Fatalf("the card's status became %q through a refused write", status)
-				}
-				notes := scalar[int](t, s, "SELECT COUNT(*) FROM notes "+
-					"WHERE org_id=$1 AND insee_code=$2", f.orgA, idorOwnedCard)
-				if notes != 1 {
-					t.Fatalf("%d notes on the card: the refused write left a trace", notes)
+				after := scalar[int](t, s, "SELECT COUNT(*) FROM assignments "+
+					"WHERE org_id=$1", f.orgB)
+				if after != before {
+					t.Fatalf("the neighbouring campaign gained %d work row(s) from "+
+						"a write on the same INSEE code", after-before)
 				}
 			}},
 		},
@@ -328,6 +356,56 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 					t.Fatalf("%d teams named after the accepted request, want 1", n)
 				}
 			}},
+		},
+		"POST /api/admin/campaigns/{slug}/coordination": {
+			{"a coordination signed in on its own campaign cannot open a door " +
+				"in its neighbour", func(t *testing.T) {
+				// The refusal that matters is administrationOnly's FIRST
+				// clause, `orgOf(r) != nil` — a caller who IS signed in, and
+				// whose role would otherwise be the most powerful there is.
+				// Anonymously the route answers 401 whether the clause exists
+				// or not, which proves nothing about this wall.
+				before := scalar[int](t, s,
+					"SELECT COUNT(*) FROM accounts WHERE org_id=$1", f.orgB)
+				c := f.signedInClient(t, idorHostA, idorCoord)
+				code, _ := c.call(http.MethodPost,
+					"/api/admin/campaigns/other/coordination",
+					map[string]string{"email": "squat@exemple.fr", "name": "Squat"})
+				if code != http.StatusForbidden {
+					t.Fatalf("a campaign's coordination naming its neighbour: "+
+						"%d, want 403", code)
+				}
+				after := scalar[int](t, s,
+					"SELECT COUNT(*) FROM accounts WHERE org_id=$1", f.orgB)
+				if after != before {
+					t.Fatalf("the neighbour gained %d account(s) through a "+
+						"refused call", after-before)
+				}
+			}},
+			{"a campaign account is not an instance session, apex or not",
+				func(t *testing.T) {
+					before := scalar[int](t, s,
+						"SELECT COUNT(*) FROM accounts WHERE org_id=$1", f.orgB)
+					coord := f.newClientOn(idorApex)
+					if code := coord.signIn(idorCoord,
+						f.passwords[idorCoord]); code == http.StatusOK {
+						t.Fatal("campaign coordination signed in on the apex: " +
+							"the instance scope accepted a campaign account")
+					}
+					code, _ := coord.call(http.MethodPost,
+						"/api/admin/campaigns/other/coordination",
+						map[string]string{"email": "squat2@exemple.fr", "name": "Squat"})
+					if code != http.StatusUnauthorized {
+						t.Fatalf("naming a campaign with no instance session: "+
+							"%d, want 401", code)
+					}
+					after := scalar[int](t, s,
+						"SELECT COUNT(*) FROM accounts WHERE org_id=$1", f.orgB)
+					if after != before {
+						t.Fatalf("the neighbour gained %d account(s) through a "+
+							"refused call", after-before)
+					}
+				}},
 		},
 		"POST /api/admin/requests/{id}": {
 			{"campaign coordination cannot moderate, even on the apex", func(t *testing.T) {

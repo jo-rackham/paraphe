@@ -89,19 +89,6 @@ func scoped(r *http.Request) *query {
 	return q
 }
 
-// teamScope: what my team has reserved, plus what nobody has taken. Other
-// teams' work stays with them — in the export too. It bears on `assignments`,
-// outer-joined: a card with no work row has a NULL team, hence is free.
-//
-// This clause walls off the TEAMS of one campaign. The wall between
-// CAMPAIGNS is the `org_id` predicate every query in this package carries.
-func teamScope(c *Account, q *query) string {
-	if c.Coordination() {
-		return "1=1"
-	}
-	return fmt.Sprintf("(t.team_id IS NULL OR t.team_id=%s)", q.p(c.MyTeam()))
-}
-
 // readAccount re-reads the account from the database. Called on EVERY
 // request: that is what makes deactivation immediate, with no session table
 // and no denylist. The read goes through the request's transaction, hence

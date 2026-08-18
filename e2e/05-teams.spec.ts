@@ -125,12 +125,16 @@ test.describe
       expect((await outside.json()).error).toContain("périmètre");
     });
 
-    test("a card reserved outside the team is refused, not just hidden", async ({
+    // No card of a campaign is refused to a team of it: the card opens, and
+    // what it does NOT carry is the person on it. A team name crosses, a
+    // volunteer's address does not — the same line the campaign's counters
+    // have always drawn.
+    test("a card another team is working opens, and names nobody", async ({
       page,
       playwright,
     }) => {
-      // the national batch reserved by the coordination in an earlier test,
-      // read through its own session
+      // the batch taken by the coordination in an earlier test, read through
+      // its own session
       const coordination = await playwright.request.newContext();
       const signedIn = await coordination.post(`${ORIGIN}/api/session`, {
         data: { email: COORDINATION.email, password: COORDINATION.password },
@@ -144,10 +148,12 @@ test.describe
 
       await signIn(page, ORIGIN, VOLUNTEER.email, volunteerPassword);
       const card = await page.request.get(`${ORIGIN}/api/mayors/${foreign}`);
-      expect(card.status()).toBe(403);
-      expect((await card.json()).error).toContain(
-        "réservée par une autre équipe",
-      );
+      expect(card.status()).toBe(200);
+      const body = JSON.stringify(await card.json());
+      expect(
+        body,
+        "the card carries the other team's volunteer address",
+      ).not.toContain(COORDINATION.email);
     });
 
     // The whole loop, through the interface: somebody with no account asks,

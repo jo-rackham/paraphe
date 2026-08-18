@@ -36,6 +36,19 @@ const maxBatchRounds = 8
 const (
 	mayorSelection = "m.*, t.volunteer, COALESCE(t.status,'to_contact') AS status, " +
 		"t.updated_at, t.team_id, c.name AS volunteer_name, " +
+		// The team WORKING the card, beside the team that last wrote a
+		// status. Nothing is refused on the strength of it: it is what makes
+		// « somebody is already on this one » a thing a volunteer can see
+		// instead of a card that is not there.
+		//
+		// TWO columns, and ::text, for the reason `updated_by_team` below is
+		// two columns and ::text — the same trap, one row over. `w.name` is
+		// NULL for the national scope, which has no row in `teams`, so a
+		// screen reading the NAME alone showed a card the coordination had
+		// taken as « personne n'est encore dessus ». `taken_by` is the
+		// answer: null means nobody, `"0"` means the national scope, and a
+		// number means the team `team_name` names.
+		"t.team_id::text AS taken_by, w.name AS team_name, " +
 		// ::text because a card IS a dictionary of text on the other side —
 		// it comes from a CSV as readily as from here. The cast keeps the
 		// three answers apart, which is the whole point of the column: null
@@ -58,12 +71,64 @@ const (
 	assignmentJoinFmt = " FROM mayors m " +
 		"LEFT JOIN assignments t ON t.insee_code = m.insee_code AND t.org_id = %[1]s " +
 		"LEFT JOIN accounts c ON c.email = t.volunteer AND c.org_id = %[1]s " +
-		"LEFT JOIN teams u ON u.id = t.updated_by_team AND u.org_id = %[1]s"
+		"LEFT JOIN teams u ON u.id = t.updated_by_team AND u.org_id = %[1]s " +
+		"LEFT JOIN teams w ON w.id = t.team_id AND w.org_id = %[1]s"
 	// Available: no work row, or a row nobody took and on which nothing was
 	// done.
 	mayorAvailable = "(t.insee_code IS NULL OR " +
 		"(t.volunteer IS NULL AND t.status = 'to_contact'))"
 )
+
+// hidePerson: THE CARD CROSSES, THE PERSON DOES NOT.
+//
+// Every team of a campaign reads every card of it — nothing is hidden and
+// nothing is refused. What does not cross is the individual: a card another
+// team is working comes back carrying `team_name` and no address and no name,
+// which is the line the campaign's counters have always drawn. Coordination
+// sees the names, as it sees everything.
+//
+// Done HERE and not in the SELECT, deliberately. Written as a CASE in the
+// query it made the statement a string the isolation canary could no longer
+// read — and an unreadable statement is one nothing can say the campaign is
+// named in. It also put a parameter in the SELECT list of a query whose
+// COUNT(*) sibling does not mention it, which PostgreSQL refuses. One
+// function over the row map costs neither, and it is the only place the rule
+// is written.
+func hidePerson(c *Account, m map[string]any) map[string]any {
+	if c.Coordination() {
+		return m
+	}
+	// 0 = the national scope, a real team every account without one belongs
+	// to: a plain truthiness test would read it as « nobody », and hand a
+	// national card's volunteer to any team that asked.
+	if owner, worked := integer(m["team_id"]); worked && owner != c.MyTeam() {
+		m["volunteer"] = nil
+		m["volunteer_name"] = nil
+	}
+	return m
+}
+
+// cards: the ONE door that reads card rows. It runs the query and masks every
+// row before handing it back, so a card query added tomorrow — a leaderboard,
+// a « recently statused » tab — inherits the rule instead of having to
+// remember it. Applied by hand at three sites, the rule was kept by nothing:
+// the fourth site would have leaked other teams' volunteers with every test
+// still green, which is the same silence the team wall used to fail in.
+// `TestEveryCardQueryMasksThePerson` refuses that: a statement that SELECTS
+// the person comes through here, or calls `hidePerson` itself.
+func (s *Server) cards(r *http.Request, sql string, args ...any) (
+	[]map[string]any, error,
+) {
+	rows, err := s.rows(r, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	c := accountOf(r)
+	for _, m := range rows {
+		hidePerson(c, m)
+	}
+	return rows, nil
+}
 
 // assignmentJoin binds the join to one campaign. It takes the placeholder
 // rather than the value so that callers numbering their parameters as they
@@ -109,7 +174,7 @@ func (s *Server) routeDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mine, err := s.rows(r, "SELECT "+mayorSelection+assignmentJoin("$1")+
+	mine, err := s.cards(r, "SELECT "+mayorSelection+assignmentJoin("$1")+
 		" WHERE t.volunteer=$2 AND t.team_id IS NOT DISTINCT FROM $3 "+
 		"ORDER BY CASE t.status WHEN 'to_call_back' THEN 0 WHEN 'to_contact' "+
 		"THEN 1 ELSE 2 END, COALESCE(NULLIF(m.score,'')::int, 0) DESC",
@@ -188,7 +253,6 @@ func (s *Server) routeFacets(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/mayors — filtered, paginated list.
 func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
-	c := accountOf(r)
 	v := r.URL.Query()
 	// unstorable text (NUL, malformed UTF-8) is refused at the middleware:
 	// nothing to strip here anymore
@@ -239,7 +303,10 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	where = append(where, "m.rank="+req.p(rank))
-	where = append(where, teamScope(c, req))
+	// No team clause: every team of a campaign reads every card of it. What
+	// varies by team is whether the PERSON on a card is named, and that is in
+	// the selection, not in the filter — so the COUNT below counts the same
+	// cards for everybody, which is what the screen's total has to mean.
 	filter := strings.Join(where, " AND ")
 
 	// One placeholder for both queries below: they share `req`, so binding
@@ -268,7 +335,7 @@ func (s *Server) routeMayors(w http.ResponseWriter, r *http.Request) {
 			req.p(after.Score), req.p(after.Department), req.p(after.Commune),
 			req.p(after.Insee))
 	}
-	rows, err := s.rows(r, fmt.Sprintf(
+	rows, err := s.cards(r, fmt.Sprintf(
 		"SELECT %s%s WHERE %s ORDER BY "+
 			"-COALESCE(NULLIF(m.score,'')::int, 0), m.department, "+
 			"m.commune, m.insee_code LIMIT %s",
@@ -352,35 +419,32 @@ type statusRequest struct {
 	Seen string `json:"seen"`
 }
 
-// POST /api/mayors/{insee}/status — recording what a contact gave. It does
-// NOT claim the card; taking a lot is what reserves.
+// POST /api/mayors/{insee}/status — recording what a contact gave. It claims
+// nothing: no card is any team's to hold.
 func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	insee := pathParam(r, "insee")
-	m, ok := s.loadMayor(w, r, insee)
-	if !ok {
+	// Existence only, for the 404: a status on an INSEE code the list does
+	// not carry is a typo, not a record. `loadMayor` would answer the same
+	// question through four outer joins and a row map, on the hottest write
+	// path there is, to read nothing out of them.
+	var exists bool
+	if err := s.tx(r).QueryRow(r.Context(),
+		"SELECT EXISTS(SELECT 1 FROM mayors WHERE insee_code=$1)", insee).
+		Scan(&exists); err != nil {
+		s.failure(w, err)
+		return
+	}
+	if !exists {
+		errorJSON(w, http.StatusNotFound, "Aucun maire pour le code INSEE %q.", insee)
 		return
 	}
 	c := accountOf(r)
-	// The geographic scope applies here as it applies to /lot. It no longer
-	// stops a team ANNEXING another department's cards — writing a status
-	// takes nothing — but it still stops it writing on them: the status is
-	// what every other team reads, and a note lands under the writer's name
-	// in a department that is not theirs.
-	// A card ALREADY reserved by the team is not concerned: a scope
-	// narrowed after the fact must not lock up work in progress.
-	if _, reserved := integer(m["team_id"]); !reserved {
-		myDepts, err := s.teamDepartments(r, c)
-		if err != nil {
-			s.failure(w, err)
-			return
-		}
-		dept := text(m["department"])
-		if len(myDepts) > 0 && !slices.Contains(myDepts, dept) {
-			errorJSON(w, http.StatusForbidden,
-				"%s n'est pas dans le périmètre de votre équipe.", dept)
-			return
-		}
-	}
+	// No geographic refusal. A perimeter says where a team DRAWS its work; it
+	// is not a claim on the mayors inside it, and refusing a status outside
+	// it stopped a volunteer recording a call somebody had actually made —
+	// the one thing this application exists to write down. The status names
+	// the team that wrote it, which is what makes an out-of-perimeter note
+	// readable rather than anonymous.
 	var d statusRequest
 	if !readBody(w, r, &d) {
 		return
@@ -411,11 +475,16 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 	// « refusé » and moves on. Reserving is a deliberate act and it has its
 	// own door, `/api/batch`, which is where a volunteer takes cards to work
 	// on. The known limit of trading the lock for the information: two
-	// people looking at the same free card at the same moment can still both
-	// call, where the lock made the second one lose the race and be told so.
+	// people looking at the same card at the same moment can still both call,
+	// where the lock made the second one lose the race and be told so.
 	//
-	// The reservation itself is untouched: a card someone HAS taken is still
-	// theirs, and the guard below still refuses a write over it.
+	// AND A RESERVATION REFUSES NOTHING EITHER. A batch hands a volunteer
+	// cards to work through; it is not a claim on the mayor. Left standing,
+	// the write lock made every screen a lie — « travaillée par l'équipe
+	// Nord » beside a save button that answers 409 — and it stopped the one
+	// thing worth writing down: somebody made the call, and could not record
+	// it. What remains below is the `seen` clause, which refuses no person
+	// and no team: it refuses writing over a state nobody read.
 	seen := d.Seen
 	if seen == "" {
 		seen = StatusToContact
@@ -431,9 +500,8 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 			"ON CONFLICT (org_id, insee_code) DO UPDATE SET "+
 			"status=excluded.status, updated_at=excluded.updated_at, "+
 			"updated_by_team=excluded.updated_by_team "+
-			"WHERE (assignments.volunteer IS NULL OR assignments.volunteer=$6) "+
-			"AND assignments.status=$7",
-		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.MyTeam(), c.Email, seen)
+			"WHERE assignments.status=$6",
+		orgOf(r).ID, insee, d.Status, shortTimestamp(), c.MyTeam(), seen)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -615,24 +683,36 @@ func (s *Server) routeBatch(w http.ResponseWriter, r *http.Request) {
 	replyJSON(w, http.StatusOK, map[string]any{"taken": taken, "message": message})
 }
 
-// GET /api/export.csv — the export follows the same wall as the screen:
-// otherwise downloading it would suffice to read who, in the other teams,
-// contacted whom.
+// GET /api/export.csv — the whole campaign's cards, like the screen. And
+// like the screen, the PERSON on a card another team is working is not in it:
+// a download must not be the way round what the page does not show. The team
+// is, in the column that replaces the name.
 func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
-	req := scoped(r)
-	filter := teamScope(accountOf(r), req)
-	cols := append(append([]string{}, Cols...), "volunteer", "status", "updated_at")
+	me := accountOf(r)
+	// `team_name` is a column of the file, not a substitution: whoever opens
+	// it reads that a card is being worked and by which team, on the same row
+	// as the empty volunteer cell rather than instead of it.
+	cols := append(append([]string{}, Cols...),
+		"volunteer", "status", "updated_at", "volunteer_name", "team_name")
 	selection := make([]string, 0, len(cols)+1)
 	for _, c := range Cols {
 		selection = append(selection, "m."+c)
 	}
-	selection = append(selection, "t.volunteer",
-		"COALESCE(t.status,'to_contact')", "t.updated_at", "COALESCE(c.name, t.volunteer)")
+	// ALIASED, because the masking below reads the row by column name — the
+	// one rule `hidePerson` states, applied here too rather than written a
+	// second time as a CASE that would drift from it.
+	selection = append(selection, "t.volunteer AS volunteer",
+		"COALESCE(t.status,'to_contact') AS status",
+		"t.updated_at AS updated_at",
+		"COALESCE(c.name, t.volunteer) AS volunteer_name",
+		"w.name AS team_name",
+		// read to decide, never written
+		"t.team_id AS team_id")
 
 	rows, err := s.tx(r).Query(r.Context(), fmt.Sprintf(
-		"SELECT %s%s WHERE %s ORDER BY m.department, m.commune",
-		strings.Join(selection, ","), assignmentJoin("$1"), filter),
-		req.args...)
+		"SELECT %s%s ORDER BY m.department, m.commune",
+		strings.Join(selection, ","), assignmentJoin("$1")),
+		scopeOrg(r))
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -649,19 +729,46 @@ func (s *Server) routeExport(w http.ResponseWriter, r *http.Request) {
 	}
 	writer := csv.NewWriter(w)
 	writer.Comma = ';'
-	if err := writer.Write(append(append([]string{}, cols...), "volunteer_name")); err != nil {
+	if err := writer.Write(cols); err != nil {
 		truncatedExport(err)
 		return
 	}
+	// Positions resolved ONCE, from the names the SELECT aliases: the columns
+	// are found by name, so the file cannot silently shift the day one is
+	// added, and the loop then costs no map and no hash. 34,826 rows through
+	// a map per row is 34,826 allocations and some two million string hashes
+	// for a lookup that never changes.
+	at := map[string]int{}
+	for i, f := range rows.FieldDescriptions() {
+		at[f.Name] = i
+	}
+	position := make([]int, len(cols))
+	for i, name := range cols {
+		position[i] = at[name]
+	}
+	teamAt, volunteerAt := at["team_id"], at["volunteer"]
+	nameAt := at["volunteer_name"]
+	// ONE probe map, reused for the whole stream: `hidePerson` states the
+	// rule, and a download must not be the way round it — but a map per row
+	// is 34,826 allocations. Three assignments in, two out, no allocation
+	// after the first. Restating the rule inline instead is what a second
+	// implementation looks like on the day the first one changes.
+	probe := make(map[string]any, 3)
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
 			truncatedExport(err)
 			return
 		}
-		row := make([]string, len(values))
-		for i, v := range values {
-			row[i] = csvSafe(text(v))
+		probe["team_id"] = values[teamAt]
+		probe["volunteer"] = values[volunteerAt]
+		probe["volunteer_name"] = values[nameAt]
+		hidePerson(me, probe)
+		values[volunteerAt] = probe["volunteer"]
+		values[nameAt] = probe["volunteer_name"]
+		row := make([]string, len(cols))
+		for i, p := range position {
+			row[i] = csvSafe(text(values[p]))
 		}
 		if err := writer.Write(row); err != nil {
 			truncatedExport(err)
@@ -684,8 +791,10 @@ func truncatedExport(err error) {
 	slog.Error("truncated CSV export", "error", err)
 }
 
-// loadMayor applies the team wall: a card reserved elsewhere is refused,
-// not merely hidden.
+// loadMayor: one card of THIS campaign, whoever in it is working on the
+// mayor. It refuses on one thing only, and it is the wall that stayed: a
+// campaign never reads its neighbour, because `assignmentJoin` names the
+// campaign and `mayors` is common and public.
 func (s *Server) loadMayor(w http.ResponseWriter, r *http.Request,
 	insee string) (map[string]any, bool) {
 	rows, err := s.tx(r).Query(r.Context(),
@@ -704,15 +813,9 @@ func (s *Server) loadMayor(w http.ResponseWriter, r *http.Request,
 		s.failure(w, err)
 		return nil, false
 	}
-	c := accountOf(r)
-	// 0 = the national team: a plain truthiness test would treat it as
-	// unreserved
-	if owner, reserved := integer(m["team_id"]); reserved && !c.Coordination() &&
-		owner != c.MyTeam() {
-		errorJSON(w, http.StatusForbidden,
-			"Cette fiche est réservée par une autre équipe. Rapprochez-vous "+
-				"de la coordination si besoin.")
-		return nil, false
-	}
-	return m, true
+	// No refusal on the strength of another team having the card. It comes
+	// back with `team_name` on it and without the person, which is what tells
+	// a volunteer somebody is already there without turning the mayor into a
+	// card that does not exist.
+	return hidePerson(accountOf(r), m), true
 }

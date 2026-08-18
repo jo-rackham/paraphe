@@ -43,21 +43,22 @@ var routeLimits = map[string]string{
 	"POST /api/mayors/{insee}/status": "write_account",
 	"POST /api/batch":                 "write_account",
 
-	"GET /api/team":                         "none: authenticated read",
-	"POST /api/team/group":                  "write_account",
-	"POST /api/team/request":                "team_request_ip",
-	"POST /api/team/requests/{id}":          "write_account",
-	"POST /api/team/account":                "write_account",
-	"POST /api/team/account/{email}/active": "write_account",
-	"POST /api/team/account/{email}/role":   "write_account",
-	"POST /api/campaign":                    "write_account",
-	"POST /api/campaign/logo":               "write_account",
-	"DELETE /api/campaign/logo":             "write_account",
-	"POST /api/request":                     "hosting_ip",
-	"GET /api/admin/requests":               "none: authenticated read",
-	"POST /api/admin/requests/{id}":         "write_account",
-	"POST /api/admin/campaigns":             "write_account",
-	"GET /api/campaigns":                    "anon_ip",
+	"GET /api/team":                                 "none: authenticated read",
+	"POST /api/team/group":                          "write_account",
+	"POST /api/team/request":                        "team_request_ip",
+	"POST /api/team/requests/{id}":                  "write_account",
+	"POST /api/team/account":                        "write_account",
+	"POST /api/team/account/{email}/active":         "write_account",
+	"POST /api/team/account/{email}/role":           "write_account",
+	"POST /api/campaign":                            "write_account",
+	"POST /api/campaign/logo":                       "write_account",
+	"DELETE /api/campaign/logo":                     "write_account",
+	"POST /api/request":                             "hosting_ip",
+	"GET /api/admin/requests":                       "none: authenticated read",
+	"POST /api/admin/requests/{id}":                 "write_account",
+	"POST /api/admin/campaigns":                     "write_account",
+	"POST /api/admin/campaigns/{slug}/coordination": "write_account",
+	"GET /api/campaigns":                            "anon_ip",
 }
 
 func TestEveryRouteDeclaresItsCeiling(t *testing.T) {
@@ -168,9 +169,16 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 	}
 }
 
-// The two moderation routes, in the scope that reaches them: the
+// The administration write routes, in the scope that reaches them: the
 // administration signs in on the apex, and `administrationOnly` sits BEFORE
 // the ceiling — so a coordination gets 403 there and proves nothing.
+//
+// Walked against routeLimits rather than written out. Enumerated by hand it
+// named two routes, and the test one function up skips every `POST
+// /api/admin/` on the grounds that this one covers them: a third arrived
+// declared write_account with nothing driving it, and both tests stayed
+// green. A list that decides what is checked, beside a list that decides
+// what is protected, loses both in one edit.
 func TestEveryAdministrationWriteRouteIsUnderItsCeiling(t *testing.T) {
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
@@ -182,21 +190,43 @@ func TestEveryAdministrationWriteRouteIsUnderItsCeiling(t *testing.T) {
 	if code := admin.signIn("admin@paraphe.test", "mot-de-passe-admin"); code != http.StatusOK {
 		t.Fatalf("administration sign-in: %d", code)
 	}
+	// `{…}` placeholders take harmless values: a wired route refuses before
+	// its handler ever reads them.
+	reachable := map[string]string{
+		"POST /api/admin/campaigns":                     "/api/admin/campaigns",
+		"POST /api/admin/requests/{id}":                 "/api/admin/requests/1",
+		"POST /api/admin/campaigns/{slug}/coordination": "/api/admin/campaigns/inconnue/coordination",
+	}
+	const filler = "POST /api/admin/campaigns"
+
 	for i := 1; i <= limitWriteAccount.events; i++ {
-		if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns",
+		if code, _ := admin.call(http.MethodPost, reachable[filler],
 			map[string]any{}); code == http.StatusTooManyRequests {
 			t.Fatalf("429 at attempt %d, below the ceiling of %d",
 				i, limitWriteAccount.events)
 		}
 	}
-	if code, _ := admin.call(http.MethodPost, "/api/admin/campaigns",
+	if code, _ := admin.call(http.MethodPost, reachable[filler],
 		map[string]any{}); code != http.StatusTooManyRequests {
-		t.Fatalf("POST /api/admin/campaigns: the bucket did not fill (%d)", code)
+		t.Fatalf("%s: the bucket did not fill (%d)", filler, code)
 	}
-	if code, _ := admin.call(http.MethodPost, "/api/admin/requests/1",
-		map[string]any{"decision": RequestRefused}); code != http.StatusTooManyRequests {
-		t.Errorf("POST /api/admin/requests/{id} answered %d with the bucket "+
-			"exhausted: it carries no ceiling any more", code)
+
+	for declared, class := range routeLimits {
+		if class != "write_account" ||
+			!strings.HasPrefix(declared, "POST /api/admin/") || declared == filler {
+			continue
+		}
+		path, covered := reachable[declared]
+		if !covered {
+			t.Errorf("%s is declared write_account and no case drives it: a "+
+				"ceiling nothing exercises is a ceiling nothing keeps", declared)
+			continue
+		}
+		if code, _ := admin.call(http.MethodPost, path,
+			map[string]any{}); code != http.StatusTooManyRequests {
+			t.Errorf("%s answered %d with the bucket exhausted: it carries no "+
+				"ceiling any more", declared, code)
+		}
 	}
 }
 

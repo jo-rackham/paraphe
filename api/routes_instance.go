@@ -316,6 +316,142 @@ func (s *Server) createCampaign(ctx context.Context, tx pgx.Tx, slug, name strin
 	return out, nil
 }
 
+type campaignCoordination struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// POST /api/admin/campaigns/{slug}/coordination — the way back into a
+// campaign whose coordination can no longer get in: an address that stopped
+// working, a password nobody wrote down, no relay to send a link with. The
+// bootstrap campaign has PARAPHE_ADMIN_* for that; a campaign born from an
+// approved request has nothing, and its one-time password was shown once.
+// Without this door the only remedy is an INSERT typed against production by
+// whoever holds the database password — the one kind of access that leaves no
+// trace anybody can read.
+//
+// It GRANTS, and it does not READ. The wall between an instance and the
+// campaigns it hosts is that the host cannot see the work: this handler
+// writes one row of `accounts` in the named campaign and reads nothing else
+// — no card, no note, no counter, not even a headcount. Opening a door and
+// walking through it are different acts, and only the first one is here.
+//
+// It leaves its author's address in `created_by`, which the campaign's own
+// coordination reads on "Mon équipe". A door opened behind somebody's back is
+// exactly what this route must not become.
+func (s *Server) routeGrantCoordination(w http.ResponseWriter, r *http.Request) {
+	slug := strings.ToLower(strings.TrimSpace(pathParam(r, "slug")))
+	var d campaignCoordination
+	if !readBody(w, r, &d) {
+		return
+	}
+	email := normalizeEmail(d.Email)
+	name := strings.TrimSpace(d.Name)
+
+	// the same bounds as every other door that writes an account
+	if !visible(name) || !storableEmail(email) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom et l'adresse email du compte de coordination sont requis.")
+		return
+	}
+	if !legible(name) || !legible(email) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom et l'adresse email ne doivent contenir ni retour à la "+
+				"ligne ni caractère invisible.")
+		return
+	}
+	if utf8.RuneCountInString(email) > maxEmailRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Cette adresse email est trop longue (254 caractères maximum).")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom ne doit pas dépasser 200 caractères.")
+		return
+	}
+
+	ctx := r.Context()
+	org, err := s.ReadOrg(ctx, s.tx(r), slug)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if org == nil {
+		errorJSON(w, http.StatusNotFound,
+			"Aucune campagne à l'adresse %s.%s.", slug, BaseDomain())
+		return
+	}
+	// A suspended campaign answers 503 on every one of its routes, sign-in
+	// included. Minting a credential there produces an account that opens
+	// nothing, and says it worked.
+	if org.State != OrgActive {
+		errorJSON(w, http.StatusConflict,
+			"La campagne %s est suspendue : un accès ouvert maintenant "+
+				"n'ouvrirait rien. Réactivez-la d'abord.", slug)
+		return
+	}
+
+	// org.ID, never the scope this request runs in: the row is born inside
+	// the named campaign. `insertAccount` is the one door that writes an
+	// account — a third copy of the mint-hash-insert shape is a third place
+	// to remember the day a column is added to it.
+	password, err := insertAccount(ctx, s.tx(r), org.ID, email, name,
+		RoleCoordination, nil, accountOf(r).Email)
+	// An address that already has an account here is REFUSED, never promoted
+	// and never switched back on: the same doctrine as approving a hosting
+	// request, and deactivation is a lever a campaign must keep against its
+	// own host. This refusal is the single fact the route discloses about a
+	// campaign's roster, and a refusal nobody can act on is worse.
+	if isUniqueViolation(err) {
+		// Logged, and at WARN. This refusal is the ONE fact the route
+		// discloses about a campaign's roster, so walking an address list
+		// through it reads that roster back one 409 at a time. Nothing here
+		// stops that — the refusal has to be actionable — but a silent
+		// oracle and a loud one are different things to be on the wrong end
+		// of, and only the successful grant used to say anything at all.
+		s.securityEvent(r, slog.LevelWarn, "coordination_grant_refused",
+			"slug", slug, "reason", "address already has an account",
+			"by", s.accountPseudonym(accountOf(r).Email))
+		errorJSON(w, http.StatusConflict,
+			"%s a déjà un compte sur cette campagne. Ouvrez l'accès sur une "+
+				"autre adresse : ce compte-ci n'est ni promu ni réactivé "+
+				"depuis l'instance.", email)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	token, err := s.mintInvitation(ctx, s.tx(r), org.ID, email)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.release(r) // before the relay, which may take thirty seconds
+	sent, warning := s.sendInvitation(invitation{
+		email: email, name: name, by: accountOf(r).Name,
+		campaign: org.Name, slug: slug, token: token,
+	})
+	s.securityEvent(r, slog.LevelWarn, "coordination_granted",
+		"slug", slug, "by", s.accountPseudonym(accountOf(r).Email))
+	reply := map[string]any{
+		"slug": slug, "address": fmt.Sprintf("%s.%s", slug, BaseDomain()),
+		"coordination": email,
+		// shown once, stored nowhere in the clear
+		"password":        password,
+		"invitation_sent": sent,
+	}
+	if warning != "" {
+		reply["invitation_error"] = warning
+	}
+	replyJSON(w, http.StatusCreated, reply)
+}
+
 type hostingDecision struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`

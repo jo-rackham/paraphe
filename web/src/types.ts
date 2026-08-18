@@ -39,6 +39,24 @@ export interface MayorCard extends Mayor {
    */
   updated_by_team?: string | null;
   updated_by_team_name?: string | null;
+  /**
+   * The team currently WORKING the card, beside the one that last wrote a
+   * status. Informative and nothing else: no card of a campaign is refused
+   * to a team of it, and this is what tells a volunteer somebody is already
+   * there instead of the card not being in the list.
+   *
+   * It is also what replaces the person when the card is not this team's:
+   * `volunteer` and `volunteer_name` come back null in that case, because a
+   * name never crosses a team where a team name does.
+   *
+   * TWO fields, for the reason `updated_by_team` is two: `team_name` is null
+   * for the NATIONAL scope, which is a real scope with no row in `teams`, so
+   * a screen reading the name alone showed a card the coordination had taken
+   * as free. `taken_by` is the answer, as TEXT — null is nobody, `"0"` is the
+   * national scope, a number is the team `team_name` names.
+   */
+  taken_by?: string | null;
+  team_name?: string | null;
 }
 
 export interface Note {
