@@ -240,3 +240,62 @@ func TestCampaignEnvMatchesTheSharedTable(t *testing.T) {
 		}
 	}
 }
+
+// The same referee, for the list that decides whether a campaign is told it
+// is unconfigured. A key dropped from one side's copy would stop blocking —
+// or start blocking — on that side alone, and the banner and the mass
+// mailing's refusal read one side while the interface reads the other.
+func TestOptionalCampaignKeysMatchTheSharedList(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "noyau", "campaign-optional.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shared struct {
+		Optional []string `json:"optional"`
+	}
+	if err := json.Unmarshal(raw, &shared); err != nil {
+		t.Fatal(err)
+	}
+	if len(shared.Optional) == 0 {
+		t.Fatal("the shared list is empty: this test would prove nothing")
+	}
+	expected := map[string]bool{}
+	for _, k := range shared.Optional {
+		expected[k] = true
+		if !slices.Contains(CampaignKeys, k) {
+			t.Errorf("campaign-optional.json names %q, which is no campaign key", k)
+		}
+	}
+	if !reflect.DeepEqual(optionalCampaignKeys, expected) {
+		t.Errorf("optionalCampaignKeys and campaign-optional.json disagree:"+
+			"\n Go:     %v\n shared: %v", optionalCampaignKeys, expected)
+	}
+}
+
+// The rule the list exists for, asserted on both halves: a campaign that
+// gives no telephone, no website and no sending town is configured; one that
+// left the shipped template in any of them is NOT, and that is what would
+// reach five hundred mayors verbatim.
+func TestAnEmptyOptionalKeyIsFilledButATemplateOneIsNot(t *testing.T) {
+	campaign := map[string]string{}
+	for _, k := range CampaignKeys {
+		campaign[k] = "une valeur réelle"
+	}
+	for _, k := range []string{"contact_tel", "site", "ville_envoi"} {
+		campaign[k] = ""
+	}
+	if got := UnfilledKeys(campaign); len(got) != 0 {
+		t.Errorf("UnfilledKeys = %v: leaving the campaign's own contact "+
+			"details empty is a choice, not a misconfiguration", got)
+	}
+	campaign["contact_tel"] = "06 00 00 00 00"
+	if got := UnfilledKeys(campaign); !slices.Contains(got, "contact_tel") {
+		t.Errorf("UnfilledKeys = %v: the shipped number is not an empty "+
+			"field, it is a number that goes out verbatim", got)
+	}
+	campaign["contact_tel"] = ""
+	campaign["signataire"] = ""
+	if got := UnfilledKeys(campaign); !slices.Contains(got, "signataire") {
+		t.Errorf("UnfilledKeys = %v: a required key stayed optional", got)
+	}
+}

@@ -44,6 +44,13 @@ var CampaignEnv = map[string]string{
 	"ville_envoi":                 "PARAPHE_SENDING_CITY",
 }
 
+// Keys a campaign may leave EMPTY without being told it is unconfigured.
+// noyau/campaign-optional.json is the referee both languages answer to, and
+// it carries the reasoning; noyau/messages.ts holds the other copy.
+var optionalCampaignKeys = map[string]bool{
+	"contact_tel": true, "site": true, "ville_envoi": true,
+}
+
 // Values of the shipped template: letting them through would send
 // "Prénom NOM" to thousands of mayors.
 var templateValues = map[string]bool{

@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Campaign keys a campaign may leave EMPTY, read by the tests of BOTH",
+    "languages — the same referee as campaign-env.json, for the same reason:",
+    "noyau/messages.ts and api/config.go each hold their own copy, and a copy",
+    "is what drifts.",
+    "",
+    "Not filling a field must not block a campaign. Three of the nine are the",
+    "campaign's own contact details, and a small team has the right to give a",
+    "telephone number to nobody, to run without a website, and to send its",
+    "letters without naming the town they leave from. The other six are what",
+    "makes a message CORRECT — the candidate, what is said about them, and who",
+    "signs — and a message missing one of those is a message that should not",
+    "leave.",
+    "",
+    "EMPTY is what this list allows, and nothing else. A key still carrying the",
+    "shipped template's value blocks whether it is in this list or not:",
+    "\"06 00 00 00 00\" reaches five hundred mayors verbatim, which is the exact",
+    "failure the gate exists for and has nothing to do with declining to give",
+    "one's number."
+  ],
+  "optional": ["contact_tel", "site", "ville_envoi"]
+}

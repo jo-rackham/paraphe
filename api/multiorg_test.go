@@ -559,11 +559,20 @@ func TestApprovalDoesNotCarryASubmittedIdentity(t *testing.T) {
 			t.Errorf("the campaign opened with a submitted %s: %q", k, v)
 		}
 	}
-	// and coordination is told the nine values are its own to fill
+	// and coordination is told which values are its own to fill: the ones a
+	// message is WRONG without. The campaign's own contact details are not
+	// among them — a team that gives no telephone number is a team, not a
+	// misconfiguration — so an approval announces six, not nine.
 	unfilled, _ := cfg["unfilled"].([]any)
-	if len(unfilled) != len(CampaignKeys) {
-		t.Errorf("%d unfilled key(s) announced, %d expected",
-			len(unfilled), len(CampaignKeys))
+	if len(unfilled) != len(CampaignKeys)-len(optionalCampaignKeys) {
+		t.Errorf("%d unfilled key(s) announced, %d expected: %v",
+			len(unfilled), len(CampaignKeys)-len(optionalCampaignKeys), unfilled)
+	}
+	for _, k := range unfilled {
+		if optionalCampaignKeys[k.(string)] {
+			t.Errorf("%q is announced unfilled although it is optional and "+
+				"empty: an empty optional key blocks nothing", k)
+		}
 	}
 }
 

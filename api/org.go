@@ -230,6 +230,20 @@ func reservedSlug(s string) bool { return reservedSlugs[s] }
 func UnfilledKeys(campaign map[string]string) []string {
 	unfilled := []string{}
 	for _, k := range CampaignKeys {
+		// EMPTY and TEMPLATE are two different states, and only the first is
+		// a choice. A campaign with no telephone and no website is a
+		// campaign, not a misconfiguration; a `contact_tel` still reading
+		// « 06 00 00 00 00 » is a number that reaches five hundred mayors
+		// verbatim, whether or not the key is optional.
+		//
+		// templateValue itself is NOT taught this: it also judges the public
+		// name the apex advertises, where empty means unnamed and always has.
+		if normaliseForTemplateCheck(campaign[k]) == "" {
+			if !optionalCampaignKeys[k] {
+				unfilled = append(unfilled, k)
+			}
+			continue
+		}
 		if templateValue(campaign[k]) {
 			unfilled = append(unfilled, k)
 		}

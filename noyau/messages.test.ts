@@ -14,6 +14,7 @@ import {
   InvalidTemplate,
   type Mayor,
   MissingField,
+  OPTIONAL_CAMPAIGN_KEYS,
   rank,
   recipientAddress,
   type Templates,
@@ -353,4 +354,81 @@ describe("the commune in the closing line", () => {
       expect(text).toContain(`${note}\n\n`);
     },
   );
+});
+
+// What a campaign is REQUIRED to fill, and what it is merely offered.
+//
+// The gate has two consumers that must agree — the banner on every screen and
+// the mass mailing's refusal to run, read from TypeScript; /api/config's
+// `unfilled`, read from Go — so the list lives in a shared file both answer
+// to, exactly like campaign-env.json.
+describe("what an unconfigured campaign means", () => {
+  const filled = (): Campaign =>
+    Object.fromEntries(
+      Object.keys(CFG).map((k) => [k, "une valeur réelle"]),
+    ) as Campaign;
+
+  it("keeps its own copy in step with the shared list", () => {
+    const shared = JSON.parse(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "campaign-optional.json"),
+        "utf8",
+      ),
+    ) as { optional: string[] };
+    expect(shared.optional.length).toBeGreaterThan(0);
+    expect([...OPTIONAL_CAMPAIGN_KEYS].sort()).toEqual(
+      [...shared.optional].sort(),
+    );
+  });
+
+  it("does not block a campaign that gives no telephone, site or town", () => {
+    const cfg = filled();
+    for (const k of OPTIONAL_CAMPAIGN_KEYS) cfg[k] = "";
+    expect(unfilledKeys(cfg)).toEqual([]);
+  });
+
+  // The distinction the whole change rests on: declining to give a number is
+  // a choice, leaving the shipped one is a number that goes out verbatim.
+  it("still blocks an optional key left at the shipped template", () => {
+    const cfg = filled();
+    cfg.contact_tel = "06 00 00 00 00";
+    cfg.site = "https://exemple.fr";
+    expect(unfilledKeys(cfg)).toEqual(["contact_tel", "site"]);
+  });
+
+  it("still blocks a required key that is empty", () => {
+    const cfg = filled();
+    cfg.signataire = "";
+    expect(unfilledKeys(cfg)).toEqual(["signataire"]);
+  });
+
+  // What the mayor actually receives once those three may be absent. The
+  // signature line joins them with « — », and a missing one used to leave
+  // the separator standing at the foot of every letter.
+  describe("the signature line", () => {
+    const engine = createEngine(REAL_TEMPLATES);
+
+    it("carries no orphan separator when a contact is missing", () => {
+      const cfg: Campaign = { ...CFG, contact_tel: "", site: "" };
+      for (const text of [
+        engine.email(ENDORSER, cfg).body,
+        engine.letter(ENDORSER, cfg),
+      ]) {
+        expect(text).toContain(cfg.contact_email);
+        expect(text).not.toMatch(/^ *— /m);
+        expect(text).not.toMatch(/ — *$/m);
+        expect(text).not.toContain(" —  — ");
+      }
+    });
+
+    it("is untouched when every contact is there", () => {
+      const cfg: Campaign = { ...CFG, contact_tel: "06 12 34 56 78" };
+      expect(engine.letter(ENDORSER, cfg)).toContain(
+        `06 12 34 56 78 — ${cfg.contact_email}`,
+      );
+      expect(engine.email(ENDORSER, cfg).body).toContain(
+        `06 12 34 56 78 — ${cfg.contact_email} — ${cfg.site}`,
+      );
+    });
+  });
 });

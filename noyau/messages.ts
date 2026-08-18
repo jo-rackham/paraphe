@@ -41,6 +41,11 @@ export const CAMPAIGN_KEYS = [
   "ville_envoi",
 ];
 
+// Keys a campaign may leave EMPTY without being told it is unconfigured.
+// noyau/campaign-optional.json is the referee both languages answer to, and
+// it carries the reasoning; api/config.go holds the other copy.
+export const OPTIONAL_CAMPAIGN_KEYS = ["contact_tel", "site", "ville_envoi"];
+
 // Values of the shipped template: letting them through would send
 // "Prénom NOM" to thousands of mayors.
 const TEMPLATE_VALUES = new Set([
@@ -415,8 +420,13 @@ export function unfilledKeys(cfg: Campaign): string[] {
         " ",
       )
       .trim();
+    // EMPTY and TEMPLATE are two different states, and only the first is a
+    // choice. A campaign with no telephone and no website is a campaign, not
+    // a misconfiguration; a `contact_tel` still reading « 06 00 00 00 00 »
+    // is a number that reaches five hundred mayors verbatim, whether or not
+    // the key is optional.
+    if (!v) return !OPTIONAL_CAMPAIGN_KEYS.includes(k);
     return (
-      !v ||
       TEMPLATE_VALUES.has(v.toLowerCase()) ||
       // the template's three placeholder syntaxes: [qui], {candidat}, <quoi>
       /\[[^\]]+\]/.test(v) ||
@@ -468,9 +478,33 @@ export function createEngine(templates: Templates): Engine {
       }
       return ch[key];
     });
+    // A SEPARATOR WITH NOTHING ON ONE SIDE IS A SEPARATOR NOBODY WROTE.
+    //
+    // The four templates sign off with the campaign's contact details joined
+    // by « — », and three of those are optional: a team may give no
+    // telephone number, run without a website, and not name the town its
+    // letters leave from. Substituted naively, a missing one leaves
+    // « — contact@… » at the foot of every letter — the orphan paragraph the
+    // rule below already refuses, one punctuation mark smaller.
+    //
+    // The line is rebuilt from its own parts, so a line where nothing came
+    // out empty is returned unchanged, byte for byte. A line of prose that
+    // happens to use « — » has no empty part and passes through the same
+    // way; only a placeholder that resolved to nothing can make one.
+    const joined = text
+      .split("\n")
+      .map((line) =>
+        line.includes(" — ")
+          ? line
+              .split(" — ")
+              .filter((part) => part.trim() !== "")
+              .join(" — ")
+          : line,
+      )
+      .join("\n");
     // an empty {argument_personnel} must not leave an orphan paragraph
     return (
-      text
+      joined
         .replaceAll("\r\n", "\n")
         .replaceAll("\r", "\n")
         .replace(/[ \t]+\n/g, "\n")
