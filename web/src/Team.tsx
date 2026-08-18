@@ -21,6 +21,7 @@ import {
   ThemeToggle,
   useViewFocus,
 } from "./common.tsx";
+import { navigate, useView } from "./route.tsx";
 import { GestionEquipe } from "./TeamAdmin.tsx";
 import { Tableau } from "./TeamDashboard.tsx";
 import { ListeServeur } from "./TeamMayors.tsx";
@@ -40,10 +41,23 @@ const VIEW_TITLES: Record<string, string> = {
   profil: "Mon profil",
 };
 
+// The address bar names the screen. A volunteer's back gesture — the one
+// they make without thinking, on a phone, in the middle of a card — used to
+// leave the application entirely, with a rewritten email and a half-typed
+// call note behind it. And a card now has an address, which is what makes
+// « regarde la fiche de Saint-Marcel » a link between two volunteers: no
+// card of a campaign is refused to a team of it any more, so that link
+// works for whoever receives it.
+const TEAM_VIEWS = ["guide", "tableau", "maires", "equipe", "profil"] as const;
+
 export default function Team({ config }: { config: ServerConfig }) {
   const [cfg, setCfg] = useState(config);
   const [me, setMe] = useState<Me | null>(null);
-  const [tab, setTab] = useState("guide");
+  const { view, card: routedCard, go: setTab } = useView(TEAM_VIEWS, "guide");
+  // « fiche » is not a view of its own in the address bar: a card lives
+  // UNDER the list it came from, so `précédent` from a card lands on the
+  // list rather than wherever the visitor happened to be before.
+  const tab = view === "maires" && routedCard ? "fiche" : view;
   // unsent card work (rewritten email, call note), keyed by INSEE: the
   // card is unmounted by any tab click — and by a lost session, exactly
   // when the note just failed to reach the server
@@ -130,14 +144,62 @@ export default function Team({ config }: { config: ServerConfig }) {
     })();
   }, [report]);
 
+  // THE CARD THE ADDRESS NAMES. One loader for the three ways in — a click,
+  // a link somebody shared, and « précédent » — because a deep link that
+  // renders an empty card is a link nobody sends twice.
+  //
+  // `loading` is a REF and holds the INSEE, not a boolean: React 19 runs
+  // effects twice in development, and the two runs must not fire two
+  // requests; and `onCardUpdated` replaces `chosen` after a status write,
+  // which must not read as a new card to fetch.
+  const loading = useRef<string | null>(null);
+  useEffect(() => {
+    if (!me || !routedCard) {
+      loading.current = null;
+      setChosen(null);
+      return;
+    }
+    if (loading.current === routedCard) return;
+    loading.current = routedCard;
+    // CLEARED BEFORE THE FETCH, and this line is the whole point of the
+    // ordering. Between two cards — which is what « précédent » and
+    // « suivant » do, and what a shared link clicked from a card does —
+    // `chosen` still held the PREVIOUS one while the next was in flight:
+    // the screen showed A's commune under B's address, and every control on
+    // it, « Enregistrer » included, was wired to A's INSEE. A status written
+    // in that window lands on the wrong mayor, in a base the whole campaign
+    // reads. Rendering nothing for a moment is the same shape as a cold
+    // load, which this screen already accepts.
+    setChosen(null);
+    let alive = true;
+    API.card(routedCard)
+      .then((c) => {
+        if (alive) setChosen(c);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        report(e);
+        // A card this account cannot read is not a screen to sit on: the
+        // list is where they can act, and REPLACE so « précédent » does not
+        // hand the same refusal back.
+        loading.current = null;
+        navigate(["maires"], { replace: true });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [me, routedCard, report]);
+
   // Session expired server-side: back to the form, saying so.
   useEffect(() => {
     const lost = () => {
       setMe(null);
       setChosen(null);
-      // without this the tab stays on "fiche", whose card has just been
-      // unmounted: signing back in lands on an empty screen
-      setTab("guide");
+      // REPLACE, not push: the session died where the visitor stood, and
+      // « précédent » onto the screen it died on is a dead end they did not
+      // choose. Without this the tab stays on « fiche », whose card has just
+      // been unmounted, and signing back in lands on an empty screen.
+      navigate([], { replace: true });
       setMessage({
         tone: "erreur",
         text:
@@ -155,7 +217,7 @@ export default function Team({ config }: { config: ServerConfig }) {
     } finally {
       setMe(null);
       setChosen(null);
-      setTab("guide");
+      navigate([], { replace: true });
       // the drafts carry notes about named mayors, and the next person on
       // this computer may be someone else entirely
       cardDrafts.current = {};
@@ -218,14 +280,11 @@ export default function Team({ config }: { config: ServerConfig }) {
   }
 
   const account = me.account;
-  const openCard = async (insee: string) => {
-    try {
-      setChosen(await API.card(insee));
-      setTab("fiche");
-    } catch (e) {
-      report(e);
-    }
-  };
+  // Opening a card is now going to its address; the effect above is what
+  // fetches it. So a card reached by a click, by a shared link, and by
+  // « précédent » all take the same path — three ways in and one loader,
+  // rather than a click path that works and a deep link that renders empty.
+  const openCard = (insee: string) => navigate(["maires", insee]);
 
   return (
     <Coquille

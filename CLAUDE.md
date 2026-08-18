@@ -128,6 +128,57 @@ licence for the RNE.
   endorsed X" is said at rank `has_endorsed` and nowhere else, and the
   endorser placeholders exist only for an endorser. `task messages` mails
   file 01 ONLY — 34,800 bulk emails would be spam.
+- **The address bar names the screen** (`web/src/route.tsx`), and it is
+  written BY HAND on the History API. `web/` has three dependencies; a
+  routing library brings twenty transitive packages for nested routes,
+  loaders and data APIs that five views and one card do not use — the same
+  reasoning that hand-wrote the S3 client and ported `difflib`. The store is
+  read through `useSyncExternalStore`, because `popstate` fires outside React
+  and a useState/useEffect pair tears under concurrent rendering; its
+  snapshot is the pathname STRING, since a freshly built array is a fresh
+  identity every call and React loops on that.
+  **THE PATH, NEVER THE FRAGMENT.** `#` belongs to the sign-in link.
+  Navigating drops whatever is in it, which is the second lock on the same
+  door: a token cannot reach a new history entry, a bookmark, or a URL
+  pasted into a support thread. Nothing was owed to the server — it has
+  always answered `index.html` for every extension-less path.
+  **One address per screen**: each mode's home is the BASE, not a segment
+  beside it, because two URLs rendering one view make a « précédent » that
+  appears to do nothing. An unknown view falls back to that home rather than
+  to a blank tree, and the known list is per MODE — the same path is a real
+  view in one and nonsense in another, which is what three modes on one
+  bundle means.
+  A card lives UNDER its list (`/maires/<insee>`), so « précédent » from a
+  card lands on the list. It is loaded by ONE effect keyed on the INSEE, so
+  a click, a shared link and a history move take the same path — a deep link
+  that renders an empty card is a link nobody sends twice. The guard is a
+  ref holding the INSEE, not a boolean: a status write replaces the card in
+  place and must not read as a new one to fetch.
+  **A FRAGMENT OR A QUERY IS NOT NOTHING TO DO.** `navigate` began with
+  « same path, nothing to do » and returned early — but the write is what
+  strips them, so the second lock was OFF for the commonest move there is:
+  tapping the tab you are already on, signing out at home. A `#jeton=…` left
+  by a `takeLinkToken` whose `replaceState` was refused, or a `?org=…`,
+  stayed standing. Same path and a CLEAN url is the only true no-op; same
+  path and a dirty one is scrubbed in place, adding no entry and waking no
+  listener, because the view did not change.
+  **A card is CLEARED before the next one is fetched.** Card to card — what
+  « précédent » and « suivant » do between two of them, and what a shared
+  link clicked from a card does — left the previous card on screen while the
+  next was in flight: A's commune under B's address, and every control,
+  « Enregistrer » included, wired to A's INSEE. A status against the wrong
+  mayor, in a base the whole campaign reads. The list→card→list path, which
+  is what the first tests exercised, never shows it.
+  **A redirect REPLACES**: a spent link, a session that died, a card that was
+  refused. « Précédent » must not walk back onto any of them.
+  `href` encodes and `segmentsOf` decodes — the round trip is asserted,
+  because a pipeline that writes one way and reads another matches no view
+  and falls back to the home with nothing said.
+  `src/testing/setup.ts` resets the location before each test — jsdom keeps
+  ONE per file, so a test that navigates would otherwise start the next one
+  on its screen. `e2e/09-navigation.spec.ts` presses the real button, with a
+  note typed into a card: unit tests can dispatch a `popstate`, they cannot
+  press « précédent ».
 - **Accessibility is guarded by `e2e/07-accessibility.spec.ts`**: axe scans
   (WCAG A + AA) every screen of the three modes, light AND dark, plus the
   keyboard path. Axe does NOT see everything — live-region timing and

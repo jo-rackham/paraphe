@@ -14,6 +14,7 @@ import {
 } from "./common.tsx";
 import { Moderation } from "./InstanceModeration.tsx";
 import { Demande } from "./InstanceRequest.tsx";
+import { navigate, useView } from "./route.tsx";
 import type { InstanceConfig, Me, Message } from "./types.ts";
 
 // The instance landing page — the domain apex, when several campaigns are
@@ -27,11 +28,19 @@ import type { InstanceConfig, Me, Message } from "./types.ts";
 
 type View = "accueil" | "demande" | "connexion";
 
+// The apex's three public screens have addresses, so « précédent » from the
+// hosting form goes back to the landing page instead of leaving the site.
+// Moderation is not among them: it is not a screen a visitor navigates TO,
+// it is what an administration's session turns « connexion » into.
+const INSTANCE_VIEWS = ["demande", "connexion"] as const;
+
 export default function Instance({ config }: { config: InstanceConfig }) {
   const [me, setMe] = useState<Me | null>(null);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
-  const [view, setView] = useState<View>("accueil");
+  const { view: routed, go } = useView(INSTANCE_VIEWS, "accueil");
+  const view = routed as View;
+  const setView = go as (v: View) => void;
 
   useEffect(() => {
     (async () => {
@@ -72,14 +81,20 @@ export default function Instance({ config }: { config: InstanceConfig }) {
         setReady(true);
       }
     })();
-  }, []);
+    // `setView` is `useView`'s `go`, a useCallback over a constant home:
+    // referentially stable, so declaring it keeps this a mount effect and
+    // costs nothing. Silencing the rule instead would be claiming a stale
+    // closure is wanted here, and it is not.
+  }, [setView]);
 
   const signOut = async () => {
     try {
       await API.signOut();
     } finally {
       setMe(null);
-      setView("accueil");
+      // REPLACE: « précédent » must not walk back onto the moderation queue
+      // this session no longer opens.
+      navigate([], { replace: true });
     }
   };
 

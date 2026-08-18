@@ -33,10 +33,17 @@ import {
   requestedSlug,
   untouchedCampaign,
 } from "./prefill.ts";
+import { navigate, useView } from "./route.tsx";
 import type { Campaign, Mayor, Message, Tracking } from "./types.ts";
 
 // Browser mode: no data leaves the computer. The only network request is
 // downloading the list published next to the application.
+
+// Addresses here too, and the mode that needs them most: nothing behind
+// this page, so a visitor who presses « précédent » on a card leaves for
+// wherever they came from — with their notes still in IndexedDB and no
+// screen showing them. A card lives under the list, `/liste/<insee>`.
+const BROWSER_VIEWS = ["liste", "guide", "donnees", "campagne"] as const;
 
 const VIEW_TITLES: Record<string, string> = {
   liste: "Les maires",
@@ -57,8 +64,26 @@ export default function Browser() {
   // carries it because it walks the settings.
   const [logo, setLogo] = useState("");
   const [personalNote, setPersonalNote] = useState("");
-  const [tab, setTab] = useState("liste");
-  const [chosen, setChosen] = useState<Mayor | null>(null);
+  const {
+    view,
+    card: routedCard,
+    go: setTab,
+  } = useView(BROWSER_VIEWS, "liste");
+  const tab = view === "liste" && routedCard ? "fiche" : view;
+  // The card comes from what this browser HOLDS — no network in this mode,
+  // by promise. So a shared link resolves against the list already
+  // downloaded; an INSEE outside it lands on the list rather than on an
+  // empty card, and the visitor can widen the pool themselves. Fetching the
+  // full file on their behalf would be a download nobody asked for, in the
+  // one mode whose whole claim is that nothing happens without them.
+  const chosen = routedCard
+    ? (mayors.find((m) => m.insee_code === routedCard) ?? null)
+    : null;
+  useEffect(() => {
+    if (routedCard && mayors.length > 0 && !chosen) {
+      navigate([], { replace: true });
+    }
+  }, [routedCard, mayors.length, chosen]);
   const [q, setQ] = useState("");
   const [rankFilter, setRankFilter] = useState("has_endorsed");
   const [deptFilter, setDeptFilter] = useState("");
@@ -591,8 +616,9 @@ export default function Browser() {
                     deptFilter={deptFilter}
                     setDeptFilter={setDeptFilter}
                     onChoose={(m) => {
-                      setChosen(m);
-                      setTab("fiche");
+                      // the shared row type carries an optional code; a row
+                      // without one is not a card to address
+                      if (m.insee_code) navigate(["liste", m.insee_code]);
                     }}
                     loadedList={loadedList}
                     onComplete={() => fetchList("complete")}
@@ -612,7 +638,7 @@ export default function Browser() {
                   notes={(
                     tracking[chosen.insee_code as string]?.notes ?? []
                   ).map((n) => ({ ...n, volunteer: null }))}
-                  onBack={() => setTab("liste")}
+                  onBack={() => navigate([])}
                   onStatus={async (status, note) => {
                     const insee = chosen.insee_code as string;
                     const e = await DB.saveTracking(insee, status, note);
