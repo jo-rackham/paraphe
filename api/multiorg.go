@@ -175,15 +175,14 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 // coordination are NOT overwritten: only the keys actually provided by the
 // configuration are reapplied, so PARAPHE_CANDIDATE remains a way to fix a
 // campaign without touching the database.
-// nameOverride: the organisation's public name follows the candidate, and
-// is only reimposed when an operator gave PARAPHE_CANDIDATE explicitly.
-func nameOverride(cfg *Config) *string {
-	if v, ok := cfg.Overrides["candidat"]; ok {
-		return &v
-	}
-	return nil
-}
-
+//
+// The NAME is seeded from the candidate and never reimposed. A campaign
+// bootstrapped from a file has nothing else to be called at birth — there is
+// no hosting request to name it — but a campaign is not its candidate, and
+// the name is a field its coordination edits. Reapplied at every start, an
+// operator's PARAPHE_CANDIDATE would undo that edit silently, which is the
+// exact failure the campaign keys and the batch size beside it already
+// describe.
 func ensureOrg(ctx context.Context, tx pgx.Tx, slug string, cfg *Config) (int, error) {
 	campaign, err := json.Marshal(cfg.Campaign)
 	if err != nil {
@@ -217,11 +216,10 @@ func ensureOrg(ctx context.Context, tx pgx.Tx, slug string, cfg *Config) (int, e
 		"INSERT INTO orgs(slug, name, campaign, batch_size, state, created_at) "+
 			"VALUES($1,$2,$3::jsonb,$4,'active',$5) "+
 			"ON CONFLICT (slug) DO UPDATE SET "+
-			"name=COALESCE($7, orgs.name), "+
 			"campaign=orgs.campaign || $6::jsonb, "+
-			"batch_size=COALESCE($8, orgs.batch_size) RETURNING id",
+			"batch_size=COALESCE($7, orgs.batch_size) RETURNING id",
 		slug, cfg.Campaign["candidat"], string(campaign), cfg.BatchSize,
-		shortTimestamp(), string(overrides), nameOverride(cfg),
+		shortTimestamp(), string(overrides),
 		cfg.BatchSizeOverride).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("bootstrap organisation %q: %w", slug, err)

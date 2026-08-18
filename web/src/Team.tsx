@@ -453,7 +453,10 @@ function Coquille({
       <header>
         <Marque
           logo={cfg.logo}
-          sous={cfg.campaign?.candidat}
+          // the CAMPAIGN's name, not its candidate's: what an administrator
+          // moderated, what the annuaire lists, and what a campaign whose
+          // candidate is not yet decided still has
+          sous={cfg.organisation?.name}
           onHome={me && setTab ? () => setTab("guide") : undefined}
         />
         {me && setTab && (

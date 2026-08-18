@@ -410,15 +410,17 @@ export const updateCampaign = (
   campaign: Record<string, string>,
   batchSize?: number,
   listed?: boolean,
+  name?: string,
 ): Promise<{
   campaign: Record<string, string>;
   batch_size: number;
   listed: boolean;
   unfilled: string[];
+  name: string;
 }> =>
   call("campaign", {
     method: "POST",
-    body: { campaign, batch_size: batchSize, listed },
+    body: { campaign, batch_size: batchSize, listed, name },
   });
 
 // The logo is its own call: an image does not fit in what a campaign body

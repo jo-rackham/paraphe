@@ -23,6 +23,13 @@ type campaignRequest struct {
 	// nil = untouched: the apex directory listing is edited from the same
 	// screen as the campaign, and a save must not flip it by omission
 	Listed *bool `json:"listed"`
+	// The campaign's own name, and nil = untouched for the same reason. It
+	// USED to be `candidat`, copied into orgs.name at every save — so a
+	// campaign approved as « Alliance écologiste » renamed itself to
+	// « Marie Dupont » the first time its coordination filled the form, on
+	// the apex's public directory as well as in its own header. A campaign
+	// is not its candidate: it presents one.
+	Name *string `json:"name"`
 }
 
 // POST /api/campaign — coordination fills in its campaign.
@@ -43,8 +50,8 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// the acceptance path copies a campaign already bounded at
-		// maxCampaignRunes; the edit path bounded nothing, and orgs.name
-		// follows `candidat` into every unauthenticated /api/config
+		// maxCampaignRunes; the edit path bounded nothing, and every one of
+		// these values reaches an unauthenticated /api/config
 		if utf8.RuneCountInString(v) > maxCampaignRunes {
 			errorJSON(w, http.StatusBadRequest,
 				"Le champ « %s » ne doit pas dépasser %d caractères.",
@@ -53,15 +60,37 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 		values[k] = strings.TrimSpace(v)
 	}
-	// `candidat` becomes `orgs.name` below, and `orgs.name` is what the apex
-	// prints in its PUBLIC directory of hosted campaigns. A right-to-left
-	// override there reverses a neighbouring campaign's line on a page no
-	// campaign owns — the one place a campaign's own text leaves its walls.
+	// Both reach an unauthenticated /api/config, and the NAME goes further
+	// still: the apex prints it in its PUBLIC directory of hosted campaigns.
+	// A right-to-left override there reverses a neighbouring campaign's line
+	// on a page no campaign owns — the one place a campaign's own text leaves
+	// its walls.
 	if candidate := values["candidat"]; candidate != "" && !legible(candidate) {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nom du candidat ne doit contenir ni retour à la ligne ni "+
 				"caractère invisible.")
 		return
+	}
+	// nil = untouched. A name is allowed to be EMPTIED — an unnamed campaign
+	// is a state the directory already knows, and it is where every campaign
+	// bootstrapped without one starts — but a name that is not empty has to
+	// be one a human reads: `visible` refuses the zero-width runes TrimSpace
+	// leaves behind, the same reading the two public forms use.
+	name := org.Name
+	if d.Name != nil {
+		name = strings.TrimSpace(*d.Name)
+		if utf8.RuneCountInString(name) > maxNameRunes {
+			errorJSON(w, http.StatusBadRequest,
+				"Le nom de la campagne ne doit pas dépasser %d caractères.",
+				maxNameRunes)
+			return
+		}
+		if name != "" && (!legible(name) || !visible(name)) {
+			errorJSON(w, http.StatusBadRequest,
+				"Le nom de la campagne ne doit contenir ni retour à la ligne "+
+					"ni caractère invisible.")
+			return
+		}
 	}
 	if len(unknown) > 0 {
 		errorJSON(w, http.StatusBadRequest,
@@ -98,15 +127,9 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
-		// The name follows the candidate: it is what /api/config returns as
-		// organisation.name and what the multi-campaign apex lists. Left
-		// out, it stayed at the template value for the campaign's whole
-		// life, however many times coordination filled the form.
 		"UPDATE orgs SET campaign="+req.p(string(raw))+"::jsonb, "+
 			"batch_size="+req.p(batchSize)+", listed="+req.p(listed)+", "+
-			"name=COALESCE(NULLIF("+
-			req.p(strings.TrimSpace(values["candidat"]))+",''), name) "+
-			"WHERE id=$1",
+			"name="+req.p(name)+" WHERE id=$1",
 		req.args...); err != nil {
 		s.failure(w, err)
 		return
@@ -116,7 +139,7 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	// campaign validated under one name can rename itself afterwards, and
 	// the apex lists the new one. Traced, so the rename is at least
 	// visible to whoever operates the instance.
-	if name := strings.TrimSpace(values["candidat"]); name != "" && name != org.Name {
+	if name != org.Name {
 		slog.Info("campaign renamed itself",
 			"slug", org.Slug, "from", org.Name, "to", name)
 	}
@@ -126,7 +149,7 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	replyJSON(w, http.StatusOK, map[string]any{
 		"campaign": values, "batch_size": batchSize, "listed": listed,
-		"unfilled": UnfilledKeys(values),
+		"unfilled": UnfilledKeys(values), "name": name,
 	})
 }
 

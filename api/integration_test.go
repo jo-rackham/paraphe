@@ -1769,10 +1769,18 @@ func TestAnUnknownPoolIsRefused(t *testing.T) {
 	}
 }
 
-// The organisation's public name is what /api/config returns and what the
-// multi-campaign apex lists; it stayed at the template value for the
-// campaign's whole life, however many times coordination filled the form.
-func TestTheCampaignNameFollowsTheCandidate(t *testing.T) {
+// A CAMPAIGN IS NOT ITS CANDIDATE: it presents one.
+//
+// The public name used to be copied from `candidat` at every save, so a
+// campaign approved as « Alliance écologiste » renamed itself to « Marie
+// Dupont » the first time its coordination filled the form — in its own
+// header, and on the apex's PUBLIC directory, where the name an
+// administrator moderated is the only thing anyone recognises it by.
+//
+// It is now a field of its own, and `nil` leaves it alone: a client that
+// says nothing about the name must not blank it, which is the same rule as
+// the directory listing beside it.
+func TestTheCampaignNameIsItsOwnAndTheCandidateDoesNotMoveIt(t *testing.T) {
 	s, srv := testServer(t)
 	email := "coord@exemple.fr"
 	pw := createAccount(t, s, email, RoleCoordination, nil)
@@ -1780,6 +1788,17 @@ func TestTheCampaignNameFollowsTheCandidate(t *testing.T) {
 	if code := c.signIn(email, pw); code != http.StatusOK {
 		t.Fatalf("sign-in: %d", code)
 	}
+	nameOf := func() string {
+		var name string
+		if err := s.pool.QueryRow(context.Background(),
+			"SELECT name FROM orgs WHERE slug=$1", testSlug).Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+	execAsMaintenance(t, s, "UPDATE orgs SET name=$1 WHERE slug=$2",
+		"Alliance écologiste", testSlug)
+
 	campaign := map[string]any{}
 	for _, k := range CampaignKeys {
 		campaign[k] = "valeur réelle et remplie"
@@ -1789,14 +1808,32 @@ func TestTheCampaignNameFollowsTheCandidate(t *testing.T) {
 		map[string]any{"campaign": campaign}); code != http.StatusOK {
 		t.Fatalf("saving the campaign: %d %v", code, body)
 	}
-	var name string
-	if err := s.pool.QueryRow(context.Background(),
-		"SELECT name FROM orgs WHERE slug=$1", testSlug).Scan(&name); err != nil {
-		t.Fatal(err)
+	if got := nameOf(); got != "Alliance écologiste" {
+		t.Errorf("orgs.name = %q after a save naming a candidate: the campaign "+
+			"renamed itself behind the name an administrator approved", got)
 	}
-	if name != "Camille Réel" {
-		t.Errorf("orgs.name = %q: the campaign's public name never follows "+
-			"what coordination typed", name)
+
+	// and it is edited by naming it
+	code, body := c.call(http.MethodPost, "/api/campaign",
+		map[string]any{"campaign": campaign, "name": "  Alliance verte  "})
+	if code != http.StatusOK {
+		t.Fatalf("renaming the campaign: %d %v", code, body)
+	}
+	if got := nameOf(); got != "Alliance verte" {
+		t.Errorf("orgs.name = %q: the name a coordination typed did not take", got)
+	}
+	if body["name"] != "Alliance verte" {
+		t.Errorf("the answer carries name=%v: the screen would show the old one "+
+			"until the next load", body["name"])
+	}
+	// a name of nothing but zero-width runes survives TrimSpace and would
+	// reach the apex directory as a blank line
+	if code, _ := c.call(http.MethodPost, "/api/campaign",
+		map[string]any{"campaign": campaign, "name": "​​"}); code != http.StatusBadRequest {
+		t.Errorf("a name of invisible runes: %d, want 400", code)
+	}
+	if got := nameOf(); got != "Alliance verte" {
+		t.Errorf("orgs.name = %q after a refusal", got)
 	}
 }
 

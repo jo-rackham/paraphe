@@ -500,6 +500,41 @@ One instance can host several campaigns, one per subdomain.
 - Campaign configuration lives **in the database, per organisation**, edited
   by coordination ("Mon équipe"). The campaign `PARAPHE_*` only bootstrap the
   first one.
+- **A CAMPAIGN IS NOT ITS CANDIDATE: it presents one.** `orgs.name` used to be
+  copied from `candidat` at every save, so a campaign approved as « Alliance
+  écologiste » renamed itself to its candidate the first time its coordination
+  filled the form — in its own header, and in the apex's PUBLIC directory,
+  where the name an administrator moderated is the only thing anyone
+  recognises it by. It is a field of its own now, edited on the same screen,
+  and `nil` leaves it alone: a client that says nothing about the name must
+  not blank it, the same rule as the `listed` toggle beside it. Empty is a
+  supported state — the directory has always skipped an unnamed campaign.
+  `ensureOrg` still SEEDS it from the candidate, because a campaign
+  bootstrapped from a file has nothing else to be called at birth, and it
+  never reimposes it: reapplied at every start, an operator's
+  `PARAPHE_CANDIDATE` would undo the edit silently, which is the failure the
+  campaign keys and the batch size beside them already describe.
+- **Not filling a field must not block a campaign; leaving the TEMPLATE in it
+  must.** Three of the nine keys are the campaign's own contact details
+  (`contact_tel`, `site`, `ville_envoi`), and a small team has the right to
+  give a telephone number to nobody, to run without a website, and not to
+  name the town its letters leave from. Empty, they no longer raise the
+  "campaign not configured" banner or stop the mass mailing. Still carrying
+  `06 00 00 00 00` they do, whether optional or not: that number reaches five
+  hundred mayors verbatim, which is the exact failure the gate exists for and
+  has nothing to do with declining to give one's own.
+  The list is `noyau/campaign-optional.json`, the referee both languages
+  answer to — the same dispositif as `campaign-env.json`, because
+  `noyau/messages.ts` and `api/config.go` each hold a copy and a copy drifts:
+  the banner and the mailing's refusal read one, `/api/config`'s `unfilled`
+  reads the other.
+  **And a separator with nothing on one side is a separator nobody wrote.**
+  The four templates sign off with those details joined by « — », so a
+  missing one left « — contact@… » at the foot of every letter. `render`
+  rebuilds each line from its own parts and drops the empty ones — a line
+  where nothing came out empty is returned byte for byte, and a line of prose
+  using « — » has no empty part to drop. It is the orphan-paragraph rule
+  beside it, one punctuation mark smaller.
 - A public request form plus moderation: a request creates NOTHING until an
   instance administrator approves it. Without that, the first abuse is
   squatting a candidate's name, with no recourse for the campaign squatted.

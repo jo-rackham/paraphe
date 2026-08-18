@@ -553,8 +553,8 @@ export function Marque({
       type="button"
       className="marque marque-lien"
       onClick={onHome}
-      // the subtitle is part of the name a screen reader hears — the campaign's
-      // candidate in team mode, « version navigateur » in browser mode. An
+      // the subtitle is part of the name a screen reader hears — the
+      // campaign's name in team mode, « version navigateur » in browser. An
       // aria-label REPLACES the content, so it has to carry `sous` itself or
       // the mark stops announcing which campaign it belongs to.
       aria-label={

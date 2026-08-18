@@ -70,6 +70,7 @@ function ConfigurationCampagne({
   const [values, setValues] = useState<Record<string, string>>(cfg.campaign);
   const [batchSize, setBatchSize] = useState(String(cfg.batch_size));
   const [listed, setListed] = useState(cfg.organisation?.listed ?? true);
+  const [name, setName] = useState(cfg.organisation?.name ?? "");
   const [sending, setSending] = useState(false);
   const [logoSending, setLogoSending] = useState(false);
   const [busy, done] = useSubmitGuard();
@@ -79,7 +80,15 @@ function ConfigurationCampagne({
     if (busy()) return; // a REF: state is a render behind
     setSending(true);
     try {
-      const r = await API.updateCampaign(values, Number(batchSize), listed);
+      const r = await API.updateCampaign(
+        values,
+        Number(batchSize),
+        listed,
+        // Only where the field is shown. Sent from a screen that does not
+        // offer it, an empty string would UNNAME the campaign — `nil` is
+        // what leaves it alone, and that is the same rule as `listed`.
+        cfg.organisation ? name : undefined,
+      );
       onCfg({
         ...cfg,
         campaign: r.campaign,
@@ -88,6 +97,7 @@ function ConfigurationCampagne({
         organisation: cfg.organisation && {
           ...cfg.organisation,
           listed: r.listed,
+          name: r.name,
         },
       });
       onMessage({
@@ -114,6 +124,23 @@ function ConfigurationCampagne({
         manque, l'application le dit sur chaque page et le publipostage de masse
         refuse de tourner.
       </p>
+      {/* The campaign's own name, and not the candidate's: it is what the
+          header shows, what the instance's annuaire lists, and what an
+          administrator moderated. Only where there IS an instance to be
+          named on — a single-campaign deployment has no annuaire and no
+          neighbour to be told apart from. */}
+      {cfg.organisation && (
+        <p>
+          <label>
+            Nom de la campagne
+            <input
+              value={name}
+              maxLength={200}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        </p>
+      )}
       {/* h3 group titles: under this card's own h2 */}
       <ChampsCampagne
         values={values}
