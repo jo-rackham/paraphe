@@ -41,6 +41,22 @@ describe("httpUrl", () => {
     expect(httpUrl(undefined)).toBeUndefined();
     expect(httpUrl(null)).toBeUndefined();
   });
+  // A HOST wearing a path's clothes, and the reason testing the resolved
+  // protocol cannot see it: `new URL("//ailleurs.test", origin)` resolves to
+  // `https://ailleurs.test`, so the check passed and the raw string went
+  // into the href — where the browser reads the same thing and leaves the
+  // campaign. It is what an operator's `//` typo does to every sign-in
+  // screen and every footer.
+  it("rejects a value that names another host without saying so", () => {
+    expect(httpUrl("//ailleurs.test/paraphe")).toBeUndefined();
+    expect(httpUrl("//ailleurs.test")).toBeUndefined();
+    expect(httpUrl("//")).toBeUndefined();
+    // …and naming one OUT LOUD is still allowed: that is a browser version
+    // published elsewhere, which is a supported deployment.
+    expect(httpUrl("https://ailleurs.test/paraphe/")).toBe(
+      "https://ailleurs.test/paraphe/",
+    );
+  });
 });
 
 describe("Alerte", () => {

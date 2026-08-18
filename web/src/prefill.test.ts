@@ -170,6 +170,28 @@ describe("fetching the proposed campaign", () => {
     ]);
   });
 
+  // The check that makes « a link names a campaign, never a host » true is
+  // in `requestedSlug` today, and this is the function that INTERPOLATES the
+  // label into a hostname. Asked directly — which is one new call site away
+  // — it must refuse rather than resolve somebody else's machine.
+  it("refuses a slug that names a host, whoever asked", async () => {
+    withDomain("paraphe.fr");
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", (url: string) => {
+      seen.push(url);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    for (const forged of [
+      "ailleurs.test",
+      "campagne@ailleurs.test",
+      "campagne.ailleurs.test",
+      "campagne/../..",
+    ]) {
+      await expect(fetchCampaign(forged)).rejects.toThrow(/ne nomme pas/);
+    }
+    expect(seen, "a forged slug reached the network").toEqual([]);
+  });
+
   // A captive portal answers 200 with HTML, and adopting that would fill
   // every message with nothing at all
   it("refuses an answer that is not a campaign", async () => {

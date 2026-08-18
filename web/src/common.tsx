@@ -906,9 +906,20 @@ export function TableMaires({ children }: { children: ReactNode }) {
  * should fail to render rather than fire a script. Resolved against the
  * current origin, so a relative path (« /navigateur/ ») still works; only
  * http and https are returned.
+ *
+ * `//` IS A HOST, NOT A PATH, and testing the resolved protocol cannot see
+ * it: `new URL("//ailleurs.test", "https://campagne.paraphe.org")` resolves
+ * to `https://ailleurs.test` — the check passes, and the raw string goes
+ * into the href, where the browser reads the same thing. A value meant to
+ * name a path on this instance would then take a volunteer off it, from the
+ * campaign's own sign-in screen and its own footer. What this refuses is a
+ * value that names ANOTHER HOST without saying so; naming one out loud
+ * (`https://…`) stays allowed, because that is what a browser version
+ * published elsewhere is.
  */
 export function httpUrl(raw: string | undefined | null): string | undefined {
   if (!raw) return undefined;
+  if (raw.startsWith("//")) return undefined;
   try {
     const u = new URL(raw, window.location.origin);
     return u.protocol === "http:" || u.protocol === "https:" ? raw : undefined;

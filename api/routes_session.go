@@ -108,6 +108,10 @@ func browserVersionFor(base, slug string) string {
 	if base == "" || BaseDomain() == "" {
 		return base
 	}
+	// Not a fallback for a failure — `validBrowserVersionURL` parsed this
+	// same string at startup, so there is none to fall back from. It is a
+	// guard against dereferencing the nil `url.Parse` returns beside an
+	// error, on a path that check has already closed.
 	u, err := url.Parse(base)
 	if err != nil {
 		return base
@@ -138,6 +142,18 @@ func validBrowserVersionURL(raw string) error {
 		return refuse(fmt.Sprintf("it is not a URL (%v)", err))
 	}
 	if u.Scheme == "" {
+		// `//ailleurs.test/x` NAMES A HOST and starts with a slash, so a
+		// "does it begin with /" test reads it as a path on this instance.
+		// It is not: the browser resolves it against the page's scheme and
+		// leaves the origin. The link sits on every campaign's sign-in
+		// screen and in every footer, so the value would take volunteers off
+		// the campaign under the campaign's own name — and neither this
+		// check nor the interface's `httpUrl`, which tests the RESOLVED
+		// protocol and sees `https:`, said a word about it.
+		if strings.HasPrefix(raw, "//") {
+			return refuse("`//host` names another host, not a path on this " +
+				"instance — write the scheme out if that is what you mean")
+		}
 		if !strings.HasPrefix(raw, "/") {
 			return refuse("a relative path resolves against whatever screen " +
 				"the visitor is on")

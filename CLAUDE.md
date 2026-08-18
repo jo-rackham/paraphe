@@ -113,6 +113,25 @@ a train, has a door, and it is on the page they already landed on.
   downloads the logo and inlines it as a data URI, because it promises
   nothing leaves the browser. Left out of the policy, the campaign was
   adopted without its mark and the failure showed in a console alone.
+- **`//` IS A HOST, AND NEITHER GUARD COULD SEE IT.** Three adversarial
+  agents found the same one independently. `PARAPHE_BROWSER_VERSION_URL`
+  is checked at startup — an http(s) URL, or a path on this instance — and
+  `//ailleurs.test/x` begins with a slash, so a "is it absolute" test read
+  it as a path. It is not: the browser resolves it against the page's
+  scheme. The interface's own `httpUrl` could not catch it either, because
+  it tests the RESOLVED protocol and `new URL("//ailleurs.test", origin)`
+  resolves to `https://ailleurs.test` — the check passes and the raw string
+  goes into the href, where the browser reads the same thing. One operator
+  typo, and every campaign's sign-in screen and every footer carried a link
+  off the campaign under the campaign's own name. Refused in BOTH places
+  now: at startup where the operator is looking, and in `httpUrl`, which is
+  where every operator-set URL becomes an href (`source_url` had the same
+  hole). Naming another host OUT LOUD stays allowed — a browser version
+  published elsewhere is a supported deployment.
+  **The slug is checked where the host is BUILT**, not only in
+  `requestedSlug` where it happened to be checked: `fetchCampaign`
+  interpolates that label into a hostname, and one new call site would have
+  withdrawn the promise silently.
 - The e2e suite builds it with `PARAPHE_BASE_DOMAIN` DELIBERATELY EMPTY, as
   the image is: a green journey there is a statement about the injection and
   nothing else.

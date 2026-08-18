@@ -491,6 +491,44 @@ describe("the deployment files", () => {
     ).toContain('meta[name="paraphe-mode"]');
   });
 
+  // …and EVERY marker, not that one. There are two now — `paraphe-mode`,
+  // which says an API answers here, and `paraphe-instance`, which says which
+  // instance a `?org=` resolves against — stamped by two functions in one
+  // file and read in two others. The test above walks one row of that grid,
+  // and a grid walked at some positions and not others certifies an
+  // agreement that does not hold: rename the second marker on the server,
+  // rename it in the Go test beside it, and both sides stay green while
+  // `?org=` goes inert on every hosted campaign.
+  //
+  // So the LIST is read out of the stamper rather than written here: whoever
+  // adds a third marker cannot add a stamper without a reader.
+  it("stamp no marker the interface does not read", () => {
+    const go = readFileSync(join(ROOT, "api/pages.go"), "utf8");
+    const stamped = [...go.matchAll(/<meta name="(paraphe-[a-z-]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(
+      [...new Set(stamped)].sort(),
+      "api/pages.go stamps a different set of markers than this test knows: " +
+        "if that is a new one, the check below already demands its reader",
+    ).toEqual(["paraphe-instance", "paraphe-mode"]);
+
+    const src = join(ROOT, "web", "src");
+    const readers = readdirSync(src)
+      .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
+      .filter((f) => !f.includes(".test."))
+      .map((f) => readFileSync(join(src, f), "utf8"))
+      .join("\n");
+    for (const name of new Set(stamped)) {
+      expect(
+        readers,
+        `the image stamps ${name} and no interface file reads it: the ` +
+          "marker travels from api/pages.go to a screen, and a stamper " +
+          "without a reader is a page carrying an answer nobody asks for",
+      ).toContain(`meta[name="${name}"]`);
+    }
+  });
+
   // A ":" in an unquoted command makes YAML read the line as a mapping:
   // GitHub rejects the ENTIRE workflow, and without a remote nothing
   // signals it.

@@ -118,6 +118,13 @@ func TestABrowserVersionURLThatIsNotOneIsRefusedAtStartup(t *testing.T) {
 		"navigateur/",                 // same
 		"https://",                    // names no host
 		"http://exemple.test/\x00nul", // not a URL at all
+		// A HOST wearing a path's clothes. It begins with a slash, so a
+		// "is it absolute" test passes it, and the browser then resolves it
+		// against the page's scheme and leaves the origin — the link is on
+		// every campaign's sign-in screen and in every footer.
+		"//ailleurs.test/paraphe",
+		"//ailleurs.test",
+		"//",
 	} {
 		if err := validBrowserVersionURL(poison); err == nil {
 			t.Errorf("validBrowserVersionURL(%q) accepted it", poison)

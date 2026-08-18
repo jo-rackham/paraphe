@@ -104,8 +104,10 @@ const markedInstance = (): string =>
     ?.getAttribute("content")
     ?.trim() ?? "";
 
-export const instanceDomain = (): string =>
-  markedInstance() || (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
+const bakedInstance = (): string =>
+  (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
+
+export const instanceDomain = (): string => markedInstance() || bakedInstance();
 
 /**
  * Where a campaign of this instance publishes itself.
@@ -131,8 +133,7 @@ function publicCampaignUrl(slug: string): string {
     const port = window.location.port ? `:${window.location.port}` : "";
     return `${window.location.protocol}//${slug}.${marked}${port}/api/campaign/public`;
   }
-  const baked = (import.meta.env.PARAPHE_INSTANCE_DOMAIN ?? "").trim();
-  return `https://${slug}.${baked}/api/campaign/public`;
+  return `https://${slug}.${bakedInstance()}/api/campaign/public`;
 }
 
 /** The slug asked for in the address bar, or null. */
@@ -149,6 +150,14 @@ export function requestedSlug(search: string): string | null {
  * credentials.
  */
 export async function fetchCampaign(slug: string): Promise<Offer> {
+  // Checked HERE, where the host is built, not only in `requestedSlug` where
+  // it happens to be checked today. This label is interpolated into a
+  // hostname: a slug carrying a `@`, a `/` or a dot names a different
+  // machine, and « a link may name a campaign, never a host » is a promise
+  // one new call site would otherwise quietly withdraw.
+  if (!validSlug(slug)) {
+    throw new Error(`« ${slug} » ne nomme pas une campagne.`);
+  }
   const url = publicCampaignUrl(slug);
   // `redirect: "error"`: the default follows, and CORS is then evaluated on
   // the FINAL response — a redirect would take the answer off the named host.
