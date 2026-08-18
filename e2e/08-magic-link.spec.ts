@@ -1,9 +1,11 @@
 import { type Browser, expect, test } from "@playwright/test";
 
 import {
+  API_ORIGIN,
   COORDINATION,
   campaignOrigin,
   FIRST_CAMPAIGN,
+  INSTANCE_ADMIN,
   SINK_ORIGIN,
 } from "./config.ts";
 import { signIn } from "./helpers.ts";
@@ -164,5 +166,73 @@ test.describe
       ).toBeVisible();
       await expect(invitee.page.getByText("Nouvelle Bénévole")).toBeVisible();
       await invitee.context.close();
+    });
+
+    // The invitation nobody drove, and it is the most special-cased of the
+    // three: it is minted on the APEX, inside the transaction that creates a
+    // campaign which did not exist a moment before, and its link is built
+    // from a slug rather than from the Host the administrator is on. Every
+    // other invitation is written by a campaign, for that campaign, from
+    // inside it.
+    //
+    // What it must prove is the whole chain in one go — the message leaves,
+    // it points at the NEW subdomain and not at the apex the approval ran
+    // on, and the token opens the coordination account the approval created.
+    // The journey next door signs that account in by PASSWORD, so a link
+    // that never worked would leave that assertion green.
+    test("approving a hosting request sends an invitation that opens the campaign", async ({
+      page,
+      browser,
+    }) => {
+      await emptyInbox();
+      const slug = "tierce";
+      const requester = "porteur@tierce.test";
+
+      await page.goto(`${API_ORIGIN}/`);
+      await page
+        .getByRole("button", { name: "Héberger une campagne" })
+        .first()
+        .click();
+      await page.getByLabel("Adresse souhaitée").fill(slug);
+      await page.getByLabel("Nom de la campagne").fill("Campagne Tierce");
+      await page.getByLabel("Votre nom").fill("Alex Tierce");
+      await page.getByLabel("Votre adresse email").fill(requester);
+      await page.getByRole("button", { name: "Envoyer la demande" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Demande enregistrée" }),
+      ).toBeVisible();
+
+      await page.goto(`${API_ORIGIN}/`);
+      await page.getByRole("button", { name: "Se connecter" }).click();
+      await page.getByLabel("Adresse email").fill(INSTANCE_ADMIN.email);
+      await page.getByLabel("Mot de passe").fill(INSTANCE_ADMIN.password);
+      await page.getByRole("button", { name: "Se connecter" }).click();
+
+      // scoped to the card: the queue holds whatever earlier journeys left,
+      // and an unscoped checkbox would arm somebody else's decision
+      const queued = page.locator(".carte", { hasText: slug });
+      await expect(queued).toContainText(requester);
+      await queued.getByLabel(/J'ai vérifié/).check();
+      await queued.getByRole("button", { name: "Ouvrir la campagne" }).click();
+      await expect(
+        page.getByRole("heading", {
+          name: `Campagne ouverte : ${slug}.localhost`,
+        }),
+      ).toBeVisible();
+
+      const link = linkIn(await waitForMail(requester));
+      // the NEW campaign's subdomain, prefixed to the configured apex — not
+      // the apex itself, where the token belongs to no campaign and the
+      // visit can only end on a sign-in screen
+      expect(link.startsWith(`${campaignOrigin(slug)}/connexion#jeton=`)).toBe(
+        true,
+      );
+
+      const opened = await visit(browser, link);
+      await expect(
+        opened.page.getByRole("button", { name: "déconnexion" }),
+      ).toBeVisible();
+      await expect(opened.page.getByText("Alex Tierce")).toBeVisible();
+      await opened.context.close();
     });
   });
