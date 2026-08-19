@@ -1,7 +1,7 @@
 {
   "name": "paraphe-web",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "description": "paraphe — version navigateur : aucune donnée ne quitte le poste",
   "packageManager": "pnpm@11.21.0",
