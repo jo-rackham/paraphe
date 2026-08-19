@@ -331,6 +331,35 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// A CARD NOBODY WILL WORK GOES BACK IN THE POOL.
+	//
+	// `/api/batch` draws where `assignments.volunteer IS NULL`, and nothing
+	// cleared it when an access closed: every card the departing volunteer had
+	// been handed and not yet touched stayed reserved to an account that can no
+	// longer sign in. It came up in no other batch, for anybody, for ever — a
+	// batch of ten per departure, silently out of circulation in a campaign
+	// that needs five hundred signatures. The remedy documented until now was
+	// an UPDATE typed against production.
+	//
+	// ONLY the untouched ones — `status = 'to_contact'`, which is exactly what
+	// `mayorAvailable` calls free. A card they emailed, called or got a refusal
+	// on keeps its status, its notes and the team that wrote them: the work is
+	// not theirs to lose by leaving, and the next volunteer reads it. That is
+	// also why `team_id` goes with `volunteer`: what is released is released to
+	// the campaign, and the notes stay behind with the team that took them.
+	//
+	// Deactivation only. Reactivating gives an account back its access, not the
+	// cards somebody else may have worked in between.
+	if !active {
+		released := scoped(r)
+		if _, err := s.tx(r).Exec(r.Context(),
+			"UPDATE assignments SET volunteer=NULL, team_id=NULL "+
+				"WHERE org_id=$1 AND volunteer="+released.p(target)+
+				" AND status='to_contact'", released.args...); err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	if err := s.commit(r); err != nil {
 		s.failure(w, err)
 		return

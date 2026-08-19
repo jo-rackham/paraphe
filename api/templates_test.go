@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The Go copy of the engine's vocabulary against the file both languages
@@ -521,5 +524,84 @@ func TestTheBrowserVersionIsOfferedTheCampaignsOwnTexts(t *testing.T) {
 		if text == "Le texte de l'équipe Nord." {
 			t.Error("a team's overlay reached the account-less version")
 		}
+	}
+}
+
+// A CARD NOBODY WILL WORK GOES BACK IN THE POOL when the access closes.
+//
+// `/api/batch` draws where `volunteer IS NULL`, and nothing cleared it: every
+// card a departing volunteer had been handed and not touched stayed reserved
+// to an account that can no longer sign in, and came up in no other batch for
+// anybody, for ever. Ten per departure, in a campaign that needs five hundred
+// signatures.
+func TestClosingAnAccessGivesBackTheCardsNobodyWorked(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 4, "01")
+	adminPw := createAccount(t, s, "coordination@exemple.fr", RoleCoordination, nil)
+	pw := createAccount(t, s, "partante@exemple.fr", RoleVolunteer, nil)
+
+	her := newClient(t, srv)
+	if code := her.signIn("partante@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("volunteer sign-in: %d", code)
+	}
+	if code, body := her.call(http.MethodPost, "/api/batch", map[string]any{}); code != http.StatusOK {
+		t.Fatalf("taking a batch: %d %v", code, body)
+	}
+	held := scalar[int](t, s,
+		"SELECT COUNT(*) FROM assignments WHERE volunteer=$1", "partante@exemple.fr")
+	if held == 0 {
+		t.Fatal("the batch reserved nothing: this test would prove nothing")
+	}
+	// one of them WORKED, so it is not an untouched card any more
+	var worked string
+	asMaintenance(t, s.pool, func(tx pgx.Tx) {
+		if err := tx.QueryRow(context.Background(),
+			"UPDATE assignments SET status='email_sent' WHERE volunteer=$1 "+
+				"AND insee_code=(SELECT MIN(insee_code) FROM assignments "+
+				"WHERE volunteer=$1) RETURNING insee_code",
+			"partante@exemple.fr").Scan(&worked); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	admin := newClient(t, srv)
+	if code := admin.signIn("coordination@exemple.fr", adminPw); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	if code, body := admin.call(http.MethodPost,
+		"/api/team/account/partante@exemple.fr/active", map[string]any{}); code != http.StatusOK {
+		t.Fatalf("closing the access: %d %v", code, body)
+	}
+
+	// the untouched ones are free again…
+	if n := scalar[int](t, s,
+		"SELECT COUNT(*) FROM assignments WHERE volunteer=$1 AND status='to_contact'",
+		"partante@exemple.fr"); n != 0 {
+		t.Errorf("%d untouched cards are still reserved to a closed access", n)
+	}
+	// …and what she actually worked is untouched: the status is not hers to
+	// lose by leaving, and the next volunteer reads it
+	if st := scalar[string](t, s,
+		"SELECT status FROM assignments WHERE insee_code=$1", worked); st != "email_sent" {
+		t.Errorf("the worked card lost its status: %q", st)
+	}
+	if v := scalar[string](t, s,
+		"SELECT COALESCE(volunteer,'') FROM assignments WHERE insee_code=$1",
+		worked); v != "partante@exemple.fr" {
+		t.Errorf("the worked card was released too: %q", v)
+	}
+
+	// and the pool has them back: a colleague draws them
+	colleaguePw := createAccount(t, s, "reste@exemple.fr", RoleVolunteer, nil)
+	other := newClient(t, srv)
+	if code := other.signIn("reste@exemple.fr", colleaguePw); code != http.StatusOK {
+		t.Fatalf("colleague sign-in: %d", code)
+	}
+	if code, _ := other.call(http.MethodPost, "/api/batch", map[string]any{}); code != http.StatusOK {
+		t.Fatal("the colleague could not take a batch")
+	}
+	if n := scalar[int](t, s,
+		"SELECT COUNT(*) FROM assignments WHERE volunteer=$1", "reste@exemple.fr"); n == 0 {
+		t.Error("the released cards did not come back into the pool")
 	}
 }

@@ -48,7 +48,12 @@ Ce que chacun voit :
   droit de lire ni d'enregistrer.
 
 Un bénévole qui s'en va : le référent désactive son compte, l'effet est
-immédiat, et ses maires restent dans l'équipe.
+immédiat. Les fiches qu'il avait prises **sans encore rien y faire**
+retournent aussitôt dans le vivier commun — sinon elles resteraient
+réservées à un compte qui ne se connecte plus, et personne ne les
+reverrait. Celles où il a noté quelque chose gardent leur statut, leurs
+notes et le nom de l'équipe qui les a écrites : ce travail-là ne se perd
+pas, et le suivant le lit.
 
 ## 2. Qui contacter d'abord (l'app s'en occupe)
 
