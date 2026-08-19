@@ -63,9 +63,11 @@ export function DemandeEquipe({ cfg }: { cfg: ServerConfig }) {
       <h2 style={{ marginTop: 0 }}>Demander à créer une équipe</h2>
       <Alerte message={error ? { tone: "erreur", text: error } : null} />
       <p className="gris">
-        Une équipe locale pioche dans ses départements, ne voit que son propre
-        travail et ouvre elle-même les accès de ses bénévoles. La coordination
-        de la campagne examine la demande : rien n'est créé avant son accord.
+        Une équipe locale reçoit ses lots dans ses départements et ouvre
+        elle-même les accès de ses bénévoles. Elle lit toute la liste de la
+        campagne : le périmètre décide d'où viennent les lots, pas de ce qu'on a
+        le droit de lire ni d'enregistrer. La coordination de la campagne
+        examine la demande : rien n'est créé avant son accord.
       </p>
       <p>
         <label>

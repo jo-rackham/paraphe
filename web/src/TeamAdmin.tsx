@@ -998,9 +998,14 @@ export function GestionEquipe({
               </div>
               <button type="submit">Créer l'équipe</button>
             </form>
+            {/* Le périmètre borne UN acte : d'où viennent les lots. La
+                phrase d'avant promettait un mur entre équipes qui n'existe
+                plus — une limitation que l'outil n'a pas. */}
             <p className="gris">
-              Une équipe ne pioche que dans ses départements et ne voit que son
-              propre travail. Sans départements, elle travaille partout.
+              Le périmètre décide seulement d'où viennent les lots distribués à
+              l'équipe. Elle lit toute la liste et peut enregistrer sur
+              n'importe quelle fiche, comme toutes les autres. Sans
+              départements, ses lots viennent de toute la France.
             </p>
             <table>
               <thead>

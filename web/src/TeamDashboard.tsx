@@ -252,10 +252,18 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
         </>
       )}
 
+      {/* LA CAMPAGNE, pas l'équipe : `routeExport` ne porte aucun prédicat
+          d'équipe — le fichier a toujours contenu toute la campagne. Une
+          coordination qui croit exporter le travail d'une équipe en tire des
+          totaux faux, et un référent croit y trouver un périmètre. */}
       <p>
         <a className="bouton secondaire" href={API.exportUrl()}>
-          <Emoji>⬇ </Emoji>Exporter le suivi de mon équipe (CSV)
+          <Emoji>⬇ </Emoji>Exporter le suivi de la campagne (CSV)
         </a>
+      </p>
+      <p className="gris">
+        Le fichier couvre toute la campagne, pas seulement votre équipe. Les
+        noms des bénévoles des autres équipes n'y sont pas, comme à l'écran.
       </p>
     </>
   );
