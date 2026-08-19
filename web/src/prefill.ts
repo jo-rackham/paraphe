@@ -1,10 +1,21 @@
-// Pre-filling a campaign from ?org=<slug>, in browser mode only.
+// Pre-filling a campaign, in browser mode only. TWO doors, and they differ
+// in what names the campaign — which is what decides whether it is applied
+// or offered.
 //
-// The problem it solves is small and real: without it, every volunteer of a
+// The ORIGIN that served this page (`ownCampaign`) is the default: served by
+// `<slug>.<instance>/navigateur/`, this build is that campaign's own browser
+// version, and there is nothing to confirm about a campaign whose own server
+// wrote the page saying which one it is.
+//
+// A `?org=<slug>` LINK (`requestedSlug`, `fetchCampaign`) may name any
+// campaign of the instance, so it is shown before it is applied.
+//
+// The problem both solve is small and real: without it, every volunteer of a
 // hosted campaign retypes the same nine fields, and a typo in any of them
 // goes out to mayors under the campaign's name.
 //
-// The reason it is a SLUG and not a URL is the whole design. A link is free
+// The reason a link carries a SLUG and not a URL is the whole design of that
+// second door. A link is free
 // to name a campaign; it is never free to name a host — the instance domain
 // comes from the DOCUMENT, never from the URL. So the data can only come
 // from a campaign that was requested, moderated and approved on that

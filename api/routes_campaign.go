@@ -373,10 +373,13 @@ func (s *Server) forgetLogo(previous string) {
 
 // GET /api/campaign/public — the campaign, and nothing else.
 //
-// It exists for the browser version, which is published on another origin
-// (GitHub Pages) and has no server of its own: a volunteer opening it with
-// ?org=<slug> gets the campaign filled in rather than retyping nine fields
-// that must match their colleagues' exactly.
+// It exists for the browser version, which has no server of its own: rather
+// than retyping nine fields that must match their colleagues' exactly, a
+// volunteer gets the campaign filled in. Two callers, and the cross-origin
+// header below is for the first only — a build published elsewhere (GitHub
+// Pages) opened with ?org=<slug>, and the build this instance serves under
+// /navigateur/, which asks this route at the root of its OWN origin to learn
+// which campaign served it.
 //
 // It returns ONLY what already travels in every message to a mayor — the
 // candidate, the contacts, the signature — never the operational detail

@@ -110,12 +110,16 @@ les démarches à sa place ».
 
 **Sans compte, dans votre navigateur.** Sur l'adresse d'une campagne
 hébergée, l'écran de connexion propose « Ouvrir la version navigateur » — et
-le lien est aussi en pied de page, sur tous les écrans. Il emporte la
-campagne avec lui : l'application vous propose de la reprendre — candidat,
-contacts, signature — et vous montre ces valeurs AVANT de rien enregistrer,
-ce sont elles que liront les maires. Un lien `…/?org=nom-de-la-campagne`
-qu'on vous envoie fait la même chose.
-Vous travaillez alors entièrement dans votre navigateur, sans compte.
+le lien est aussi en pied de page, sur tous les écrans. Les textes de la
+campagne — candidat, contacts, signature — y sont **déjà remplis** : c'est la
+version navigateur de cette campagne-là, elle les reprend toute seule et vous
+dit d'où ils viennent. Si vous aviez déjà saisi les vôtres, rien n'est
+écrasé.
+Un lien `…/?org=nom-de-la-campagne` qu'on vous envoie, lui, désigne une
+campagne qui n'est pas forcément celle de la page : l'application vous montre
+alors ses valeurs et vous demande avant de rien enregistrer — ce sont elles
+que liront les maires.
+Vous travaillez entièrement dans votre navigateur, sans compte.
 Attention à ce que cela implique : cette version **ne coordonne rien**. Elle
 ignore qu'un autre bénévole a déjà appelé le même maire. Convenez d'un
 partage (par département, par tranche de la liste) ou acceptez la

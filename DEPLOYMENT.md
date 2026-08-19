@@ -404,20 +404,28 @@ controller** — not the author of the repository.
 
 Volunteers working without an account, in their browser, otherwise retype the
 campaign's nine fields — and a typo goes out to mayors under the campaign's
-name. The interface accepts `?org=<slug>` and offers to take the campaign
-published by `<slug>.<domain>`.
+name.
 
-**Nothing to configure for the version this image serves.** Each campaign's
-sign-in screen carries the link, `?org=` included, and every screen of it
-carries the same link in the footer. The instance the parameter resolves
-against is injected into `/navigateur/index.html` **at startup**, in memory,
-the way the mode marker is: the published image is built with no domain at
-all, because one image serves every operator's instance and one carrying
-`paraphe.org` would send everyone else's volunteers to fetch campaigns from
-there.
+**Nothing to configure, and nothing to click.** The browser version this
+image serves at `<slug>.<domain>/navigateur/` asks that origin which campaign
+it is (`GET /api/campaign/public`, at the root of the same origin) and takes
+the answer as its default: the campaign's texts are filled in on arrival,
+with a sentence saying where they came from. Anything the volunteer has
+already typed is left alone. Each campaign's sign-in screen carries the link,
+and so does the footer of every screen of it.
+
+**A `?org=<slug>` link is the other door, and it is the one that asks.** It
+names a campaign that need not be the one serving the page — a link sent from
+elsewhere, or opened on a build published elsewhere — so its values are shown
+before they are applied. The instance the parameter resolves against is
+injected into `/navigateur/index.html` **at startup**, in memory, the way the
+mode marker is: the published image is built with no domain at all, because
+one image serves every operator's instance and one carrying `paraphe.org`
+would send everyone else's volunteers to fetch campaigns from there.
 
 A build published **elsewhere** — GitHub Pages, another static host — has no
-server to inject anything, so it bakes the domain instead:
+API origin to ask, so `?org=` is its only pre-fill, and no server to inject
+anything, so it bakes the domain instead:
 
 ```
 PARAPHE_BASE_DOMAIN=paraphe.fr PARAPHE_BASE_PATH=/paraphe/ pnpm --dir web build
@@ -437,8 +445,9 @@ time — never from the URL. A forged link therefore cannot slip a third
 party's contact details under a real candidate's name; that would require
 having a campaign approved on your instance. The volunteer sees the values
 before accepting them anyway, and a campaign still at its template values
-pre-fills nothing (409).
+pre-fills nothing (409) — on either door.
 
 A **single-campaign** instance has no subdomain space for `<slug>.<domain>`
-to name, so it injects no marker and its campaign offers the link without a
-parameter: the tool, with its nine fields to fill in by hand.
+to name, so it injects no marker and its link carries no parameter. It fills
+itself in all the same: every host of it resolves the one campaign, so the
+origin the browser version asks answers with it.

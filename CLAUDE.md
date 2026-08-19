@@ -87,12 +87,53 @@ campaign's sign-in screen links to it, and so does the footer of every screen
 of that campaign. A volunteer who wants no account, or a shared computer, or
 a train, has a door, and it is on the page they already landed on.
 
-- **The link CARRIES the campaign** (`?org=<slug>`, built by
-  `browserVersionFor`), because the alternative is nine fields retyped by
-  hand and a typo going out to mayors under the campaign's name. The
+- **A CAMPAIGN'S OWN BROWSER VERSION FILLS ITSELF IN**, with no click and no
+  confirmation. It asks the origin that served it — `ownCampaign()`, a
+  root-relative `GET /api/campaign/public` — and takes the answer as its
+  DEFAULT. The confirmation screen was written for a LINK: `?org=` may name a
+  campaign of another instance, so its values are shown before they are
+  applied, and that is what stops a forged one putting somebody else's
+  contact details under a real candidate's name. None of it applies to the
+  campaign that SERVED THE PAGE — whoever could lie about it wrote the page
+  saying so. Confirming cost two clicks, and to the volunteer who did not
+  make them it read as a tool that had failed to fill anything in; it was
+  reported twice as « les champs ne sont pas substitués ».
+  **ROOT-RELATIVE is the whole trick.** Every other call this build makes
+  goes through Vite's base, `/navigateur/api/…`, which the server answers
+  with HTML deliberately — that is what keeps it in browser mode on an origin
+  that has an API. The real API is at the ROOT of that same origin, and
+  asking it is also what tells a campaign's own version from a static
+  publication: on GitHub Pages that path answers HTML too, and `readOffer`
+  refuses it.
+  It never overwrites what a volunteer typed (`untouchedCampaign`), and a
+  `?org=` naming a DIFFERENT campaign keeps its offer — a link is a link
+  wherever it is opened.
+  **« Aucune requête avant un clic » was never true**, and the test that said
+  so now states the rule it was reaching for: zero requests to the host a
+  LINK names, and the origin that already served the HTML, the bundle and
+  139 kB of mayors may be asked. Held literally, that promise forbade the one
+  request which names nothing.
+- **The link still CARRIES the campaign** (`?org=<slug>`, built by
+  `browserVersionFor`) — for the version published ELSEWHERE, which has no
+  API origin to ask, and for a link sent from one campaign to another. The
   parameter is added only where it resolves — a single-campaign instance has
   no subdomain space, and it gets the plain link rather than a pre-fill that
   would land on an empty configuration.
+- **ONE shape reader for the two doors** (`readOffer`): what an answer must
+  look like before nine of its values go out in every message to a mayor is
+  decided once. It THROWS, and the doors differ only in what they do with the
+  refusal — the link door owes its reader a sentence, the origin door treats
+  it as "there is no campaign here", which is its normal state on an apex, a
+  static host or a captive portal.
+- **The provenance sentence has a slot of its own**, like `offerError`. Sent
+  through the general message, the list download wiped it a second later
+  (« 34 826 maires chargés ») and the campaign's texts appeared with nothing
+  saying where they came from — the same clobbering, one region over.
+- Rejected: injecting the campaign into the page at startup, server-side.
+  `s.browserPage` is ONE page for every host; rendering it per host would put
+  a scope resolution, hence a pool connection, on a static path — and a
+  snapshot taken at startup is stale the moment a coordination edits its
+  texts.
 - **The instance the parameter resolves against is injected AT STARTUP**
   (`markBrowserVersion`), in memory, like the mode marker beside it. It is
   not baked: one image serves every operator's instance, and one carrying
