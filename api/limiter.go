@@ -67,7 +67,22 @@ var (
 	// because each one is moderation work for its coordination.
 	limitTeamRequestIP = limitClass{"team_request_ip", 10, time.Hour}
 	limitHostingIP     = limitClass{"hosting_ip", 3, time.Hour}
-	limitAnonIP        = limitClass{"anon_ip", 120, time.Minute}
+	// 300, not 120, and for the reason limitSignInIP carries above: one
+	// source is one BUILDING. This class covers the reads a page load makes
+	// before anybody is authenticated — /api/config on every visit, the
+	// public campaign, the directory — so a launch meeting where thirty
+	// volunteers open the application at once, reload, and open it again on
+	// their phone spends a hundred in a burst, from one NAT. The end-to-end
+	// suite showed the shape first, as it did for the sign-in ceiling:
+	// sixty-odd journeys from one loopback address crossed it and the LAST
+	// test of the run paid — which is how a ceiling set too tight presents
+	// itself, as a flake somewhere else.
+	//
+	// It is not the wall against abuse and never was: these are cheap reads
+	// that write nothing and tell an anonymous caller nothing that loading
+	// the page does not. The sharp walls are per ACCOUNT and per submitted
+	// address, and they are unchanged.
+	limitAnonIP = limitClass{"anon_ip", 300, time.Minute}
 	// Changing one's own password VERIFIES the current one, so it is a
 	// guessing surface like signing in — reached, this time, by whoever
 	// already holds the session. That is not nothing: a borrowed session

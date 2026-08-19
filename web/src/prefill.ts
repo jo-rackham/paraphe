@@ -136,6 +136,48 @@ function publicCampaignUrl(slug: string): string {
   return `https://${slug}.${bakedInstance()}/api/campaign/public`;
 }
 
+/**
+ * The campaign THIS ORIGIN IS, when an instance is the one serving this
+ * build — and it is the default, not an offer.
+ *
+ * A `?org=` link may name a campaign on another instance, so it is shown
+ * before it is applied: a forged one would otherwise put somebody else's
+ * contact details under a real candidate's name. NONE of that applies here.
+ * The campaign is not named by a link, it is the origin that served the
+ * page: whoever could lie about it already wrote the page saying it. So
+ * there is nothing to confirm, and confirming cost two clicks and read, to
+ * the volunteer who did not make them, as a tool that had failed to fill
+ * anything in.
+ *
+ * ROOT-RELATIVE on purpose. Every other call this build makes goes through
+ * Vite's base — `/navigateur/api/…` — which the server answers with HTML
+ * deliberately, because that is what keeps this build in browser mode. The
+ * real API is at the root of the same origin, and asking it is what tells a
+ * campaign's own version from a static publication: on GitHub Pages this
+ * path answers HTML too, and the shape check below refuses it.
+ *
+ * It is the one request this mode makes before a click, and it leaves
+ * nothing: it goes to the host that just served this page, carries no
+ * credential and no identifier, and says nothing that loading the page did
+ * not already say.
+ *
+ * Null for every "there is no campaign here" — the apex, a static host, an
+ * unconfigured campaign (409), a captive portal. Absence is the normal
+ * answer, not a failure to report.
+ */
+export async function ownCampaign(): Promise<Offer | null> {
+  try {
+    const response = await fetch("/api/campaign/public", {
+      credentials: "omit",
+      redirect: "error",
+    });
+    if (!response.ok) return null;
+    return readOffer(await response.json());
+  } catch {
+    return null;
+  }
+}
+
 /** The slug asked for in the address bar, or null. */
 export function requestedSlug(search: string): string | null {
   const slug = new URLSearchParams(search).get("org");
@@ -173,12 +215,31 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
         `La campagne « ${slug} » n'a pas répondu (HTTP ${response.status}).`,
     );
   }
-  const body = await response.json();
+  return readOffer(await response.json(), slug);
+}
+
+/**
+ * What an answer has to look like before nine of its values go out in every
+ * message to a mayor. ONE reader for the two doors — the campaign a link
+ * names, and the campaign this origin is — because the second copy is where
+ * they would stop agreeing on what counts as a campaign.
+ *
+ * It THROWS rather than returning null: the link door owes its reader a
+ * sentence, and the origin door treats every refusal as « there is no
+ * campaign here », which is its normal state.
+ */
+export function readOffer(body: unknown, slug?: string): Offer {
   // Answered, but with what? A captive portal returns 200 and HTML, and a
   // half-filled object is worse than none: eight blank rows shown as a
   // campaign, or a value that is not a string, which replaced the whole
   // screen with the error boundary.
-  const campaign = body?.campaign;
+  const answer = body as {
+    slug?: unknown;
+    name?: unknown;
+    campaign?: Record<string, string>;
+    logo?: { url?: unknown };
+  } | null;
+  const campaign = answer?.campaign;
   const complete =
     campaign &&
     typeof campaign === "object" &&
@@ -191,17 +252,29 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
         "s'est peut-être intercalé — ne l'utilisez pas.",
     );
   }
-  // The logo is optional and its absence changes nothing. Checked all the
-  // same: `logo.url` is put into an <img>, and a captive portal answering
-  // this route can write whatever it likes there. Only an absolute http(s)
-  // URL is kept — a `javascript:` or `data:` value would be a string this
-  // campaign chose and this browser executed.
-  let logo = "";
-  const offered = body?.logo?.url;
-  if (typeof offered === "string" && offered !== "") {
-    if (/^https?:\/\//i.test(offered)) {
-      logo = offered;
-    }
+  // The name this campaign is KNOWN by, and the slug it answers at. Asked
+  // through a link the slug is the one asked for, never the one the answer
+  // claims: it is the label that built the host, and taking the body's
+  // instead would let an answer rename itself.
+  const named = typeof answer?.slug === "string" ? answer.slug : "";
+  const which = slug ?? named;
+  if (!validSlug(which)) {
+    throw new Error("Cette réponse ne nomme aucune campagne.");
   }
-  return { slug, name: String(body.name ?? slug), campaign, logo };
+  // The logo is optional and its absence changes nothing. Checked all the
+  // same: `logo.url` is put into an <img>, and whatever answers this route
+  // can write anything there. Only an absolute http(s) URL is kept — a
+  // `javascript:` or `data:` value would be a string this campaign chose
+  // and this browser executed.
+  let logo = "";
+  const offered = answer?.logo?.url;
+  if (typeof offered === "string" && /^https?:\/\//i.test(offered)) {
+    logo = offered;
+  }
+  return {
+    slug: which,
+    name: String(answer?.name ?? which),
+    campaign,
+    logo,
+  };
 }

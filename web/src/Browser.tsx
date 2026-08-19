@@ -30,6 +30,7 @@ import {
   fetchCampaign,
   inlineLogo,
   type Offer,
+  ownCampaign,
   requestedSlug,
   untouchedCampaign,
 } from "./prefill.ts";
@@ -98,6 +99,13 @@ export default function Browser() {
   // volunteer takes with the candidate's name in front of them.
   const [offer, setOffer] = useState<Offer | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
+  // Where the campaign came from, when it came from this origin. ITS OWN
+  // SLOT and not the page's Alerte: the list download is already in flight
+  // when this is decided and lands a second later with « N maires chargés »,
+  // which took the sentence off the screen — the same clobber `offerError`
+  // above exists for, one writer along. Nine values that go out in every
+  // message to a mayor are worth saying the provenance of.
+  const [adopted, setAdopted] = useState<string | null>(null);
   // The campaign a ?org= link NAMES, held until the volunteer asks for it.
   // Fetching it on load put a request to <slug>.<instance> in the network
   // tab before any click — the one thing this mode promises does not happen,
@@ -156,6 +164,48 @@ export default function Browser() {
     }
   }, []);
 
+  /**
+   * Takes a campaign into this browser: the nine values, and the mark that
+   * goes with them.
+   *
+   * ONE writer for the two doors — the campaign this origin is, taken as
+   * the default, and the campaign a link offered and the volunteer
+   * accepted. They differ in whether anything was asked, never in what is
+   * written, and written twice they would differ in the logo, which is the
+   * half that is easy to forget.
+   *
+   * The logo is downloaded ONCE, here, and kept as a data URI: this mode
+   * makes no request afterwards, and holding the campaign's URL would put a
+   * call to the instance in every page load — exactly what « aucune donnée
+   * ne quitte ce navigateur » promises does not happen. A failure costs the
+   * picture and nothing else, so it does not undo the adoption.
+   */
+  const adopt = useCallback(async (taken: Offer) => {
+    // a rejected write (quota, private window, blocked base) must be SAID:
+    // without the catch this returns having done nothing at all
+    try {
+      await DB.writeSetting("campagne", taken.campaign);
+      setCfg(taken.campaign);
+      setDraft(taken.campaign);
+      if (taken.logo) {
+        try {
+          const inlined = await inlineLogo(taken.logo);
+          await DB.writeSetting("logo", inlined);
+          setLogo(inlined);
+        } catch {
+          setLogo("");
+        }
+      }
+      return true;
+    } catch (e) {
+      setMessage({
+        tone: "erreur",
+        text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
+      });
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const [m, s, c, a, g, l] = await Promise.all([
@@ -182,6 +232,33 @@ export default function Browser() {
       if (m.length === 0) fetchList("light");
 
       const slug = requestedSlug(window.location.search);
+      // THE CAMPAIGN THIS ORIGIN IS, taken as the default and not offered.
+      //
+      // Served under /navigateur/ by `<slug>.paraphe.org`, this build is
+      // that campaign's own account-less version: whoever opens it wants
+      // its texts, and asking them to accept the texts of the site they are
+      // already standing on is a question with one answer. It read as a
+      // tool that had failed to fill anything in — twice, from the same
+      // reader, which is how a design gets found out.
+      //
+      // The offer stays for the case it was written for: a `?org=` naming
+      // ANOTHER campaign is a link, and a link is shown before it is
+      // applied. Naming THIS one is not a second opinion, it is the same
+      // campaign arriving by a longer road.
+      //
+      // Only on an untouched campaign, like everything else that writes
+      // these nine values: what the volunteer typed is theirs.
+      const own = untouchedCampaign(c) ? await ownCampaign() : null;
+      if (own && (!slug || slug === own.slug)) {
+        if (await adopt(own)) {
+          setAdopted(
+            `Les textes de la campagne « ${own.name} » sont repris depuis ` +
+              "son site. Ils restent dans ce navigateur, et vous pouvez les " +
+              "modifier dans « Ma campagne ».",
+          );
+        }
+        return;
+      }
       // Offered ONLY on a campaign nobody has touched. "Not complete" was
       // the wrong test: a volunteer who had filled eight fields of nine —
       // their own name under « Qui signe les emails », their own phone —
@@ -216,7 +293,7 @@ export default function Browser() {
       });
       setReady(true);
     });
-  }, [fetchList]);
+  }, [fetchList, adopt]);
 
   const unfilled = useMemo(() => M.unfilledKeys(cfg), [cfg]);
 
@@ -471,6 +548,28 @@ export default function Browser() {
               </>
             )}
           </p>
+          {/* Pre-exists its text, holds no control while it is empty, and
+              is DISMISSIBLE: it states where nine values came from, which is
+              worth reading once and not on every visit. */}
+          <p className={adopted ? "alerte" : "sr-only"}>
+            <span role="status">{adopted ?? ""}</span>
+            {adopted && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="lien"
+                  onClick={() => {
+                    // this button unmounts with the message
+                    focusContenu();
+                    setAdopted(null);
+                  }}
+                >
+                  j'ai noté
+                </button>
+              </>
+            )}
+          </p>
           {/* persistent region: the start of a download is announced by a
               text CHANGE here, not by the card mounting with its sentence —
               completion is announced by the Alerte above */}
@@ -546,40 +645,13 @@ export default function Browser() {
                   onAccept={async () => {
                     // the card — and the clicked button — unmounts
                     focusContenu();
-                    // a rejected write (quota, private window, blocked base) must
-                    // be SAID: without the catch the button silently did nothing
-                    try {
-                      await DB.writeSetting("campagne", offer.campaign);
-                      setCfg(offer.campaign);
-                      setDraft(offer.campaign);
-                      // The logo is downloaded ONCE, here, and kept as a
-                      // data URI: this mode makes no request after this
-                      // one, and holding the campaign's URL would put a
-                      // call to the instance in every page load — which is
-                      // exactly what « aucune donnée ne quitte ce
-                      // navigateur » promises does not happen. A failure
-                      // costs the picture and nothing else, so it does not
-                      // undo an adoption the volunteer just made.
-                      if (offer.logo) {
-                        try {
-                          const inlined = await inlineLogo(offer.logo);
-                          await DB.writeSetting("logo", inlined);
-                          setLogo(inlined);
-                        } catch {
-                          setLogo("");
-                        }
-                      }
+                    if (await adopt(offer)) {
                       setOffer(null);
                       setMessage({
                         tone: "ok",
                         text:
                           `Campagne « ${offer.name} » reprise. Elle reste dans ce ` +
                           "navigateur, et vous pouvez la modifier dans « Ma campagne ».",
-                      });
-                    } catch (e) {
-                      setMessage({
-                        tone: "erreur",
-                        text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
                       });
                     }
                   }}

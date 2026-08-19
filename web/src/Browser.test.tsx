@@ -155,16 +155,26 @@ const firstCampaignField = () =>
 
 beforeEach(async () => {
   vi.stubEnv("PARAPHE_INSTANCE_DOMAIN", "paraphe.fr");
-  vi.stubGlobal("fetch", () =>
-    Promise.resolve({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          slug: "campagne",
-          name: "Camille Réel",
-          campaign: OFFERED,
-        }),
-    }),
+  // TWO answers, because there are two doors and this file is about the
+  // second. The ORIGIN serving these tests is a static publication — the
+  // GitHub Pages case — so its own `/api/campaign/public` answers nothing,
+  // and every offer below is one a LINK made. A stub that answered both
+  // alike would have this build adopt the campaign at load and no offer
+  // would ever appear, which is exactly what happened when it did.
+  vi.stubGlobal("fetch", (url: string) =>
+    Promise.resolve(
+      String(url).startsWith("/")
+        ? { ok: false, status: 404, json: () => Promise.resolve({}) }
+        : {
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                slug: "campagne",
+                name: "Camille Réel",
+                campaign: OFFERED,
+              }),
+          },
+    ),
   );
   window.history.replaceState({}, "", "/?org=campagne");
   await DB.eraseAll();
@@ -230,10 +240,138 @@ describe("the offer banner, rendered", () => {
   // used to be fetched by the mount effect, so opening a link shared
   // publicly rang <slug>.<instance> with the visitor's address before any
   // click. Counted here, because a comment cannot hold that line.
-  it("asks before it fetches: nothing leaves until the volunteer clicks", async () => {
-    let calls = 0;
-    vi.stubGlobal("fetch", (...args: unknown[]) => {
-      calls++;
+  // THE CAMPAIGN THIS ORIGIN IS, and no clicks at all.
+  //
+  // Served under /navigateur/ by `<slug>.paraphe.org`, this build is that
+  // campaign's own account-less version. Whoever opens it wants its texts,
+  // and asking them to accept the texts of the site they are standing on is
+  // a question with one answer — asked twice, it read as a tool that had
+  // failed to substitute anything, because the example values it left on
+  // screen are written to look exactly like placeholders.
+  describe("the campaign this origin is", () => {
+    /** An instance serving its own browser version, with no ?org= at all. */
+    const servedByCampaign = async () => {
+      window.history.replaceState({}, "", "/");
+      vi.stubGlobal("fetch", (url: string) =>
+        Promise.resolve(
+          String(url).startsWith("/api/campaign/public")
+            ? {
+                ok: true,
+                json: () =>
+                  Promise.resolve({
+                    slug: "sienne",
+                    name: "Camille Sienne",
+                    campaign: OFFERED,
+                  }),
+              }
+            : { ok: false, status: 404, json: () => Promise.resolve({}) },
+        ),
+      );
+      await act(async () => {
+        root.render(<Browser />);
+      });
+    };
+
+    it("fills the campaign in with no click and no offer", async () => {
+      await servedByCampaign();
+      // a POSITIVE signal: waiting for the banner to be ABSENT is satisfied
+      // by the loading screen, before anything has been decided, and would
+      // pass whatever the adoption does
+      await until(
+        () => text().includes("Camille Sienne"),
+        "the campaign lands on its own",
+      );
+      expect(text()).not.toContain("Campagne non configurée");
+      // never the offer: there is nothing to confirm about the site you
+      // are already on
+      expect(text()).not.toContain("Ce lien propose une campagne");
+      expect(text()).not.toContain("Reprendre la campagne");
+      // and it is STORED, not merely on screen: a claim about the base,
+      // which every mutation that dropped the write left green
+      const stored = await DB.readSetting<Record<string, string>>(
+        "campagne",
+        {},
+      );
+      expect(stored.candidat).toBe(OFFERED.candidat);
+    });
+
+    it("says where the texts came from", async () => {
+      await servedByCampaign();
+      await until(
+        () => text().includes("Camille Sienne"),
+        "the screen names the campaign it took",
+      );
+      // the values go out in every message to a mayor: where they came
+      // from is not a detail to leave unsaid
+      expect(text()).toContain("depuis son site");
+    });
+
+    // What the volunteer typed is theirs, whatever the origin says.
+    it("never replaces a campaign already in this browser", async () => {
+      await DB.writeSetting("campagne", { ...OFFERED, candidat: "Déjà Saisi" });
+      await servedByCampaign();
+      // the LIST is the positive signal that the mount effect has run to
+      // the end: it renders after the campaign decision, not before
+      await until(() => text().includes("Bourg-Réel"), "the app opens");
+      const stored = await DB.readSetting<Record<string, string>>(
+        "campagne",
+        {},
+      );
+      expect(stored.candidat).toBe("Déjà Saisi");
+    });
+
+    // A static publication has no campaign to be: its own /api answers
+    // HTML or 404, and nothing must be adopted from that.
+    it("adopts nothing when the origin serves no campaign", async () => {
+      window.history.replaceState({}, "", "/");
+      vi.stubGlobal("fetch", () =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ page: "<!doctype html>" }),
+        }),
+      );
+      await act(async () => {
+        root.render(<Browser />);
+      });
+      await until(
+        () => text().includes("Bourg-Réel"),
+        "the app opens with nothing adopted",
+      );
+      expect(text()).toContain("Campagne non configurée");
+      const stored = await DB.readSetting<Record<string, string>>(
+        "campagne",
+        {},
+      );
+      expect(stored.candidat ?? "").not.toBe(OFFERED.candidat);
+    });
+  });
+
+  // WHICH HOST, and not how many requests. The promise this mode makes is
+  // about a THIRD PARTY learning that you opened a link: a `?org=` names a
+  // campaign on an instance you have never contacted, and ringing it at
+  // load would tell it — with your address — every time the page opened.
+  // That is what waits for a click, and it is verifiable in the network tab.
+  //
+  // A request to the origin that SERVED this page is a different act: it
+  // already handed over the HTML, the bundle and 139 kB of mayor list, and
+  // one more GET tells it nothing new. That is why a campaign's own
+  // account-less version may ask which campaign it is — see ownCampaign —
+  // and why this test counts hosts rather than calls. Written as « zero
+  // requests », the rule read as something this mode never did: it
+  // downloads its list at load, from that same origin, unasked.
+  it("rings no host a LINK names until the volunteer clicks", async () => {
+    const elsewhere: string[] = [];
+    let own = 0;
+    vi.stubGlobal("fetch", (url: string) => {
+      if (String(url).startsWith("/")) {
+        own++;
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({}),
+        });
+      }
+      elsewhere.push(String(url));
       return Promise.resolve({
         ok: true,
         json: () =>
@@ -241,18 +379,27 @@ describe("the offer banner, rendered", () => {
             slug: "campagne",
             name: "Camille Réel",
             campaign: OFFERED,
-            url: args[0],
           }),
       });
     });
     await renderAndSettle();
-    expect(calls, "a request left the browser before any click").toBe(0);
+    expect(
+      elsewhere,
+      "a request reached the instance the link names before any click",
+    ).toEqual([]);
+    // …and the one it did make went to its own origin, which is what tells
+    // a campaign's own version from a static publication
+    expect(own, "the origin was never asked which campaign it is").toBe(1);
+
     await click("Voir cette proposition");
     await until(
       () => text().includes("Reprendre la campagne"),
       "the offer lands",
     );
-    expect(calls, "the ask must send exactly one request").toBe(1);
+    expect(
+      elsewhere,
+      "the ask must send exactly one request, to the named campaign",
+    ).toEqual(["https://campagne.paraphe.fr/api/campaign/public"]);
   });
 
   it("appears on an untouched campaign, and the warning stays with it", async () => {
