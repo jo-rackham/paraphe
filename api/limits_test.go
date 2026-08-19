@@ -45,6 +45,10 @@ import (
 var accountedCeilings = map[string]bool{
 	"maxNoteRunes": true, "maxCampaignRunes": true,
 	"maxNameRunes": true, "maxEmailRunes": true,
+	// The six message templates travel in ONE body, so they are their own
+	// request and carry their own arithmetic — the same shape as the logo,
+	// and for the same reason: their sum does not fit beside a campaign.
+	"maxTemplateRunes": true,
 }
 
 func apiPackage(t *testing.T) map[string]*ast.File {
@@ -824,71 +828,144 @@ func byteLength(expr ast.Expr) bool {
 func TestTextCeilingsAreNamedAndAccountedFor(t *testing.T) {
 	for name, file := range apiPackage(t) {
 		ast.Inspect(file, func(n ast.Node) bool {
+			// `if n := utf8.RuneCountInString(x); n > CEIL` BINDS THE
+			// MEASUREMENT TO A NAME, and the comparison then reads as a bare
+			// identifier — which the shape rule below cannot recognise, so the
+			// ceiling is invisible and joins no sum. It is legal Go and the
+			// natural way to write it when the count is wanted in the message
+			// too; `maxTemplateRunes` was written that way and walked straight
+			// past this canary, with CLAUDE.md promising arithmetic nothing
+			// checked. Resolved HERE, in the one statement that binds and uses
+			// it, so no scope has to be tracked and no other `n` is confused
+			// with this one.
+			if ifs, ok := n.(*ast.IfStmt); ok {
+				if measured, bound := lengthBoundInInit(ifs.Init); measured != nil {
+					if cond, ok := ifs.Cond.(*ast.BinaryExpr); ok {
+						ast.Inspect(resolved(cond, bound, measured),
+							ceilingRule(t, name))
+					}
+				}
+				return true
+			}
 			cmp, ok := n.(*ast.BinaryExpr)
 			if !ok {
 				return true
 			}
-			switch cmp.Op {
-			case token.GTR, token.GEQ, token.LSS, token.LEQ, token.EQL, token.NEQ:
-			default:
-				return true
-			}
-			// either side may hold the measurement
-			bound := cmp.Y
-			measured := cmp.X
-			op := cmp.Op
-			if !textLength(cmp.X) && !byteLength(cmp.X) {
-				bound, measured = cmp.X, cmp.Y
-				// …and the comparison is now read from the other end:
-				// `max < len(x)` bounds x from ABOVE exactly as
-				// `len(x) > max` does, so the operator turns with the sides.
-				op = mirrored(op)
-			}
-			// A FLOOR IS NOT A CEILING, and this canary is about ceilings:
-			// its sum answers « would a request at every limit still fit in
-			// maxBodySize ». `RuneCount(new) < minPasswordRunes` bounds a
-			// password from BELOW — it lets nothing through that a body
-			// limit would have to hold — and demanding it join the sum of
-			// maxima would put a minimum into an addition of maxima and
-			// make the arithmetic mean nothing.
-			//
-			// Read from the SHAPE, after the sides are settled, and not from
-			// the name: this file's own opening says a naming convention is
-			// what a ceiling called something else walks past.
-			if op == token.LSS || op == token.LEQ {
-				return true
-			}
-			if byteLength(measured) {
-				// a ceiling counted in runes, applied to bytes: it refuses
-				// fewer characters than its own message announces
-				if limit, ok := bound.(*ast.Ident); ok && accountedCeilings[limit.Name] {
-					t.Errorf("%s: len() counts bytes and %s is a ceiling in "+
-						"runes — an accented value is refused far below the "+
-						"limit the message promises", name, limit.Name)
-				}
-				return true
-			}
-			if !textLength(measured) {
-				return true
-			}
-			switch limit := bound.(type) {
-			case *ast.BasicLit:
-				if limit.Kind == token.INT {
-					t.Errorf("%s: a text ceiling written as the literal %s. Use "+
-						"one of the named ceilings in auth.go — they are what "+
-						"the body limit is checked against", name, limit.Value)
-				}
-			case *ast.Ident:
-				if !accountedCeilings[limit.Name] {
-					t.Errorf("%s: %s bounds a text length and is not in the sum "+
-						"checked against maxBodySize in "+
-						"TestTheBodyCeilingHoldsBothEdges: a request at every "+
-						"ceiling would answer 413", name, limit.Name)
-				}
-			}
-			return true
+			return ceilingComparison(t, name, cmp)
 		})
 	}
+}
+
+// ceilingComparison: is THIS comparison a text ceiling, and is it accounted
+// for? The whole reading, in one place, because it is applied twice — once to
+// every comparison in the package, once to the resolved condition of an `if`
+// that bound its measurement to a name.
+func ceilingComparison(t *testing.T, name string, cmp *ast.BinaryExpr) bool {
+	switch cmp.Op {
+	case token.GTR, token.GEQ, token.LSS, token.LEQ, token.EQL, token.NEQ:
+	default:
+		return true
+	}
+	// either side may hold the measurement
+	bound := cmp.Y
+	measured := cmp.X
+	op := cmp.Op
+	if !textLength(cmp.X) && !byteLength(cmp.X) {
+		bound, measured = cmp.X, cmp.Y
+		// …and the comparison is now read from the other end:
+		// `max < len(x)` bounds x from ABOVE exactly as
+		// `len(x) > max` does, so the operator turns with the sides.
+		op = mirrored(op)
+	}
+	// A FLOOR IS NOT A CEILING, and this canary is about ceilings:
+	// its sum answers « would a request at every limit still fit in
+	// maxBodySize ». `RuneCount(new) < minPasswordRunes` bounds a
+	// password from BELOW — it lets nothing through that a body
+	// limit would have to hold — and demanding it join the sum of
+	// maxima would put a minimum into an addition of maxima and
+	// make the arithmetic mean nothing.
+	//
+	// Read from the SHAPE, after the sides are settled, and not from
+	// the name: this file's own opening says a naming convention is
+	// what a ceiling called something else walks past.
+	if op == token.LSS || op == token.LEQ {
+		return true
+	}
+	if byteLength(measured) {
+		// a ceiling counted in runes, applied to bytes: it refuses
+		// fewer characters than its own message announces
+		if limit, ok := bound.(*ast.Ident); ok && accountedCeilings[limit.Name] {
+			t.Errorf("%s: len() counts bytes and %s is a ceiling in "+
+				"runes — an accented value is refused far below the "+
+				"limit the message promises", name, limit.Name)
+		}
+		return true
+	}
+	if !textLength(measured) {
+		return true
+	}
+	switch limit := bound.(type) {
+	case *ast.BasicLit:
+		if limit.Kind == token.INT {
+			t.Errorf("%s: a text ceiling written as the literal %s. Use "+
+				"one of the named ceilings in auth.go — they are what "+
+				"the body limit is checked against", name, limit.Value)
+		}
+	case *ast.Ident:
+		if !accountedCeilings[limit.Name] {
+			t.Errorf("%s: %s bounds a text length and is not in the sum "+
+				"checked against maxBodySize in "+
+				"TestTheBodyCeilingHoldsBothEdges: a request at every "+
+				"ceiling would answer 413", name, limit.Name)
+		}
+	}
+	return true
+}
+
+// ceilingRule: the walk above, as a function, so the resolved condition of an
+// `if` init-binding is judged by exactly the same reading as everything else.
+// Stated twice it would be the copy that stops refusing something.
+func ceilingRule(t *testing.T, name string) func(ast.Node) bool {
+	return func(n ast.Node) bool {
+		cmp, ok := n.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		return ceilingComparison(t, name, cmp)
+	}
+}
+
+// lengthBoundInInit: what an `if` measures in its own init statement, and the
+// name it binds it to. Nothing else — a binding that is not a text or byte
+// length is not this canary's business.
+func lengthBoundInInit(init ast.Stmt) (ast.Expr, string) {
+	assign, ok := init.(*ast.AssignStmt)
+	if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+		return nil, ""
+	}
+	name, ok := assign.Lhs[0].(*ast.Ident)
+	if !ok {
+		return nil, ""
+	}
+	if !textLength(assign.Rhs[0]) && !byteLength(assign.Rhs[0]) {
+		return nil, ""
+	}
+	return assign.Rhs[0], name.Name
+}
+
+// resolved: the same comparison with the bound name put back to what it
+// measures, so the rule reads the call the author actually wrote. A COPY —
+// the file's AST is read by other canaries and must not be rewritten under
+// them.
+func resolved(cmp *ast.BinaryExpr, name string, measured ast.Expr) *ast.BinaryExpr {
+	out := *cmp
+	if id, ok := out.X.(*ast.Ident); ok && id.Name == name {
+		out.X = measured
+	}
+	if id, ok := out.Y.(*ast.Ident); ok && id.Name == name {
+		out.Y = measured
+	}
+	return &out
 }
 
 // …and the exemption above is one line from blinding the canary, so it is

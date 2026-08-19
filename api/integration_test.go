@@ -2282,6 +2282,23 @@ func TestTheBodyCeilingHoldsBothEdges(t *testing.T) {
 			"the application invites answers 413",
 			maxLogoBytes, base64Grows, envelope, maxBodySize)
 	}
+	// The six message templates, which travel in ONE body and are therefore
+	// their own request, like the logo. CLAUDE.md states this arithmetic —
+	// « 6 × 5 000 × 4 = 120 000, under the 128 KiB a body may weigh » — and
+	// until this line it was STATED AND NOT CHECKED: `maxTemplateRunes` was
+	// written `if n := utf8.RuneCountInString(text); n > …`, which bound the
+	// measurement to a name and made it invisible to the canary that demands
+	// a ceiling join this sum. Raised to 60 000 it stayed green, at ten times
+	// the body limit.
+	perTemplate := len(`"courrier_decouverte.txt":"",`)
+	widestTemplates := utf8Worst*len(templateFiles)*maxTemplateRunes +
+		len(`{"templates":{}}`) + len(templateFiles)*perTemplate
+	if widestTemplates >= maxBodySize {
+		t.Errorf("six templates at maxTemplateRunes (%d) weigh %d bytes, over "+
+			"a body limit of %d: a campaign saving the texts this application "+
+			"invites it to write answers 413",
+			maxTemplateRunes, widestTemplates, maxBodySize)
+	}
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	_, srv := testServer(t)
 	c := clientOn(t, srv, "paraphe.test")

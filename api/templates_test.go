@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The Go copy of the engine's vocabulary against the file both languages
@@ -430,4 +431,45 @@ func keysIn(m map[string]any) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// A SAVE AT EVERY CEILING THE ROUTE ITSELF ALLOWS, in 4-byte runes.
+//
+// The arithmetic in TestTheBodyCeilingHoldsBothEdges says the six fit under
+// `maxBodySize`; this is the request that proves it, and it is the one a
+// campaign writing six long templates actually sends. Refused, it answers 413
+// with nothing on screen saying which limit was the problem.
+func TestSixTemplatesAtEveryCeilingStillFitInOneBody(t *testing.T) {
+	s, srv := testServer(t)
+	pw := createAccount(t, s, "coordination@exemple.fr", RoleCoordination, nil)
+	c := newClient(t, srv)
+	if code := c.signIn("coordination@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("coordination sign-in: %d", code)
+	}
+	templates := map[string]string{}
+	for _, file := range templateFiles {
+		// 𝄞 is four bytes, the worst case UTF-8 allows, and it is graphic:
+		// `legibleText` refuses controls and bidi reordering, not music.
+		text := strings.Repeat("𝄞", maxTemplateRunes)
+		if strings.HasPrefix(file, "email") {
+			const subject = "OBJET: x\n"
+			text = subject + strings.Repeat("𝄞",
+				maxTemplateRunes-utf8.RuneCountInString(subject))
+		}
+		if n := utf8.RuneCountInString(text); n != maxTemplateRunes {
+			t.Fatalf("%s: the fixture is %d runes, not the ceiling", file, n)
+		}
+		templates[file] = text
+	}
+	code, answer := c.call(http.MethodPost, "/api/campaign/templates",
+		map[string]any{"templates": templates})
+	if code != http.StatusOK {
+		t.Fatalf("six templates at the ceiling were refused: %d %v — the body "+
+			"limit is below the sum of the route's own ceilings", code, answer)
+	}
+	// …and all six were stored, or the request fit because something dropped
+	campaign, _ := layersOf(t, c)
+	if len(campaign) != len(templateFiles) {
+		t.Errorf("stored %d of %d templates", len(campaign), len(templateFiles))
+	}
 }
