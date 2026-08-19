@@ -2,15 +2,17 @@
 
 En {annee_recente}, vous avez présenté {candidat_recent} à l'élection présidentielle. Ce geste est public, et nous savons ce qu'il peut coûter localement : c'est précisément pourquoi il nous a marqués, et pourquoi nous vous écrivons aujourd'hui, à vous plutôt qu'à d'autres.
 
-Je m'appelle {candidat}. {candidat_description_longue}
+Je vous écris au nom de {candidat}, qui sollicite les présentations pour 2027. Sa démarche, dans ses mots :
 
-Je ne vous demande pas d'adhérer à mes idées. Je vous demande d'envisager de me permettre de les soumettre au débat et au suffrage — ce que la loi appelle une présentation, et que la doctrine constitutionnelle distingue explicitement du soutien politique. Le « je ne partage pas vos idées, mais je me battrai pour qu'elles puissent s'exprimer » a, dans notre République, une forme concrète : elle tient sur le formulaire que le Conseil constitutionnel vous adressera début 2027, et que vous êtes {seul_e} à pouvoir renvoyer.
+{candidat_description_longue}
+
+Nous ne vous demandons pas d'adhérer à ces idées. Nous vous demandons d'envisager de permettre qu'elles soient soumises au débat et au suffrage — ce que la loi appelle une présentation, et que la doctrine constitutionnelle distingue explicitement du soutien politique. Le « je ne partage pas vos idées, mais je me battrai pour qu'elles puissent s'exprimer » a, dans notre République, une forme concrète : elle tient sur le formulaire que le Conseil constitutionnel vous adressera début 2027, et que vous êtes {seul_e} à pouvoir renvoyer.
 
 {argument_personnel}
 
-Mon équipe se permettra de vous appeler dans les prochaines semaines. Si vous préférez ne pas être {sollicite_e}, un mot suffira et nous le respecterons.
+Nous nous permettrons de vous appeler dans les prochaines semaines. Si vous préférez ne pas être {sollicite_e}, un mot suffira et nous le respecterons.
 
-Avec ma considération et ma gratitude pour votre engagement au service {commune_de},
+Avec notre considération et notre gratitude pour votre engagement au service {commune_de},
 
-{candidat}
+{signataire}, {signataire_qualite}
 {contact_tel} — {contact_email}

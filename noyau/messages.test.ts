@@ -430,5 +430,47 @@ describe("what an unconfigured campaign means", () => {
         `06 12 34 56 78 — ${cfg.contact_email} — ${cfg.site}`,
       );
     });
+
+    // WHOEVER SENDS IT IS WHOEVER SIGNS IT, and the letter used not to.
+    // It was written at the candidate's own « je » — « Je m'appelle X », « mes
+    // idées », « mon équipe » — and signed with the candidate's name, while
+    // the person who prints it, stamps it and posts it is a volunteer. Five
+    // hundred letters putting words in a candidate's mouth and a signature
+    // they never gave.
+    //
+    // Structural, not prose: every template that LEAVES carries the
+    // signatory. The candidate is quoted in it — `candidat_description_longue`
+    // is first-person by design — but quoting is announced, and the name at
+    // the bottom is the sender's. The telephone scripts are not in this list:
+    // nobody signs a phone call.
+    it.each(["email", "letter"] as const)(
+      "signs the %s with the person who sends it",
+      (channel) => {
+        // both ranks: the four templates that leave, not one of them
+        const noSignal: Mayor = {
+          ...ENDORSER,
+          rank: "no_signal",
+          recent_candidate: "",
+          recent_year: "",
+          endorsement_history: "",
+        };
+        for (const mayor of [ENDORSER, noSignal]) {
+          const made = engine[channel](mayor, CFG);
+          const text = typeof made === "string" ? made : made.body;
+          expect(text).toContain(CFG.signataire);
+          expect(text).toContain(CFG.signataire_qualite);
+          // the last line that names a person is the signatory's, never the
+          // candidate's: a message signed by the candidate is one the sender
+          // cannot answer for
+          const signature = text
+            .trimEnd()
+            .split("\n")
+            .filter(Boolean)
+            .slice(-2);
+          expect(signature.join("\n")).toContain(CFG.signataire);
+          expect(signature.join("\n")).not.toContain(CFG.candidat);
+        }
+      },
+    );
   });
 });

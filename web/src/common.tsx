@@ -111,7 +111,10 @@ export const CAMPAIGN_FIELDS: CampaignField[] = [
     group: "Le candidat ou la candidate",
     label: "Sa présentation en deux ou trois phrases",
     example: "Je suis médecin depuis vingt ans dans le Cantal…",
-    hint: "À la première personne. N'apparaît que dans le courrier.",
+    hint:
+      "À la première personne : le courrier la CITE, annoncée par « sa " +
+      "démarche, dans ses mots ». Le reste de la lettre est écrit et signé " +
+      "par vous. N'apparaît que dans le courrier.",
     long: true,
   },
   {
