@@ -58,8 +58,13 @@ var routeLimits = map[string]string{
 	// Drawing a new password for somebody who lost theirs: a WRITE, not a
 	// verification — nothing is guessed here, and it is the same act as
 	// opening an access, one line up.
-	"POST /api/team/account/{email}/password":       "write_account",
-	"POST /api/campaign":                            "write_account",
+	"POST /api/team/account/{email}/password": "write_account",
+	"POST /api/campaign":                      "write_account",
+	// The campaign's own message templates, and one team's. Same ceiling as
+	// every other authenticated write: they are edited by hand, by somebody
+	// who signed in, a few times in a campaign's life.
+	"POST /api/campaign/templates":                  "write_account",
+	"POST /api/team/templates":                      "write_account",
 	"POST /api/campaign/logo":                       "write_account",
 	"DELETE /api/campaign/logo":                     "write_account",
 	"POST /api/request":                             "hosting_ip",
@@ -150,6 +155,7 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 		"POST /api/team/account/{email}/password": "/api/team/account/qui@exemple.fr/password",
 		"POST /api/team/requests/{id}":            "/api/team/requests/1",
 		"POST /api/campaign":                      "/api/campaign",
+		"POST /api/campaign/templates":            "/api/campaign/templates",
 		"POST /api/campaign/logo":                 "/api/campaign/logo",
 		"DELETE /api/campaign/logo":               "/api/campaign/logo",
 	}
@@ -163,6 +169,13 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 			if strings.HasPrefix(declared, "POST /api/admin/") {
 				continue
 			}
+			// a lead's own routes: another ROLE, and the role guard sits
+			// before the ceiling, so a coordination gets 403 here and proves
+			// nothing. Skipped by the SAME list that drives them one test
+			// down, never by a name written twice.
+			if _, isLead := leadWriteRoutes[declared]; isLead {
+				continue
+			}
 			t.Errorf("%s is declared write_account and no case drives it: a "+
 				"ceiling nothing exercises is a ceiling nothing keeps", declared)
 			continue
@@ -170,6 +183,56 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 		// the METHOD the map declares, not POST: a route driven with the
 		// wrong verb answers 405 from the mux, before any limiter, and the
 		// case would then pass while exercising nothing
+		method, _, _ := strings.Cut(declared, " ")
+		if code, _ := c.call(method, path, map[string]any{}); code !=
+			http.StatusTooManyRequests {
+			t.Errorf("%s answered %d with the write_account bucket exhausted: "+
+				"it carries no ceiling any more", declared, code)
+		}
+	}
+}
+
+// The routes ONE TEAM'S LEAD reaches and a coordination does not. One list,
+// two readers: the walk above skips exactly what this one drives, so a lead
+// route added here cannot fall out of both.
+var leadWriteRoutes = map[string]string{
+	"POST /api/team/templates": "/api/team/templates",
+}
+
+// A lead's own write routes, under the same ceiling, driven by a lead —
+// `leadOnly` sits BEFORE the limiter, so a coordination answers 403 there and
+// proves nothing about any ceiling. Same lesson as the administration walk
+// below, one role over.
+func TestEveryLeadWriteRouteIsUnderItsCeiling(t *testing.T) {
+	s, srv := testServer(t)
+	team := createTeam(t, s, "Nord", "01")
+	pw := createAccount(t, s, "referent@exemple.fr", RoleLead, &team)
+	c := newClient(t, srv)
+	if code := c.signIn("referent@exemple.fr", pw); code != http.StatusOK {
+		t.Fatalf("lead sign-in: %d", code)
+	}
+	// filled through a route EVERY role reaches, so the bucket is full before
+	// the first lead-only route is touched — and asserted at the crossing, or
+	// the walk below would rest on a bucket that was never filled
+	for i := 1; i <= limitWriteAccount.events; i++ {
+		if code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+			map[string]any{"note": "x"}); code == http.StatusTooManyRequests {
+			t.Fatalf("429 at attempt %d, below the ceiling of %d",
+				i, limitWriteAccount.events)
+		}
+	}
+	if code, _ := c.call(http.MethodPost, "/api/me/personal_note",
+		map[string]any{"note": "x"}); code != http.StatusTooManyRequests {
+		t.Fatalf("the bucket did not fill: attempt %d answered %d",
+			limitWriteAccount.events+1, code)
+	}
+
+	for declared, path := range leadWriteRoutes {
+		if class := routeLimits[declared]; class != "write_account" {
+			t.Errorf("%s is driven here as a write_account route but declares "+
+				"%q", declared, class)
+			continue
+		}
 		method, _, _ := strings.Cut(declared, " ")
 		if code, _ := c.call(method, path, map[string]any{}); code !=
 			http.StatusTooManyRequests {

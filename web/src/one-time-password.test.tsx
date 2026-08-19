@@ -70,6 +70,7 @@ describe("a one-time password survives a double press", () => {
           me={who("coord@exemple.fr", "Coordination")}
           cfg={teamConfig()}
           onCfg={() => {}}
+          onMe={() => {}}
           onError={() => {}}
           onMessage={() => {}}
         />,

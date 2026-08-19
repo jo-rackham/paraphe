@@ -269,7 +269,12 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 			org_id INTEGER NOT NULL,
 			name TEXT NOT NULL,
 			departments TEXT DEFAULT '',
-			created_at TEXT)`,
+			created_at TEXT,
+			-- This team's own message templates, on top of its campaign's.
+			-- Sparse, like the campaign's: what a team does not rewrite it
+			-- keeps taking from the campaign, INCLUDING when the campaign
+			-- changes it afterwards.
+			templates JSONB NOT NULL DEFAULT '{}'::jsonb)`,
 		// Same remark for the address: one person can volunteer in two
 		// campaigns hosted here, with the same address.
 		`CREATE TABLE IF NOT EXISTS accounts(
@@ -310,6 +315,10 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 		// this file creates `accounts`, and the ALTER failed the whole start.
 		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS phone_outreach BOOLEAN`,
 		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`,
+		// This team's own templates, over its campaign's. HERE and not with
+		// the orgs upgrades for the reason written above `accounts`: that list
+		// runs before this file creates `teams`.
+		`ALTER TABLE teams ADD COLUMN IF NOT EXISTS templates JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		// Sign-in links. Only the token's SHA-256 is here: what arrives in an
 		// inbox exists nowhere on this side, so a dump of this table opens no
 		// account (link.go).

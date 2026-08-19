@@ -355,6 +355,9 @@ export default function Team({ config }: { config: ServerConfig }) {
           // the volunteer's own answer wins; null means they never gave one,
           // and the campaign's default then applies AS IT CHANGES
           phoneOutreach={account.phone_outreach ?? cfg.phone_outreach ?? false}
+          // the campaign's texts, then this volunteer's team's, over the
+          // image's — resolved by the engine, in that order
+          templates={[me.templates?.campaign, me.templates?.team]}
           drafts={cardDrafts}
           status={chosen.mayor.status}
           notes={chosen.notes ?? []}
@@ -381,6 +384,7 @@ export default function Team({ config }: { config: ServerConfig }) {
         <GestionEquipe
           onError={report}
           me={me}
+          onMe={setMe}
           cfg={cfg}
           onCfg={setCfg}
           onMessage={setMessage}

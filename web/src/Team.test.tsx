@@ -193,7 +193,14 @@ describe("what the management screen is called", () => {
     // function feeds all three, and a name written three times is a name
     // that stays behind in two of them
     expect(button(shown)).toBeDefined();
-    expect(text()).not.toContain(hidden);
+    // scoped to the NAVIGATION, which is what this is about. Swept over the
+    // whole document it also read the GUIDE, and the guide names both screens
+    // on purpose — it is shared by every role, and a référent has to be told
+    // theirs is called « Mon équipe ». A guard that cries on prose is one the
+    // next author routes around.
+    expect(container.querySelector("nav")?.textContent ?? "").not.toContain(
+      hidden,
+    );
     await click(shown);
     await until(() => text().includes("Les accès"), "the screen opens");
     expect(container.querySelector("h1")?.textContent).toBe(shown);

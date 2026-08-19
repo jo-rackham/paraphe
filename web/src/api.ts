@@ -20,6 +20,7 @@ import type {
   ServerConfig,
   Team,
   TeamData,
+  Templates,
 } from "./types.ts";
 
 const ROOT = `${import.meta.env.BASE_URL}api/`;
@@ -469,6 +470,23 @@ export const updateCampaign = (
       phone_outreach: phoneOutreach,
     },
   });
+
+// The message templates, likewise a call of their own and for the same
+// reason: six of them do not fit under the ceiling beside nine campaign
+// fields. The map REPLACES the whole overlay — dropping a key is how
+// « revenir au texte fourni » is said — and the answer carries what was
+// STORED, which is not what was sent: an emptied text is an override removed.
+export const updateCampaignTemplates = (
+  templates: Templates,
+): Promise<{ templates: Templates }> =>
+  call("campaign/templates", { method: "POST", body: { templates } });
+
+// The same, one level down: a référent's own team, over its campaign's. No
+// team identifier — a lead edits theirs and nobody else's.
+export const updateTeamTemplates = (
+  templates: Templates,
+): Promise<{ templates: Templates }> =>
+  call("team/templates", { method: "POST", body: { templates } });
 
 // The logo is its own call: an image does not fit in what a campaign body
 // leaves under the request ceiling, and replacing one should not require

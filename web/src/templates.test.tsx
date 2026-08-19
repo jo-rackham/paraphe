@@ -1,0 +1,194 @@
+// A campaign writes its own texts, and each of its teams writes its own on
+// top. What is EMPTY is inherited — and the screen has to keep it empty, or
+// the whole design is a trap.
+//
+// The API is mocked: the refusals themselves are the server's and are pinned
+// in api/templates_test.go. What is tested here is the layering, and the one
+// thing only this end can get wrong.
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import * as API from "./api.ts";
+import { Fiche } from "./common.tsx";
+import * as M from "./messages.ts";
+import { ModelesMessages } from "./Templates.tsx";
+import { teamConfig } from "./testing/fixtures.ts";
+import type { Mayor, Templates } from "./types.ts";
+
+// An ENDORSER, so the card renders `courrier.txt` and not its discovery
+// twin: the rank chooses the file, and that choice stays the engine's
+// whoever wrote the text.
+const ENDORSER: Mayor = {
+  insee_code: "01001",
+  commune: "Artemare",
+  department: "Ain",
+  last_name: "DESCHAMPS",
+  first_name: "Roland",
+  title: "M.",
+  rank: "has_endorsed",
+  recent_candidate: "Anasse Kazib",
+  recent_year: "2022",
+  endorsement_history: "2022: KAZIB Anasse (A)",
+};
+
+vi.mock("./api.ts", { spy: true });
+
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+
+const flush = () =>
+  act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+beforeEach(() => {
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.resetAllMocks();
+});
+
+const editor = async (
+  niveau: "campaign" | "team",
+  propres: Templates,
+  herites: Templates = {},
+  onEnregistre: (t: Templates) => void = () => {},
+) => {
+  await act(async () => {
+    root.render(
+      <ModelesMessages
+        niveau={niveau}
+        propres={propres}
+        herites={herites}
+        onEnregistre={onEnregistre}
+        onError={() => {}}
+        onMessage={() => {}}
+      />,
+    );
+  });
+  await flush();
+};
+
+const box = () =>
+  container.querySelector("#modele-texte") as HTMLTextAreaElement;
+
+const choose = async (file: string) => {
+  const select = container.querySelector("#modele-choisi") as HTMLSelectElement;
+  await act(async () => {
+    select.value = file;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
+
+const press = async (label: string) => {
+  const b = [...container.querySelectorAll("button")].find((x) =>
+    (x.textContent ?? "").includes(label),
+  );
+  if (!b) throw new Error(`no button « ${label} »`);
+  await act(async () => b.click());
+  await flush();
+};
+
+// THE ONE THING ONLY THIS END CAN GET WRONG.
+//
+// Shown as the VALUE of the box, the inherited text is a copy the moment
+// anybody presses Enregistrer — and every later correction the coordination
+// makes stops reaching that team, silently, because the team now has a
+// template of its own that happens to be identical. As a placeholder it stays
+// visible and stays inherited.
+it("shows the inherited text without ever putting it in the box", async () => {
+  await editor("team", {}, { "courrier.txt": "Texte de la campagne." });
+  await choose("courrier.txt");
+  expect(box().value).toBe("");
+  expect(box().placeholder).toBe("Texte de la campagne.");
+
+  // and where the level above has written nothing, the image's own text
+  await editor("campaign", {});
+  await choose("email.txt");
+  expect(box().value).toBe("");
+  expect(box().placeholder).toBe(M.SHIPPED_TEMPLATES["email.txt"]);
+});
+
+it("saves nothing for a level that has touched nothing", async () => {
+  vi.mocked(API.updateTeamTemplates).mockResolvedValue({ templates: {} });
+  await editor("team", {}, { "courrier.txt": "Texte de la campagne." });
+  await press("Enregistrer");
+  expect(API.updateTeamTemplates).toHaveBeenCalledWith({});
+});
+
+it("sends the campaign's overlay to the campaign route and the team's to its own", async () => {
+  vi.mocked(API.updateCampaignTemplates).mockResolvedValue({ templates: {} });
+  await editor("campaign", { "courrier.txt": "x" });
+  await press("Enregistrer");
+  expect(API.updateCampaignTemplates).toHaveBeenCalled();
+  expect(API.updateTeamTemplates).not.toHaveBeenCalled();
+});
+
+// « Revenir au texte fourni » REMOVES the key. Sent as an empty string it
+// would be an override that renders one blank page, five hundred times — and
+// the server reads an empty value the same way for that reason, so this is
+// the two ends agreeing rather than one of them carrying the rule.
+it("drops the key when the text goes back to the inherited one", async () => {
+  vi.mocked(API.updateTeamTemplates).mockResolvedValue({ templates: {} });
+  await editor("team", { "courrier.txt": "propre à l'équipe" });
+  await choose("courrier.txt");
+  expect(box().value).toBe("propre à l'équipe");
+  await press("Revenir au texte");
+  expect(box().value).toBe("");
+  await press("Enregistrer");
+  const sent = vi.mocked(API.updateTeamTemplates).mock.calls[0][0];
+  expect(Object.hasOwn(sent, "courrier.txt")).toBe(false);
+});
+
+// What comes BACK is what the screen shows, not what went out: an emptied
+// text is an override removed, and the box has to fall back to the inherited
+// one rather than keep the string the person deleted.
+it("takes the stored overlay from the answer, not from what it sent", async () => {
+  vi.mocked(API.updateTeamTemplates).mockResolvedValue({ templates: {} });
+  const seen: Templates[] = [];
+  await editor("team", { "courrier.txt": "   " }, {}, (t) => seen.push(t));
+  await press("Enregistrer");
+  expect(seen).toEqual([{}]);
+});
+
+// The card is what a mayor actually receives, and it renders from the layers
+// in order: the team's over the campaign's over the image's.
+it("renders a card from the team's text, then the campaign's, then the image's", async () => {
+  const cfg = teamConfig().campaign;
+  const render = async (templates: (Templates | undefined)[]) => {
+    await act(async () => {
+      root.render(
+        <Fiche
+          mayor={ENDORSER}
+          cfg={cfg}
+          templates={templates}
+          onBack={() => {}}
+          onStatus={() => {}}
+        />,
+      );
+    });
+    await flush();
+    return container.textContent ?? "";
+  };
+
+  const campaign = { "courrier.txt": "Lettre de la campagne.\n" };
+  const team = { "courrier.txt": "Lettre de l'équipe Nord.\n" };
+
+  expect(await render([campaign, {}])).toContain("Lettre de la campagne.");
+  expect(await render([campaign, team])).toContain("Lettre de l'équipe Nord.");
+  // a team that rewrote nothing keeps following the campaign — including
+  // when the campaign changes its text afterwards
+  expect(await render([campaign, { "email.txt": "OBJET: x\ny\n" }])).toContain(
+    "Lettre de la campagne.",
+  );
+  // and with no layer at all, the image's own letter
+  expect(await render([])).toContain(cfg.signataire);
+});

@@ -11,6 +11,7 @@ import {
   ROLES,
   useSubmitGuard,
 } from "./common.tsx";
+import { ModelesMessages } from "./Templates.tsx";
 import type {
   Me,
   Message,
@@ -503,12 +504,20 @@ function DemandesEquipes({
 export function GestionEquipe({
   onError,
   me,
+  onMe,
   cfg,
   onCfg,
   onMessage,
 }: {
   onError: (e: unknown) => void;
   me: Me;
+  /**
+   * The templates a save changes live on `me`, because that is what the CARD
+   * renders from. Handed back up rather than refetched: /api/me is the only
+   * route that carries them, and a screen that saved a text and then showed
+   * the old one until the next reload is a screen that looks broken.
+   */
+  onMe: (me: Me) => void;
   cfg: ServerConfig;
   onCfg: (c: ServerConfig) => void;
   onMessage: (m: Message) => void;
@@ -605,6 +614,38 @@ export function GestionEquipe({
           onCfg={onCfg}
           onError={onError}
           onMessage={onMessage}
+        />
+      )}
+
+      {/* The six texts this level sends. Coordination edits the CAMPAIGN's,
+          over the ones the image carries; a référent edits their TEAM's, over
+          the campaign's — the same split as the heading above, and the reason
+          a lead never sees a « campagne » box they cannot save. A volunteer
+          edits neither: they write the personal touch, not the template. */}
+      {(coordination || me.account.role === "lead") && (
+        <ModelesMessages
+          niveau={coordination ? "campaign" : "team"}
+          propres={
+            (coordination ? me.templates?.campaign : me.templates?.team) ?? {}
+          }
+          herites={(coordination ? {} : me.templates?.campaign) ?? {}}
+          onError={onError}
+          onMessage={onMessage}
+          onEnregistre={(templates) =>
+            // straight onto `me`, because that is what the CARD renders from:
+            // a save that left the old text on the next card opened would
+            // read as a save that did not work
+            onMe({
+              ...me,
+              templates: {
+                campaign: me.templates?.campaign ?? {},
+                team: me.templates?.team ?? {},
+                ...(coordination
+                  ? { campaign: templates }
+                  : { team: templates }),
+              },
+            })
+          }
         />
       )}
 

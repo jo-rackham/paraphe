@@ -485,7 +485,7 @@ func (s *Server) routeRedeemLink(w http.ResponseWriter, r *http.Request) {
 		refuse()
 		return
 	}
-	departments, err := s.teamDepartments(r, c)
+	body, err := s.meBodyFor(r, c)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -499,7 +499,7 @@ func (s *Server) routeRedeemLink(w http.ResponseWriter, r *http.Request) {
 	// so. Refunding the request ceiling here credited an event nobody spent,
 	// and that credit told an attacker watching the ceiling the moment its
 	// owner clicked their link.
-	s.openSession(w, r, c, departments, nil,
+	s.openSession(w, r, c, body, nil,
 		"signin_link_succeeded",
 		"link", purpose)
 }

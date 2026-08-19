@@ -900,6 +900,100 @@ is the campaign's coordination that decides.
   guard read at the top of a handler cannot fix that, because the write comes
   after the await; an append cannot lose one whatever the interleaving.
 
+## The texts a campaign sends, and who may rewrite them
+
+The six `modeles/*.txt` are the image's. A campaign rewrites them for itself
+(coordination, `POST /api/campaign/templates`), and each of its teams rewrites
+them again on top (its référent, `POST /api/team/templates`). Two sparse
+overlays in `orgs.templates` and `teams.templates`, resolved **team →
+campaign → image** by `mergeTemplates`.
+
+- **WHAT A LAYER DOES NOT MENTION IT INHERITS**, and it keeps inheriting: a
+  team that customised the email alone follows the campaign's letter as the
+  campaign CHANGES it. Copying the six in at creation would have frozen every
+  campaign on the templates of the day it was approved — the failure
+  `phone_outreach` describes one field over. The screen carries that rule or
+  it is a trap: the inherited text is the textarea's PLACEHOLDER and never its
+  value, because a box pre-filled with the campaign's letter becomes a frozen
+  copy the moment anyone presses « Enregistrer », identical on screen and no
+  longer following anything. `templates.test.tsx` pins it, and the mutation
+  that fills the box goes red on that assertion.
+- **An EMPTY value removes the override; it never stores a template of
+  nothing.** That is the shape a textarea sends when somebody selects all and
+  deletes, and it is exactly what « revenir au texte fourni » means — stored
+  literally it is a campaign whose letter renders as one blank page, five
+  hundred times. Both ends read it that way (`storableTemplates`,
+  `mergeTemplates`), so a row written by an older client resolves the same.
+- **REFUSED AT SAVE, never at send.** The engine is TypeScript and the API
+  renders no message, but an invalid template is not a bad request — it is
+  every message the campaign sends, discovered by the mass mailing on a Sunday
+  evening with 1 960 letters not printed, or by a volunteer whose card shows an
+  error where the message should be. Neither of them wrote it and neither can
+  fix it. `api/templates.go` reproduces the engine's refusals in front of the
+  person who typed the text: unknown placeholder, an email with no `OBJET:`
+  line, a name outside the six, a bidi override, the size bound.
+- **The vocabulary is `noyau/placeholders.json`**, the referee both languages
+  answer to — the same dispositif as `campaign-optional.json`, and the copy in
+  Go is a copy. The chain is `fields()` → the JSON → the Go maps, with a canary
+  at each link; the direction that matters is a name in Go the engine does not
+  produce, which accepts a template the engine will later refuse. What the
+  editor SHOWS comes from `placeholderNames()`, derived from `fields()` rather
+  than listed a fourth time.
+- **THE TWO RANK VOCABULARIES ARE DISJOINT, and that is what enforces the
+  project's cardinal invariant once campaigns edit the files.** Choosing the
+  template by rank stops being enough: pasting « En {annee_recente}, vous avez
+  présenté {candidat_recent}. » into the discovery template printed « En ,
+  vous avez présenté . » to 32 866 mayors, in silence. Because the sets share
+  no name, that paste is refused BY NAME, in both directions, and the refusal
+  says which audience the file addresses — told only that the placeholder is
+  unknown, whoever pasted it looks for a typo in a word spelt correctly.
+  **The rank itself stays the engine's decision**: personalising must not let
+  anyone choose which file goes to whom.
+- **`maxTemplateRunes` is ARITHMETIC, not taste.** A save carries all six, a
+  rune is at most four bytes, and 6 × 5 000 × 4 = 120 000 — under the 128 KiB
+  a body may weigh. Any larger and a legitimate save is refused by
+  `maxBodySize` instead, which answers about kilobytes to somebody who was
+  writing a letter. It is also why these have a route of their own rather than
+  a tenth campaign field: that body already weighs 94 616 bytes at its
+  ceilings, the same reason the logo is not a field either.
+- **`orgs.templates` is NOT selected by `ReadOrg`**, deliberately, and the
+  column carries the note. That query runs on every request that resolves a
+  subdomain — it is why the logo is a pointer and not an image — and six
+  templates are tens of kilobytes read to answer a readiness probe. They are
+  read in `/api/me`, once per page load, and written where they are edited.
+- **`/api/me` carries the two layers apart, not one resolved set**, because
+  the screen that edits them has to tell them apart: « revenir au texte de la
+  campagne » is a button nobody can aim at a merged text. It is not in
+  `/api/config` — that body is public and has no account, and a team's
+  overlay is its team's.
+  **THREE DOORS ANSWER THAT SHAPE** — `/api/me`, signing in, redeeming a link
+  — and it was spelt out at two of them. The templates went into one: a
+  volunteer who signed in and went straight to a card rendered from the
+  IMAGE's texts while their campaign's own sat unused, until they happened to
+  reload. Every unit test stayed green, because each door is asserted on its
+  own; the end-to-end journey is what found it, and
+  `TestSigningInSaysTheSameThingAsMe` compares the three by KEY.
+  **And the body is built by the CALLER, before it commits.** `openSession`
+  receives it rather than reading it: the sign-in route commits when it
+  upgrades an older password hash, so a read inside `openSession` answered
+  « tx is closed » — on that one path, which is the one nobody exercises by
+  hand. The comment above `teamDepartments` had said so since it was written.
+- **`leadOnly` is narrower than `managers` on purpose.** `managers` admits
+  coordination, which belongs to no team: it would write into a row that does
+  not exist and be told « enregistré » by an UPDATE that matched nothing. Its
+  own texts are the campaign's, one route over — the split « Ma campagne » and
+  « Mon équipe » already make on screen. A coordination cannot edit a given
+  team's overlay, and that is the same line `routeToggleAccount` draws.
+- **The mass mailing still reads `modeles/` off disk.** `outils/` is the
+  world with no server, configured by `config/campagne.yaml`; the app is the
+  world with a database. That split already exists for the telephone opt-in
+  (`app.appel_telephonique` against `orgs.phone_outreach`) and is the same
+  here. A campaign that customises its templates in the app and then runs
+  `task messages` gets the image's.
+- Browser mode is untouched: an account-less volunteer renders from the
+  templates the image carries. The campaign values travel through `?org=` and
+  through the origin; the templates do not, yet.
+
 ## Signing in by email
 
 A second path beside the password, ON only when `PARAPHE_SMTP_URL` is set —

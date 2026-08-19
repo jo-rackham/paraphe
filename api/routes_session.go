@@ -252,7 +252,10 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 	// Read BEFORE the upgrade below, because committing closes the
 	// transaction and everything this answer needs must already be in hand.
-	departments, err := s.teamDepartments(r, c)
+	// The message templates are in there too, and they are the reason this
+	// paragraph is not merely a nicety: read after the commit, the one
+	// sign-in that commits — the hash upgrade — answered 500.
+	body, err := s.meBodyFor(r, c)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -279,8 +282,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
-	s.openSession(w, r, c, departments, &limitSignInAccount,
-		"signin_succeeded")
+	s.openSession(w, r, c, body, &limitSignInAccount, "signin_succeeded")
 }
 
 // openSession is what happens once a caller has PROVED who they are, by
@@ -291,16 +293,19 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 // this was pulled together, and a volunteer who fumbled a password before
 // asking for a link would have carried those failures into the next window.
 //
-// The account and its departments are read by the CALLER, before it
-// commits — the transaction closes with that commit, and everything this
-// answer needs must already be in hand.
+// The whole ANSWER is built by the CALLER, before it commits — the
+// transaction closes with that commit, and everything this reply needs must
+// already be in hand. `meBody` is what builds it, so the shape stays in one
+// place while the reading stays where the transaction is still open. Read
+// here instead, the templates came back « tx is closed » on the one sign-in
+// that commits: the hash upgrade.
 // countedUnder names the account-keyed ceiling THIS ROUTE spent an event on,
 // or nil when it spent none. Not the door the caller came through: redeeming
 // a link carries a token and no address, so it counts nothing per account —
 // and refunding the request ceiling there gave back an event nobody had
 // spent, which is the same observable credit the refund exists to avoid.
 func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
-	c *Account, departments []string, countedUnder *limitClass, event string,
+	c *Account, body map[string]any, countedUnder *limitClass, event string,
 	extra ...any) {
 	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now()); err != nil {
 		s.failure(w, err)
@@ -332,11 +337,7 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
 	}
 	s.securityEvent(r, slog.LevelInfo, event,
 		append([]any{"account", s.accountPseudonym(c.Email)}, extra...)...)
-	replyJSON(w, http.StatusOK, map[string]any{
-		"account":     c,
-		"departments": departments,
-		"may_manage":  c.MayManage(),
-	})
+	replyJSON(w, http.StatusOK, body)
 }
 
 // POST /api/me/password — changing one's OWN password.
@@ -445,16 +446,45 @@ func (s *Server) routeMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replyMe(w http.ResponseWriter, r *http.Request, c *Account) {
-	departments, err := s.teamDepartments(r, c)
+	body, err := s.meBodyFor(r, c)
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
-	replyJSON(w, http.StatusOK, map[string]any{
+	replyJSON(w, http.StatusOK, body)
+}
+
+// meBody: what a client is told about ITSELF, written ONCE.
+//
+// Three routes answer this shape — /api/me, signing in, redeeming a link —
+// and it used to be spelt out at two of them. Adding the message templates to
+// one and not the other is exactly what happened: a volunteer who signed in
+// and went straight to a card rendered from the templates the IMAGE carries
+// while their campaign's own sat unused, until they happened to reload. The
+// end-to-end journey found it, and `TestSigningInSaysTheSameThingAsMe` is
+// what stops the next field doing the same.
+//
+// The TEMPLATES are here and not in /api/config: that body is public and has
+// no account, and a team's overlay is its team's.
+func (s *Server) meBodyFor(r *http.Request, c *Account) (
+	map[string]any, error) {
+	departments, err := s.teamDepartments(r, c)
+	if err != nil {
+		return nil, err
+	}
+	campaignTemplates, teamTemplates, err := s.templateLayers(r, c)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
 		"account":     c,
 		"departments": departments,
 		"may_manage":  c.MayManage(),
-	})
+		"templates": map[string]any{
+			"campaign": campaignTemplates,
+			"team":     teamTemplates,
+		},
+	}, nil
 }
 
 // teamDepartments: my team's geographic scope (empty = everything).

@@ -82,6 +82,7 @@ const render = async (onError: (e: unknown) => void = () => {}) => {
         me={ME}
         cfg={CONFIG}
         onCfg={() => {}}
+        onMe={() => {}}
         onMessage={() => {}}
       />,
     );

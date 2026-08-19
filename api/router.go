@@ -194,6 +194,13 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.managers),
 				guard(s.limitAccount(limitWriteAccount))).
 				Post("/account/{email}/password", s.routeResetPassword)
+			// This team's own message templates, over its campaign's. A LEAD
+			// and not a manager: `s.managers` also admits coordination, which
+			// belongs to no team and would be writing into a row that is not
+			// there — its own texts are one route below.
+			r.With(guard(s.leadOnly),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/templates", s.routeTeamTemplates)
 		})
 		r.With(guard(s.coordinationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
@@ -202,6 +209,12 @@ func (s *Server) router() chi.Router {
 		// body at every one of its ceilings already weighs 94 616 bytes of
 		// the 131 072 a body may carry, and an image does not fit in what
 		// is left.
+		// The campaign's own message templates. A route of its own for the
+		// same reason as the logo below: the campaign body already weighs
+		// 94 616 bytes at its ceilings.
+		r.With(guard(s.coordinationOnly),
+			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+			Post("/campaign/templates", s.routeCampaignTemplates)
 		r.With(guard(s.coordinationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 			Post("/campaign/logo", s.routeUploadLogo)

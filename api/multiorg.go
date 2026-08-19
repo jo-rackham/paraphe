@@ -62,7 +62,12 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			-- content, so a column for the digest would be the same fact
 			-- written twice.
 			logo_key TEXT NOT NULL DEFAULT '',
-			logo_type TEXT NOT NULL DEFAULT '')`,
+			logo_type TEXT NOT NULL DEFAULT '',
+			-- The campaign's own message templates, keyed by file name. A file
+			-- ABSENT here is a file the image supplies, today and after the
+			-- next release changes it — which is why this is a sparse overlay
+			-- and not a copy of the six. Read nowhere near ReadOrg: see below.
+			templates JSONB NOT NULL DEFAULT '{}'::jsonb)`,
 		// The form is public: without moderation, the first abuse is
 		// squatting a candidate's name. A request therefore creates
 		// nothing — it waits for an instance administrator to approve it.
@@ -152,6 +157,22 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS phone_outreach BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
+		// THE CAMPAIGN'S OWN TEXTS, a SPARSE overlay on the image's six.
+		//
+		// Empty for every campaign that has not written any, which is the state
+		// this column is designed around: what a campaign does not rewrite it
+		// keeps inheriting, so a correction shipped in the next release reaches
+		// it. Copying the six files in at creation would have frozen every
+		// campaign on the templates of the day it was approved — the failure
+		// `phone_outreach` describes one column over, in the other direction.
+		//
+		// NOT SELECTED BY ReadOrg, deliberately, and this is the note for
+		// whoever adds the next column here. That query runs on EVERY request
+		// that resolves a subdomain, which is why the logo is a pointer and not
+		// an image; six templates are tens of kilobytes read to answer a
+		// readiness probe. They are read where they are needed — /api/me, once
+		// per page load — and written where they are edited.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS templates JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		// Who WROTE the status, at team granularity. `team_id` beside it
 		// names who RESERVED, and the two are not the same fact: since a
 		// status stopped claiming the card, `team_id` is null on a card that

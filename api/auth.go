@@ -226,6 +226,26 @@ func (s *Server) managers(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// leadOnly: what belongs to ONE team, edited by whoever leads it — its own
+// message templates, today.
+//
+// Narrower than `managers` on purpose. That guard admits coordination too, and
+// coordination belongs to no team: it would be writing into a row that does
+// not exist, told « enregistré » by an UPDATE that matched nothing. Its own
+// texts are the campaign's, on the route beside this one, which is the split
+// « Ma campagne » and « Mon équipe » already make on screen.
+func (s *Server) leadOnly(next http.HandlerFunc) http.HandlerFunc {
+	return s.inCampaign(func(w http.ResponseWriter, r *http.Request) {
+		if accountOf(r).Role != RoleLead {
+			errorJSON(w, http.StatusForbidden,
+				"Réservé au référent de l'équipe. Les modèles de la campagne "+
+					"s'éditent depuis « Ma campagne ».")
+			return
+		}
+		next(w, r)
+	})
+}
+
 // coordinationOnly: team creation, overview.
 func (s *Server) coordinationOnly(next http.HandlerFunc) http.HandlerFunc {
 	return s.inCampaign(func(w http.ResponseWriter, r *http.Request) {

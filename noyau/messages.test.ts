@@ -14,9 +14,11 @@ import {
   InvalidTemplate,
   type Mayor,
   MissingField,
+  mergeTemplates,
   OPTIONAL_CAMPAIGN_KEYS,
   rank,
   recipientAddress,
+  TEMPLATE_FILES,
   type Templates,
   unfilledKeys,
 } from "./messages.ts";
@@ -623,5 +625,111 @@ describe("what an unconfigured campaign means", () => {
         }
       },
     );
+  });
+});
+
+// WHAT A CAMPAIGN MAY WRITE, and the second reader that has to agree.
+//
+// The engine refuses an unknown placeholder at RENDER time. Once a campaign
+// writes its own templates, render time is the mass mailing on a Sunday
+// evening, or a volunteer's card showing an error where a message should be —
+// so the API refuses the same text at SAVE time, while the person who wrote it
+// is still looking at it. api/templates.go is that reader, and this is the
+// file both answer to.
+describe("the placeholder manifest, shared with the API", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "placeholders.json"),
+      "utf8",
+    ),
+  ) as { common: string[]; has_endorsed: string[]; discovery: string[] };
+
+  const produced = (value: string): string[] =>
+    Object.keys(fields({ ...ENDORSER, rank: value }, CFG)).sort();
+
+  it.each([
+    ["has_endorsed", "has_endorsed" as const],
+    ["no_signal", "discovery" as const],
+  ])("names exactly what fields() gives a %s mayor", (value, bucket) => {
+    expect(produced(value)).toEqual(
+      [...manifest.common, ...manifest[bucket]].sort(),
+    );
+  });
+
+  // The two rank sets being DISJOINT is what refuses the project's cardinal
+  // mistake BY NAME, in either direction: a thank-you sentence pasted into a
+  // discovery template, and a discovery context pasted into a thank-you.
+  it("keeps the two rank vocabularies apart", () => {
+    const shared = manifest.has_endorsed.filter((k) =>
+      manifest.discovery.includes(k),
+    );
+    expect(shared).toEqual([]);
+    for (const bucket of ["has_endorsed", "discovery"] as const) {
+      expect(
+        manifest.common.filter((k) => manifest[bucket].includes(k)),
+      ).toEqual([]);
+    }
+  });
+});
+
+// A campaign rewrites the texts it sends, and a team of that campaign rewrites
+// them again. What a layer does not mention it INHERITS — including when the
+// layer beneath changes its mind afterwards.
+describe("the template layers", () => {
+  const SHIPPED: Templates = { "email.txt": "image", "courrier.txt": "image" };
+
+  it("names the six files a campaign sends, and only files that exist", () => {
+    expect([...TEMPLATE_FILES].sort()).toEqual(
+      Object.keys(REAL_TEMPLATES).sort(),
+    );
+  });
+
+  it("lets the team win, then the campaign, then the image", () => {
+    const merged = mergeTemplates(
+      SHIPPED,
+      { "email.txt": "campagne", "courrier.txt": "campagne" },
+      { "email.txt": "équipe" },
+    );
+    expect(merged["email.txt"]).toBe("équipe");
+    // NOT frozen at the day the team customised something else: a campaign
+    // that corrects its letter must reach the team that only touched the email
+    expect(merged["courrier.txt"]).toBe("campagne");
+  });
+
+  // The shape a textarea sends when somebody selects all and deletes. Taken
+  // literally it is a campaign whose letter renders as one blank page, five
+  // hundred times — and « revenir au texte fourni » is the same act.
+  it.each([
+    ["empty", ""],
+    ["blank", "   \n  "],
+  ])(
+    "reads an %s override as saying nothing, not as a template of nothing",
+    (_case, text) => {
+      expect(mergeTemplates(SHIPPED, { "email.txt": text })["email.txt"]).toBe(
+        "image",
+      );
+    },
+  );
+
+  it("leaves the layers it was given untouched", () => {
+    const campaign = { "email.txt": "campagne" };
+    mergeTemplates(SHIPPED, campaign);
+    expect(SHIPPED["email.txt"]).toBe("image");
+    expect(campaign).toEqual({ "email.txt": "campagne" });
+  });
+
+  // What the whole feature is FOR: a campaign's own words, rendered.
+  it("renders a campaign's own template through the engine", () => {
+    const engine = createEngine(
+      mergeTemplates(REAL_TEMPLATES, {
+        "email.txt": "OBJET: {commune}\n{salutation}, ici {candidat}.\n",
+      }),
+    );
+    expect(engine.email(ENDORSER, CFG)).toEqual({
+      subject: "Rieux-en-Val",
+      body: `Monsieur le Maire, ici ${CFG.candidat}.\n`,
+    });
+    // and the templates it did NOT rewrite still come from the image
+    expect(engine.letter(ENDORSER, CFG)).toContain(CFG.signataire);
   });
 });

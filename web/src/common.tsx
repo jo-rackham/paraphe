@@ -10,7 +10,15 @@ import {
 } from "react";
 import GUIDE from "../../GUIDE.md?raw";
 import * as M from "./messages.ts";
-import type { Campaign, Logo, Mayor, Me, Message, Note } from "./types.ts";
+import type {
+  Campaign,
+  Logo,
+  Mayor,
+  Me,
+  Message,
+  Note,
+  Templates,
+} from "./types.ts";
 
 // Vocabulary and components shared by both modes. The card above all: it
 // is what calls the message engine, and the rank drives the template
@@ -1210,6 +1218,12 @@ export interface CardProps {
    * means no, and the two sentences that promise a call render empty.
    */
   phoneOutreach?: boolean;
+  /**
+   * The texts this card is rendered from, over the ones the image carries:
+   * the campaign's, then this volunteer's team's. Absent — browser mode, and
+   * every campaign that has written none — is the shipped six.
+   */
+  templates?: (Templates | null | undefined)[];
   status?: string | null;
   notes?: Note[];
   onBack: () => void;
@@ -1228,6 +1242,7 @@ export interface CardProps {
 export function Fiche({
   mayor,
   cfg,
+  templates,
   personalNote,
   signer,
   phoneOutreach,
@@ -1257,10 +1272,15 @@ export function Fiche({
   } | null = null;
   let error: string | null = null;
   try {
+    // the campaign's texts and this team's, over the image's — and the same
+    // object back when there are none, so nothing re-renders for a campaign
+    // that has written no template
+    const engine = M.engineFor(...(templates ?? []));
+    const opts = { personalNote, signer, phoneOutreach };
     rendered = {
-      ...M.email(mayor, cfg, { personalNote, signer, phoneOutreach }),
-      letter: M.letter(mayor, cfg, { personalNote, signer, phoneOutreach }),
-      phone: M.phoneScript(mayor, cfg, { personalNote, signer, phoneOutreach }),
+      ...engine.email(mayor, cfg, opts),
+      letter: engine.letter(mayor, cfg, opts),
+      phone: engine.phoneScript(mayor, cfg, opts),
       address: M.recipientAddress(mayor),
       letterHead: M.letterHeader(mayor, cfg),
     };

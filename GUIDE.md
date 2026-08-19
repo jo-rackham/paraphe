@@ -175,6 +175,31 @@ avez, pas l'inverse.
   officielles du Conseil constitutionnel et de l'annuaire
   service-public.fr » — c'est la vérité.
 
+## 5 bis. Réécrire les modèles de messages
+
+Les six textes (email, courrier, script téléphone — chacun en deux versions,
+parrain connu ou non) sont modifiables depuis « Ma campagne », et chaque
+équipe peut les réécrire à son tour depuis « Mon équipe ».
+
+- **Ce qu'on laisse vide suit le niveau du dessus** — et continue de le
+  suivre. Une équipe qui ne réécrit que l'email garde le courrier de la
+  campagne, y compris quand la coordination le corrige après coup. Le texte
+  hérité s'affiche en gris dans le cadre : c'est celui qui part tant qu'on
+  n'écrit rien. **Ne le recopiez pas pour « le garder »** : ça le fige, et les
+  corrections suivantes ne vous arriveront plus.
+- **Les `{champs}` entre accolades** sont remplis pour chaque maire. La liste
+  exacte est sous le cadre — elle change selon le modèle, et c'est voulu :
+  `{candidat_recent}` et `{annee_recente}` n'existent que dans les modèles qui
+  s'adressent à un maire ayant déjà parrainé. Un modèle « découverte » qui les
+  emploie est refusé à l'enregistrement, parce que le message partirait avec
+  des trous : « En , vous avez présenté . »
+- **L'enregistrement refuse tout de suite** ce que le moteur refuserait à
+  l'envoi : un champ qui n'existe pas, un email sans sa ligne `OBJET:`. Mieux
+  vaut le savoir devant son écran qu'au moment d'un publipostage.
+- **Pour revenir en arrière** : videz le cadre, ou « Revenir au texte fourni ».
+  Rien n'est perdu — le texte d'origine n'a jamais été remplacé, seulement
+  masqué.
+
 ## 6. Pour le coordinateur / la coordinatrice
 
 - **Suivi global** : tableau de bord (statuts, départements) + « Exporter le

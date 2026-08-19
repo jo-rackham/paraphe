@@ -42,21 +42,51 @@ func normalizeEmail(s string) string {
 // Free text is not passed through this — a message keeps its line breaks.
 func legible(s string) bool {
 	for _, r := range s {
-		switch {
-		// every control character: CR, LF, TAB, ESC, BEL — no name holds one
-		case unicode.Is(unicode.Cc, r):
-			return false
-		// the bidi embeddings, overrides and isolates: these REORDER the text
-		// that follows them, which is the whole Trojan Source class
-		case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
-			return false
-		// Unicode's own line and paragraph separators
-		case r == 0x2028, r == 0x2029:
-			return false
-		// a byte-order mark inside a label is nothing a person typed
-		case r == 0xFEFF:
+		if !legibleRune(r) {
 			return false
 		}
+	}
+	return true
+}
+
+// legibleText: the same reading for something written in PARAGRAPHS.
+//
+// A campaign's own templates are prose that leaves for elected officials, and
+// a bidi override in one reorders what the volunteer proof-reads on screen
+// exactly as it reorders a label. But a template is nothing WITHOUT its line
+// breaks, and `legible` refuses every `Cc` — newline and tab included — so it
+// is the wrong reader for text.
+//
+// The rune rule is `legibleRune`, written once: a second copy of that switch
+// is a copy that stops refusing U+2028 the day one of them is edited. The
+// only difference is the two controls a paragraph is made of.
+func legibleText(s string) bool {
+	for _, r := range s {
+		if r == '\n' || r == '\t' {
+			continue
+		}
+		if !legibleRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func legibleRune(r rune) bool {
+	switch {
+	// every control character: CR, LF, TAB, ESC, BEL — no name holds one
+	case unicode.Is(unicode.Cc, r):
+		return false
+	// the bidi embeddings, overrides and isolates: these REORDER the text
+	// that follows them, which is the whole Trojan Source class
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return false
+	// Unicode's own line and paragraph separators
+	case r == 0x2028, r == 0x2029:
+		return false
+	// a byte-order mark inside a label is nothing a person typed
+	case r == 0xFEFF:
+		return false
 	}
 	return true
 }

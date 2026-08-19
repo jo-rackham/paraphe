@@ -5,9 +5,9 @@
 // strings rather than a rigid structure — the CSV gains columns (a new
 // signal) without the type having to change.
 
-import type { Mayor } from "../../noyau/messages.ts";
+import type { Mayor, Templates } from "../../noyau/messages.ts";
 
-export type { Campaign, Mayor } from "../../noyau/messages.ts";
+export type { Campaign, Mayor, Templates } from "../../noyau/messages.ts";
 
 /** A campaign's logo, as the API describes it. Null: the campaign has none. */
 export interface Logo {
@@ -87,6 +87,20 @@ export interface Me {
   account: Account;
   departments: string[];
   may_manage: boolean;
+  /**
+   * The message templates that apply to THIS account, in two layers over the
+   * ones the image carries: its campaign's, then its team's.
+   *
+   * Two layers and not one resolved set, because the screen that edits them
+   * has to tell them apart — « revenir au texte de la campagne » is a button
+   * nobody can aim at a merged text. `mergeTemplates` is what resolves them,
+   * and it lives in noyau/ beside the engine, so this end and the mass
+   * mailing resolve them the same way.
+   *
+   * Optional: an API one release behind carries none, and a campaign that has
+   * written no template carries two empty objects.
+   */
+  templates?: { campaign: Templates; team: Templates };
 }
 
 export interface Status {

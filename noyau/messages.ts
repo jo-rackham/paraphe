@@ -549,6 +549,83 @@ export function unfilledKeys(cfg: Campaign): string[] {
   });
 }
 
+/**
+ * The six files a campaign sends, named ONCE.
+ *
+ * Three readers used to carry their own copy of this list — the browser
+ * inlines them at build time, the mass mailing reads them off disk, and the
+ * tests read them again — so a seventh template, or a rename, was three edits
+ * with nothing to notice a missed one. It is also what the API answers with
+ * when it says which of them a campaign has rewritten, and a name a campaign
+ * may store has to be a name that is rendered.
+ */
+export const TEMPLATE_FILES = [
+  "email.txt",
+  "email_decouverte.txt",
+  "courrier.txt",
+  "courrier_decouverte.txt",
+  "telephone.txt",
+  "telephone_decouverte.txt",
+];
+
+/**
+ * The {placeholders} ONE template file may use, shown to whoever edits it.
+ *
+ * Derived from `fields()` rather than listed again: a vocabulary written out
+ * by hand beside the one that renders is the copy that stops matching, and the
+ * screen would then advertise a field the engine refuses — or hide one it
+ * accepts. The rank comes from the FILE NAME, exactly as `createEngine`
+ * chooses which file to render, which is what keeps the endorsement
+ * placeholders out of a discovery template and the discovery context out of a
+ * thank-you.
+ */
+export function placeholderNames(file: string): string[] {
+  const sample: Mayor = {
+    rank: file.includes("_decouverte") ? "no_signal" : "has_endorsed",
+    title: "M.",
+    first_name: "x",
+    last_name: "x",
+    commune: "x",
+    recent_candidate: "x",
+    recent_year: "2022",
+  };
+  const cfg: Campaign = Object.fromEntries(CAMPAIGN_KEYS.map((k) => [k, ""]));
+  return Object.keys(fields(sample, cfg)).sort();
+}
+
+/**
+ * The image's templates, then the campaign's, then the team's — LAST WINS,
+ * key by key.
+ *
+ * A campaign rewrites the texts it sends, and a team of that campaign
+ * rewrites them again for its own department. What a layer does not mention
+ * it INHERITS: a team that customised the email alone keeps following the
+ * campaign's letter, including when the campaign changes its mind — freezing
+ * the day's version instead would make every later correction invisible to
+ * the teams that had touched anything at all. It is the rule
+ * `accounts.phone_outreach` already follows one field over, and for the same
+ * reason.
+ *
+ * An EMPTY string is a layer saying nothing, not a template of nothing. The
+ * difference matters because it is the shape a textarea sends when the person
+ * editing it selects all and deletes: taken literally, that is a campaign
+ * whose letter renders as one blank page, five hundred times. « Revenir au
+ * texte fourni » and « I have not touched this » are the same act here, and a
+ * campaign that genuinely wants to send nothing has no business sending.
+ */
+export function mergeTemplates(
+  base: Templates,
+  ...layers: (Templates | null | undefined)[]
+): Templates {
+  const merged: Templates = { ...base };
+  for (const layer of layers) {
+    for (const [name, text] of Object.entries(layer ?? {})) {
+      if (typeof text === "string" && text.trim() !== "") merged[name] = text;
+    }
+  }
+  return merged;
+}
+
 export interface Engine {
   email(
     mayor: Mayor,
