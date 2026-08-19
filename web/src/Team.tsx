@@ -352,6 +352,9 @@ export default function Team({ config }: { config: ServerConfig }) {
           cfg={cfg.campaign}
           personalNote={account.personal_note}
           signer={account.name}
+          // the volunteer's own answer wins; null means they never gave one,
+          // and the campaign's default then applies AS IT CHANGES
+          phoneOutreach={account.phone_outreach ?? cfg.phone_outreach ?? false}
           drafts={cardDrafts}
           status={chosen.mayor.status}
           notes={chosen.notes ?? []}
@@ -390,12 +393,16 @@ export default function Team({ config }: { config: ServerConfig }) {
           cfg={cfg}
           onError={report}
           onMessage={setMessage}
-          onSaved={(personalNote: string) => {
+          onSaved={(personalNote: string, phoneOutreach: boolean | null) => {
             setMe((m) =>
               m
                 ? {
                     ...m,
-                    account: { ...m.account, personal_note: personalNote },
+                    account: {
+                      ...m.account,
+                      personal_note: personalNote,
+                      phone_outreach: phoneOutreach,
+                    },
                   }
                 : m,
             );

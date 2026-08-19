@@ -14,7 +14,7 @@ interface ProfilProps {
   me: Me;
   cfg: ServerConfig;
   onError: (e: unknown) => void;
-  onSaved: (personalNote: string) => void;
+  onSaved: (personalNote: string, phoneOutreach: boolean | null) => void;
   /** the page-level live region, in the shell: see Team.tsx */
   onMessage: (m: Message) => void;
 }
@@ -22,6 +22,12 @@ interface ProfilProps {
 export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
   const [personalNote, setPersonalNote] = useState(
     me.account.personal_note ?? "",
+  );
+  // THREE states, and « suivre la campagne » is the one a volunteer who has
+  // never opened this screen is in — it must keep following as the campaign
+  // changes its mind, not freeze at today's value.
+  const [appel, setAppel] = useState<boolean | null>(
+    me.account.phone_outreach ?? null,
   );
   const [sending, setSending] = useState(false);
   const [busy, done] = useSubmitGuard();
@@ -57,6 +63,33 @@ export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
             />
           </label>
         </p>
+        <p>
+          <label htmlFor="mon-appel">
+            Appels téléphoniques
+            <select
+              id="mon-appel"
+              value={appel === null ? "campagne" : appel ? "oui" : "non"}
+              onChange={(e) =>
+                setAppel(
+                  e.target.value === "campagne"
+                    ? null
+                    : e.target.value === "oui",
+                )
+              }
+            >
+              <option value="campagne">
+                Comme la campagne (
+                {cfg.phone_outreach ? "j'appelle" : "je n'appelle pas"})
+              </option>
+              <option value="oui">J'appelle les maires que je contacte</option>
+              <option value="non">Je n'appelle pas</option>
+            </select>
+          </label>
+        </p>
+        <p className="gris">
+          Décide si vos messages proposent un échange téléphonique et annoncent
+          un appel. Ne promettez un appel que si vous comptez le passer.
+        </p>
         <button
           type="button"
           aria-disabled={sending || undefined}
@@ -64,8 +97,8 @@ export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
             if (busy()) return;
             setSending(true);
             try {
-              const r = await API.savePersonalNote(personalNote);
-              onSaved(r.personal_note);
+              const r = await API.savePersonalNote(personalNote, appel);
+              onSaved(r.personal_note, r.phone_outreach);
             } catch (e) {
               onError(e);
             } finally {

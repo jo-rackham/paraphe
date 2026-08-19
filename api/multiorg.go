@@ -50,6 +50,11 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 			-- adjustable later by its coordination — discretion is strategic
 			-- for a campaign preparing its announcement.
 			listed BOOLEAN NOT NULL DEFAULT TRUE,
+			-- Whether this campaign telephones the mayors it writes to: the
+			-- campaign's DEFAULT, which a volunteer may answer for themselves
+			-- (accounts.phone_outreach). Opt-in, so FALSE — no message
+			-- promises a call until somebody says the campaign makes them.
+			phone_outreach BOOLEAN NOT NULL DEFAULT FALSE,
 			-- The campaign's logo, as a POINTER into the object store: no
 			-- bytes, only which object should exist and what it is. That
 			-- pointer is the only way an orphan — or a bucket restored from an
@@ -136,6 +141,15 @@ func orgSchema(ctx context.Context, tx pgx.Tx) error {
 		`ALTER TABLE orgs ALTER COLUMN listed SET DEFAULT TRUE`,
 		`ALTER TABLE hosting_requests ADD COLUMN IF NOT EXISTS listed BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE hosting_requests ALTER COLUMN listed SET DEFAULT TRUE`,
+		// WHETHER THIS CAMPAIGN TELEPHONES the mayors it writes to, and it
+		// is the campaign's DEFAULT — a volunteer may answer for themselves
+		// (accounts.phone_outreach). OPT-IN: FALSE, and no `SET DEFAULT TRUE`
+		// beside it, because the email asked for a telephone exchange and the
+		// letter announced a call whatever the campaign actually did. A
+		// promise made to elected officials, at the scale of a mailing, by a
+		// tool, on behalf of people who never made it — a campaign that does
+		// telephone loses nothing by saying so once.
+		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS phone_outreach BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS logo_type TEXT NOT NULL DEFAULT ''`,
 		// Who WROTE the status, at team granularity. `team_id` beside it
@@ -235,10 +249,10 @@ func (s *Server) ReadOrg(ctx context.Context, q interface {
 	var campaign []byte
 	err := q.QueryRow(ctx,
 		"SELECT id, slug, name, campaign::text, batch_size, state, COALESCE(created_at,''), listed, "+
-			"logo_key, logo_type "+
+			"phone_outreach, logo_key, logo_type "+
 			"FROM orgs WHERE slug=$1", slug).
 		Scan(&o.ID, &o.Slug, &o.Name, &campaign, &o.BatchSize, &o.State, &o.CreatedAt, &o.Listed,
-			&o.LogoKey, &o.LogoType)
+			&o.PhoneOutreach, &o.LogoKey, &o.LogoType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -431,6 +431,54 @@ describe("what an unconfigured campaign means", () => {
       );
     });
 
+    // ALL THREE CHANNELS take the signer, and the letter was the one that
+    // did not. While it spoke at the candidate's own « je » there was
+    // nothing to give it; signed by whoever posts it, leaving it out puts
+    // the CAMPAIGN's signatory at the bottom — on a campaign configured by
+    // its coordination, the coordinator's name, under a letter a volunteer
+    // prints and stamps.
+    it("lets the volunteer sign the letter, not just the email", () => {
+      const made = engine.letter(ENDORSER, CFG, { signer: "Alex Bénévole" });
+      // the SIGNATURE LINE, not merely the presence of the name: the
+      // campaign's `signataire_qualite` legitimately stays beside it, and
+      // `valeur de signataire` is a prefix of `valeur de signataire_qualite`
+      // — a naive « does not contain » passes on a letter that still bears
+      // the campaign's signatory
+      const signature = made
+        .trimEnd()
+        .split("\n")
+        .filter(Boolean)
+        .at(-2) as string;
+      expect(signature).toBe(`Alex Bénévole, ${CFG.signataire_qualite}`);
+    });
+
+    // OPT-IN, so unset means no. The email asked for a telephone exchange
+    // and the letter announced a call, unconditionally — including for a
+    // campaign that gave no number and runs no calling. A promise made to
+    // five hundred elected officials by a tool, on behalf of people who
+    // never made it.
+    it.each(["email", "letter"] as const)(
+      "promises no telephone call in the %s unless the campaign said it calls",
+      (channel) => {
+        const noSignal: Mayor = {
+          ...ENDORSER,
+          rank: "no_signal",
+          recent_candidate: "",
+          recent_year: "",
+          endorsement_history: "",
+        };
+        for (const mayor of [ENDORSER, noSignal]) {
+          const off = engine[channel](mayor, CFG);
+          const offText = typeof off === "string" ? off : off.body;
+          expect(offText).not.toMatch(/par téléphone|vous appeler/);
+
+          const on = engine[channel](mayor, CFG, { phoneOutreach: true });
+          const onText = typeof on === "string" ? on : on.body;
+          expect(onText).toMatch(/par téléphone|vous appeler/);
+        }
+      },
+    );
+
     // WHOEVER SENDS IT IS WHOEVER SIGNS IT, and the letter used not to.
     // It was written at the candidate's own « je » — « Je m'appelle X », « mes
     // idées », « mon équipe » — and signed with the candidate's name, while

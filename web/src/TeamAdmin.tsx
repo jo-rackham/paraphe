@@ -91,6 +91,9 @@ function ConfigurationCampagne({
   const [values, setValues] = useState<Record<string, string>>(cfg.campaign);
   const [batchSize, setBatchSize] = useState(String(cfg.batch_size));
   const [listed, setListed] = useState(cfg.organisation?.listed ?? true);
+  // The campaign's DEFAULT answer to « appelons-nous les maires ». Opt-in:
+  // a campaign that has never said so promises no call in any message.
+  const [appel, setAppel] = useState(cfg.phone_outreach ?? false);
   const [name, setName] = useState(cfg.organisation?.name ?? "");
   const [sending, setSending] = useState(false);
   const [logoSending, setLogoSending] = useState(false);
@@ -109,11 +112,13 @@ function ConfigurationCampagne({
         // offer it, an empty string would UNNAME the campaign — `nil` is
         // what leaves it alone, and that is the same rule as `listed`.
         cfg.organisation ? name : undefined,
+        appel,
       );
       onCfg({
         ...cfg,
         campaign: r.campaign,
         batch_size: r.batch_size,
+        phone_outreach: r.phone_outreach,
         unfilled: r.unfilled,
         organisation: cfg.organisation && {
           ...cfg.organisation,
@@ -212,6 +217,23 @@ function ConfigurationCampagne({
             onChange={(e) => setBatchSize(e.target.value)}
           />
         </label>
+      </p>
+      <p>
+        <label>
+          <input
+            type="checkbox"
+            checked={appel}
+            onChange={(e) => setAppel(e.target.checked)}
+          />{" "}
+          Cette campagne appelle les maires qu'elle contacte
+        </label>
+      </p>
+      <p className="gris">
+        Cochée, l'email propose un échange téléphonique et le courrier annonce
+        un appel. Décochée, aucun message ne promet d'appel. C'est le défaut de
+        la campagne : chaque bénévole peut répondre pour lui-même dans « Mon
+        profil ». Ne la cochez que si des appels sont réellement passés — la
+        promesse est faite à des élus.
       </p>
       {cfg.organisation && (
         <>

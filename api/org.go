@@ -55,6 +55,11 @@ type Org struct {
 	// Listed: whether the apex directory shows this campaign — chosen on
 	// the hosting request, adjustable by coordination
 	Listed bool `json:"listed"`
+	// PhoneOutreach: whether this campaign telephones the mayors it writes
+	// to. It is the campaign's DEFAULT — a volunteer answers for themselves
+	// on their own account — and it is opt-in, because the sentences it
+	// governs promise a call to an elected official.
+	PhoneOutreach bool `json:"phone_outreach"`
 	// The campaign's logo, optional. The BYTES live in the object store;
 	// what the database keeps is the pointer. The key ENDS in a digest of
 	// the content, which is what makes its public URL immutable. Kept here

@@ -114,6 +114,15 @@ describe("Fiche", () => {
     email: "mairie@artemare.fr",
   };
 
+  // MAYOR alone renders NO message: with no rank column the engine falls
+  // back to `has_endorsed`, whose required fields it lacks, so the card
+  // shows the error instead of the three channels — and an assertion about
+  // message text would read an empty string and pass on anything.
+  const SENDABLE: Mayor = {
+    ...MAYOR,
+    rank: "no_signal",
+  };
+
   const render = (mayor: Mayor) =>
     act(() => {
       root.render(
@@ -125,6 +134,69 @@ describe("Fiche", () => {
         />,
       );
     });
+
+  // WHO SIGNS, ON ALL THREE CHANNELS. The card excluded the letter while it
+  // was written at the candidate's own « je »; signed by whoever posts it,
+  // leaving it out puts the CAMPAIGN's signatory at the bottom — which on a
+  // campaign configured by its coordination is the coordinator's name, under
+  // a letter a volunteer prints and stamps. The engine has always honoured
+  // `signer`; this is about the card actually giving it one.
+  it("signs the letter with the volunteer, like the email", () => {
+    const cfg = { ...EMPTY_CFG, candidat: "Camille Réelle" };
+    act(() => {
+      root.render(
+        <Fiche
+          mayor={SENDABLE}
+          cfg={cfg}
+          signer="Alex Bénévole"
+          onBack={() => {}}
+          onStatus={() => {}}
+        />,
+      );
+    });
+    const letter = container.querySelector("pre.lettre")?.textContent ?? "";
+    expect(letter, "the letter is not on screen").toContain(
+      "Conseil constitutionnel vous adressera",
+    );
+    const signature = letter.trimEnd().split("\n").filter(Boolean).at(-2);
+    expect(signature).toContain("Alex Bénévole");
+    expect(signature).not.toContain(EMPTY_CFG.signataire);
+  });
+
+  // OPT-IN: unset means the campaign has not said it telephones, and the
+  // card must not promise a call on its behalf.
+  it("promises no telephone call unless the campaign said it calls", () => {
+    // PER CHANNEL, not pooled. Pooled, the letter alone satisfies « a call is
+    // mentioned » and the email's own wiring is pinned by nothing — measured:
+    // dropping `phoneOutreach` from the email call left this green.
+    const email = () =>
+      container.querySelector<HTMLTextAreaElement>("textarea[rows='16']")
+        ?.value ?? "";
+    const letterText = () =>
+      container.querySelector("pre.lettre")?.textContent ?? "";
+
+    render(SENDABLE);
+    // the messages ARE on screen — otherwise « does not mention a call »
+    // holds because nothing is rendered at all, and the assertion is worth
+    // nothing
+    expect(email()).toContain("présentations");
+    expect(letterText()).toContain("Conseil constitutionnel");
+    expect(email()).not.toMatch(/par téléphone/);
+    expect(letterText()).not.toMatch(/vous appeler/);
+    act(() => {
+      root.render(
+        <Fiche
+          mayor={SENDABLE}
+          cfg={EMPTY_CFG}
+          phoneOutreach
+          onBack={() => {}}
+          onStatus={() => {}}
+        />,
+      );
+    });
+    expect(email()).toMatch(/par téléphone/);
+    expect(letterText()).toMatch(/vous appeler/);
+  });
 
   it("the phone dials: a tel: link carrying digits only", () => {
     render(MAYOR);
@@ -175,7 +247,7 @@ describe("Fiche", () => {
     await act(async () => {
       root.render(
         <Fiche
-          mayor={MAYOR}
+          mayor={SENDABLE}
           cfg={EMPTY_CFG}
           onBack={() => {}}
           onStatus={onStatus}

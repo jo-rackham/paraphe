@@ -8,7 +8,9 @@ Je me permets de vous écrire au nom de {candidat}, {candidat_description}, qui 
 
 {argument_personnel}
 
-Accepteriez-vous d'en échanger quelques minutes par téléphone, ou que {candidat} vous appelle personnellement ? Je reste à votre disposition, y compris pour un simple non.
+{proposition_telephone}
+
+Je reste à votre disposition, y compris pour un simple non.
 
 Avec notre profond respect pour votre engagement au service {commune_de},
 

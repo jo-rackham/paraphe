@@ -30,6 +30,12 @@ type Account struct {
 	CreatedAt    string  `json:"created_at"`
 	CreatedBy    string  `json:"created_by"`
 	TeamName     *string `json:"team_name"`
+	// This volunteer's own answer to « do I telephone the mayors I write
+	// to », or nil when they have not answered — in which case the
+	// campaign's own setting applies, AS IT CHANGES rather than as it stood
+	// the day the account was made. Three states, and a bool could hold only
+	// two.
+	PhoneOutreach *bool `json:"phone_outreach"`
 	// When the password last changed, and `json:"-"` because it is nobody's
 	// business but this server's: it is compared against the session token's
 	// own instant, never displayed. NULL for an account that has never
@@ -109,12 +115,13 @@ func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 	// exact promise written above the list. Named here, at the one site that
 	// scans into a struct and needs it.
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT "+accountColumns+", c.password_changed_at"+
+		"SELECT "+accountColumns+", c.password_changed_at, c.phone_outreach"+
 			" FROM accounts c LEFT JOIN teams g "+
 			"ON g.id = c.team_id AND g.org_id = c.org_id "+
 			"WHERE c.org_id=$1 AND c.email=$2 AND c.active", scopeOrg(r), email).
 		Scan(&c.Email, &c.Name, &c.Role, &c.TeamID, &c.Active, &c.PersonalNote,
-			&c.CreatedAt, &c.CreatedBy, &c.TeamName, &c.PasswordChangedAt)
+			&c.CreatedAt, &c.CreatedBy, &c.TeamName, &c.PasswordChangedAt,
+			&c.PhoneOutreach)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -237,6 +237,19 @@ export interface Options {
   personalNote?: string;
   /** Letter date; injectable so the tests stay reproducible. */
   today?: Date;
+  /**
+   * Whether this campaign telephones the mayors it writes to. OPT-IN, so
+   * `false` is the answer when nobody has said.
+   *
+   * The email asked « accepteriez-vous d'en échanger quelques minutes par
+   * téléphone » and the letter announced « nous nous permettrons de vous
+   * appeler dans les prochaines semaines » — unconditionally, including for
+   * campaigns that had given no telephone number and run no calling. A
+   * promise made to five hundred elected officials by a tool, on behalf of
+   * people who never made it, and the mayor who waits for that call is the
+   * one who paid for it.
+   */
+  phoneOutreach?: boolean;
 }
 
 // The returned keys are the template placeholders — FRENCH, because the
@@ -247,7 +260,12 @@ export function fields(
   cfg: Campaign,
   opts: Options = {},
 ): Record<string, string> {
-  const { signer = "", personalNote = "", today = new Date() } = opts;
+  const {
+    signer = "",
+    personalNote = "",
+    today = new Date(),
+    phoneOutreach = false,
+  } = opts;
   const required =
     rank(mayor) === "has_endorsed" ? REQUIRED_FIELDS_ENDORSER : REQUIRED_FIELDS;
   const empty = required.filter((k) => !clean(mayor[k]));
@@ -293,6 +311,26 @@ export function fields(
     civilite_courte: woman ? "Madame" : "Monsieur",
     seul_e: woman ? "seule" : "seul",
     sollicite_e: woman ? "sollicitée" : "sollicité",
+    // THE TWO PHONE SENTENCES, and they are empty unless the campaign said
+    // it telephones. Written here rather than in the templates for the
+    // reason `contexte` above is: a sentence that must sometimes not exist
+    // at all cannot be a fixed line of a file, and the engine already drops
+    // a paragraph whose only content came out empty.
+    //
+    // One per channel because they say different things: the email ASKS the
+    // mayor, the letter ANNOUNCES a call. The agreement comes from the same
+    // `woman` as everything else — a sentence generated in code is still a
+    // sentence a mayor reads.
+    proposition_telephone: phoneOutreach
+      ? "Accepteriez-vous d'en échanger quelques minutes par téléphone, ou " +
+        `que ${volunteerText(cfg.candidat)} vous appelle personnellement ?`
+      : "",
+    relance_telephone: phoneOutreach
+      ? "Nous nous permettrons de vous appeler dans les prochaines " +
+        `semaines. Si vous préférez ne pas être ${
+          woman ? "sollicitée" : "sollicité"
+        }, un mot suffira et nous le respecterons.`
+      : "",
     prenom: clean(mayor.first_name),
     nom: clean(mayor.last_name),
     commune: clean(mayor.commune),

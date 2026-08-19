@@ -74,6 +74,13 @@ export interface Account {
   active: boolean;
   personal_note: string;
   team_name: string | null;
+  /**
+   * This volunteer's own answer to « do I telephone the mayors I write to »,
+   * or null for « whatever the campaign does » — which is what somebody who
+   * never opened the setting means, and it keeps tracking the campaign
+   * rather than freezing at its value the day the account was made.
+   */
+  phone_outreach?: boolean | null;
 }
 
 export interface Me {
@@ -118,6 +125,12 @@ export interface ServerConfig {
   browser_version_url: string;
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
+  /**
+   * Whether the campaign telephones the mayors it writes to — its DEFAULT.
+   * A volunteer who has answered for themselves (Account.phone_outreach)
+   * overrides it; one who has not follows it as it changes.
+   */
+  phone_outreach?: boolean;
 }
 
 /** The apex of a multi-campaign instance: no campaign to describe. */

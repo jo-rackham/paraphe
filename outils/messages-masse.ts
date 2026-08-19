@@ -102,13 +102,29 @@ const EMAIL_COLS = [
 
 export function main(): void {
   mkdirSync(OUT, { recursive: true });
-  const { campaign: c } = loadConfig();
+  const { campaign: c, phoneOutreach } = loadConfig();
   const engine = createEngine(loadTemplates());
   const file = join(ROOT, "out", "01_maires_cibles_prioritaires.csv");
   const text = readFileSync(file, "utf8");
   const mayors = parseRecords(text) as Mayor[];
   const sourceCols = parseRows(text)[0];
-  const sender = `${c.candidat}\n${c.contact_email}\n${c.contact_tel}`;
+  // THE RETURN ADDRESS IS THE SENDER'S, and the sender is whoever posts the
+  // letter. Built from `candidat`, the envelope said the candidate while the
+  // body said « je vous écris au nom de » that same candidate and signed with
+  // somebody else's name — three identities on one page, up to 1 960 times.
+  // The letter stopped being the candidate's when it stopped being written at
+  // their « je »; this block had not followed.
+  //
+  // Joined from the parts that exist: `contact_tel` is one a campaign may
+  // leave empty, and an empty line at the top of an envelope window is a
+  // line somebody has to explain.
+  const sender = [
+    [c.signataire, c.signataire_qualite].filter(Boolean).join(", "),
+    c.contact_email,
+    c.contact_tel,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const withEmail: Record<string, string>[] = [];
   const withoutEmail: Mayor[] = [];
@@ -138,8 +154,8 @@ export function main(): void {
     let letter: string;
     let address: string;
     try {
-      ({ subject, body } = engine.email(m, c));
-      letter = engine.letter(m, c);
+      ({ subject, body } = engine.email(m, c, { phoneOutreach }));
+      letter = engine.letter(m, c, { phoneOutreach });
       address = recipientAddress(m);
     } catch (e) {
       // Data unusable for THIS mayor: set them aside, never generate an

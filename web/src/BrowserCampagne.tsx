@@ -14,7 +14,20 @@ interface CampaignTabProps {
   /** "" removes it */
   onLogo: (dataUri: string) => void;
   onErreur: (message: string) => void;
-  onSave: (cfg: Campaign, personalNote: string) => void;
+  /**
+   * Whether this campaign telephones the mayors it writes to. OPT-IN, so the
+   * answer is no until somebody says otherwise: the email asked for a call
+   * and the letter announced one whatever the campaign actually did, which
+   * is a promise made to elected officials on behalf of people who never
+   * made it.
+   */
+  appelTelephonique: boolean;
+  onAppelTelephonique: (yes: boolean) => void;
+  onSave: (
+    cfg: Campaign,
+    personalNote: string,
+    appelTelephonique: boolean,
+  ) => void;
 }
 
 export function CampaignTab({
@@ -26,6 +39,8 @@ export function CampaignTab({
   onNote,
   onLogo,
   onErreur,
+  appelTelephonique,
+  onAppelTelephonique,
   onSave,
 }: CampaignTabProps) {
   return (
@@ -60,7 +75,25 @@ export function CampaignTab({
             />
           </label>
         </p>
-        <button type="button" onClick={() => onSave(draft, note)}>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={appelTelephonique}
+              onChange={(e) => onAppelTelephonique(e.target.checked)}
+            />{" "}
+            J'appellerai les maires que je contacte
+          </label>
+        </p>
+        <p className="gris">
+          Coché, l'email propose un échange téléphonique et le courrier annonce
+          un appel. Décoché, aucun message ne promet d'appel — ne le cochez que
+          si vous comptez vraiment téléphoner.
+        </p>
+        <button
+          type="button"
+          onClick={() => onSave(draft, note, appelTelephonique)}
+        >
           Enregistrer
         </button>
         {/* persistent: the marker appears as a text change, not as a node

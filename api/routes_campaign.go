@@ -23,6 +23,11 @@ type campaignRequest struct {
 	// nil = untouched: the apex directory listing is edited from the same
 	// screen as the campaign, and a save must not flip it by omission
 	Listed *bool `json:"listed"`
+	// Whether the campaign telephones the mayors it writes to — nil =
+	// untouched, for the reason above. Opt-in and campaign-wide: a volunteer
+	// answers for themselves on their own account, and only falls back to
+	// this when they have not.
+	PhoneOutreach *bool `json:"phone_outreach"`
 	// The campaign's own name, and nil = untouched for the same reason. It
 	// USED to be `candidat`, copied into orgs.name at every save — so a
 	// campaign approved as « Alliance écologiste » renamed itself to
@@ -125,10 +130,15 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	if d.Listed != nil {
 		listed = *d.Listed
 	}
+	phone := org.PhoneOutreach
+	if d.PhoneOutreach != nil {
+		phone = *d.PhoneOutreach
+	}
 	req := scoped(r)
 	if _, err := s.tx(r).Exec(r.Context(),
 		"UPDATE orgs SET campaign="+req.p(string(raw))+"::jsonb, "+
 			"batch_size="+req.p(batchSize)+", listed="+req.p(listed)+", "+
+			"phone_outreach="+req.p(phone)+", "+
 			"name="+req.p(name)+" WHERE id=$1",
 		req.args...); err != nil {
 		s.failure(w, err)
@@ -149,7 +159,8 @@ func (s *Server) routeUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	replyJSON(w, http.StatusOK, map[string]any{
 		"campaign": values, "batch_size": batchSize, "listed": listed,
-		"unfilled": UnfilledKeys(values), "name": name,
+		"phone_outreach": phone,
+		"unfilled":       UnfilledKeys(values), "name": name,
 	})
 }
 

@@ -66,6 +66,11 @@ export default function Browser() {
   // carries it because it walks the settings.
   const [logo, setLogo] = useState("");
   const [personalNote, setPersonalNote] = useState("");
+  // OPT-IN, so `false` until this volunteer says otherwise. The email used to
+  // ask for a telephone exchange and the letter to announce a call whatever
+  // the campaign actually did — a promise to elected officials made by a tool
+  // on behalf of somebody who never made it.
+  const [appelTelephonique, setAppelTelephonique] = useState(false);
   const {
     view,
     card: routedCard,
@@ -124,6 +129,7 @@ export default function Browser() {
   // writers below (accept, import, erase) reset it explicitly instead.
   const [draft, setDraft] = useState<Campaign>(EMPTY_CFG);
   const [noteDraft, setNoteDraft] = useState("");
+  const [appelDraft, setAppelDraft] = useState(false);
   // unsent card work (rewritten email, call note), keyed by INSEE: the
   // card is unmounted by any tab click and must not lose it
   const cardDrafts = useRef<Record<string, CardDraft>>({});
@@ -217,23 +223,28 @@ export default function Browser() {
 
   useEffect(() => {
     (async () => {
-      const [m, s, c, a, g, l] = await Promise.all([
+      const [m, s, c, a, g, l, tel] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
         DB.readSetting<string>("argument", ""),
         DB.readSetting<unknown>("logo", ""),
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
+        // opt-in: a database written before this setting existed answers
+        // false, which is the answer that promises nothing
+        DB.readSetting<boolean>("appel_telephonique", false),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
+      setAppelTelephonique(tel === true);
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
       setDraft(c);
       setNoteDraft(a);
+      setAppelDraft(tel === true);
       setLoadedList(l);
       setReady(true);
       // first launch: the priority list loads by default — it is light and
@@ -336,7 +347,9 @@ export default function Browser() {
   // green « Campagne enregistrée » banner while the base held the older
   // value — indistinguishable from saved work until the next reload.
   const dirty =
-    JSON.stringify(draft) !== JSON.stringify(cfg) || noteDraft !== personalNote;
+    JSON.stringify(draft) !== JSON.stringify(cfg) ||
+    noteDraft !== personalNote ||
+    appelDraft !== appelTelephonique;
 
   // nine fields filled and the tab closed without « Enregistrer » is a
   // silent total loss — and a rewritten card email or a half-typed call
@@ -463,7 +476,7 @@ export default function Browser() {
       const report = await DB.importAll(JSON.parse(await file.text()), {
         merge,
       });
-      const [m, s, c, a, g, l] = await Promise.all([
+      const [m, s, c, a, g, l, tel] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
@@ -475,16 +488,21 @@ export default function Browser() {
         // banner offering to load "all 34 826" — which would replace the
         // list just imported
         DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
+        // …and it carries this one, so a restored backup keeps its answer
+        // rather than silently reverting to « we do not telephone »
+        DB.readSetting<boolean>("appel_telephonique", false),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
+      setAppelTelephonique(tel === true);
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
       setDraft(c);
       setNoteDraft(a);
+      setAppelDraft(tel === true);
       setLoadedList(l);
       setMessage({
         tone: "ok",
@@ -776,6 +794,7 @@ export default function Browser() {
                   mayor={chosen}
                   cfg={cfg}
                   personalNote={personalNote}
+                  phoneOutreach={appelTelephonique}
                   drafts={cardDrafts}
                   status={tracking[chosen.insee_code as string]?.status}
                   notes={(
@@ -804,6 +823,8 @@ export default function Browser() {
                     setMayors([]);
                     setTracking({});
                     setCfg(EMPTY_CFG);
+                    setAppelTelephonique(false);
+                    setAppelDraft(false);
                     setPersonalNote("");
                     setLogo("");
                     setDraft(EMPTY_CFG);
@@ -843,15 +864,19 @@ export default function Browser() {
                     }
                   }}
                   onErreur={(text) => setMessage({ tone: "erreur", text })}
-                  onSave={async (next, note) => {
+                  appelTelephonique={appelDraft}
+                  onAppelTelephonique={setAppelDraft}
+                  onSave={async (next, note, appel) => {
                     try {
                       await DB.writeSetting("campagne", next);
                       await DB.writeSetting("argument", note);
+                      await DB.writeSetting("appel_telephonique", appel);
                       // cfg only: the draft may already carry keystrokes typed
                       // while these writes are in flight, and they must stay —
                       // the `dirty` marker then reappears on its own
                       setCfg(next);
                       setPersonalNote(note);
+                      setAppelTelephonique(appel);
                       setMessage({
                         tone: "ok",
                         text: "Campagne enregistrée dans ce navigateur.",

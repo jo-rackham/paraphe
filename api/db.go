@@ -281,6 +281,12 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 			team_id INTEGER,
 			active BOOLEAN NOT NULL DEFAULT TRUE,
 			personal_note TEXT DEFAULT '',
+			-- NULL = follow the campaign. Three states, not two: « I call »,
+			-- « I do not », and « whatever the campaign does » — the answer of
+			-- a volunteer who never opened the setting, which must keep
+			-- tracking the campaign rather than freeze at its value the day
+			-- the account was made.
+			phone_outreach BOOLEAN,
 			created_at TEXT, created_by TEXT,
 			PRIMARY KEY (org_id, email))`,
 		// When the password last changed, and it is what makes a change
@@ -296,6 +302,13 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 		// NULL is "never changed since this column existed" — every account
 		// older than it — and a null must not invalidate anything: a session
 		// predating the feature is not a session to kill.
+		// NULL = follow the campaign. Three states, not two: « I call », « I do
+		// not », and « whatever the campaign does » — what a volunteer who
+		// never opened the setting means, and it must keep tracking the
+		// campaign rather than freeze at its value the day the account was
+		// made. HERE and not with the orgs upgrades: that list runs before
+		// this file creates `accounts`, and the ALTER failed the whole start.
+		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS phone_outreach BOOLEAN`,
 		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`,
 		// Sign-in links. Only the token's SHA-256 is here: what arrives in an
 		// inbox exists nowhere on this side, so a dump of this table opens no

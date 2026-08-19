@@ -90,8 +90,8 @@ campagne d'un coup. Vérifiez quand même le texte avant d'envoyer.
    d'un citoyen réel, signé de son prénom, n'a rien d'un mailing. Pas de
    copie cachée groupée, pas d'envoi en masse depuis un même compte.
 2. **Courrier** (octobre → décembre) — pour les meilleures cibles : la lettre
-   signée du candidat, imprimée depuis l'app, envoyée **avant** l'avalanche
-   de janvier. Budget à prévoir : environ 2 € par lettre (impression,
+   imprimée depuis l'app et signée par la personne qui la poste, envoyée
+   **avant** l'avalanche de janvier. Budget à prévoir : environ 2 € par lettre (impression,
    enveloppe, timbre), soit ~2 000 à 4 000 € pour toute la liste. Une bonne
    idée : **une cagnotte dédiée aux frais de courrier** — mais attention,
    pour une campagne présidentielle les dons doivent passer par le
@@ -136,8 +136,8 @@ même campagne, c'est une maladresse, pas une faute.
    d'autre l'a eu. Perdu ? Votre référent vous en tire un nouveau.
    Écrivez ensuite votre **touche
    personnelle** (même onglet) : une phrase sur pourquoi *vous*
-   vous engagez. Elle s'insère automatiquement dans vos emails, signés de
-   votre prénom.
+   vous engagez. Elle s'insère automatiquement dans vos emails, signés du
+   nom de votre compte.
 2. Sur le tableau de bord, **« Me réserver un lot »** : 10 maires vous sont
    distribués (choisissez votre département si vous voulez appeler près de
    chez vous — un accent local aide). Ce sont des maires que personne d'autre

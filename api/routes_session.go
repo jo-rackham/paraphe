@@ -81,6 +81,11 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		// object store: either way the header shows the hexagon alone.
 		"logo":       s.logoOf(org),
 		"magic_link": magicLink,
+		// The campaign's DEFAULT answer to « do we telephone the mayors we
+		// write to ». A volunteer who has answered for themselves overrides
+		// it (see /api/me); one who has not follows it, and follows it as it
+		// CHANGES rather than as it stood the day their account was made.
+		"phone_outreach": org.PhoneOutreach,
 		"organisation": map[string]any{
 			"slug": org.Slug, "name": org.Name,
 			// the toggle "Mon équipe" shows needs the current state
@@ -472,6 +477,17 @@ func (s *Server) teamDepartments(r *http.Request, c *Account) ([]string, error) 
 
 type personalNoteRequest struct {
 	PersonalNote string `json:"personal_note"`
+	// This volunteer's own answer to « do I telephone the mayors I write to »,
+	// or nil for « whatever the campaign does ». Carried on the same route as
+	// the personal touch because it is the same act — one screen, « Mon
+	// profil », saved once.
+	PhoneOutreach *bool `json:"phone_outreach"`
+	// Whether the field above was MEANT. A client that says nothing about it
+	// must not clear an answer the volunteer gave — the rule `listed` and
+	// `name` already follow — and nil is itself a value here (« follow the
+	// campaign »), so nil alone cannot tell « leave it alone » from « unset
+	// it ».
+	SetPhoneOutreach bool `json:"set_phone_outreach"`
 }
 
 // POST /api/me/personal_note — the volunteer's personal touch, inserted into
@@ -490,9 +506,15 @@ func (s *Server) routePersonalNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := accountOf(r)
+	phone := c.PhoneOutreach
+	if d.SetPhoneOutreach {
+		phone = d.PhoneOutreach
+	}
 	if _, err := s.tx(r).Exec(r.Context(),
-		"UPDATE accounts SET personal_note=$1 WHERE org_id=$2 AND email=$3",
-		strings.TrimSpace(d.PersonalNote), scopeOrg(r), c.Email); err != nil {
+		"UPDATE accounts SET personal_note=$1, phone_outreach=$4 "+
+			"WHERE org_id=$2 AND email=$3",
+		strings.TrimSpace(d.PersonalNote), scopeOrg(r), c.Email,
+		phone); err != nil {
 		s.failure(w, err)
 		return
 	}
@@ -500,6 +522,7 @@ func (s *Server) routePersonalNote(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	replyJSON(w, http.StatusOK, map[string]string{
-		"personal_note": strings.TrimSpace(d.PersonalNote)})
+	replyJSON(w, http.StatusOK, map[string]any{
+		"personal_note":  strings.TrimSpace(d.PersonalNote),
+		"phone_outreach": phone})
 }

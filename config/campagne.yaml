@@ -18,3 +18,9 @@ app:
   # nombre de maires attribués par « prendre un lot »
   # (l'accès se fait par compte individuel : voir DEPLOYMENT.md)
   taille_lot: 10
+  # Appelez-vous les maires que vous contactez ? À `true`, l'email propose un
+  # échange téléphonique et le courrier annonce un appel. Laissé à `false`,
+  # aucun message ne promet d'appel — ne le passez à `true` que si les appels
+  # sont réellement passés : la promesse est faite à des élus, et le
+  # publipostage l'envoie jusqu'à 1 960 fois.
+  appel_telephonique: false

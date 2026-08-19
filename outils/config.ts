@@ -43,11 +43,19 @@ export interface Config {
   campaign: Campaign;
   batchSize: number;
   unfilled: string[];
+  /**
+   * Whether this campaign telephones the mayors it writes to. OPT-IN: absent
+   * means no, and no generated message promises a call. The email asked for a
+   * telephone exchange and the letter announced one whatever the campaign
+   * actually did — a promise made to elected officials, at the scale of a
+   * mailing, on behalf of people who never made it.
+   */
+  phoneOutreach: boolean;
 }
 
 interface ConfigFile {
   campagne?: Record<string, unknown>;
-  app?: { taille_lot?: unknown };
+  app?: { taille_lot?: unknown; appel_telephonique?: unknown };
 }
 
 /**
@@ -58,6 +66,8 @@ interface ConfigFile {
 export function loadConfig({ strict = true } = {}): Config {
   const campaign: Campaign = {};
   let batchSize = 0;
+  // opt-in: unset is « we do not telephone », which promises nothing
+  let phoneOutreach = false;
 
   const base = join(ROOT, "config", "campagne.yaml");
   if (!existsSync(base)) {
@@ -69,6 +79,8 @@ export function loadConfig({ strict = true } = {}): Config {
     for (const [k, v] of Object.entries(f.campagne ?? {}))
       campaign[k] = String(v);
     if (typeof f.app?.taille_lot === "number") batchSize = f.app.taille_lot;
+    if (typeof f.app?.appel_telephonique === "boolean")
+      phoneOutreach = f.app.appel_telephonique;
   }
   for (const k of CAMPAIGN_KEYS) {
     const v = (process.env[CAMPAIGN_ENV[k]] ?? "").trim();
@@ -99,7 +111,7 @@ export function loadConfig({ strict = true } = {}): Config {
         "variables PARAPHE_*",
     );
   }
-  return { campaign, batchSize, unfilled };
+  return { campaign, batchSize, unfilled, phoneOutreach };
 }
 
 const TEMPLATE_NAMES = [

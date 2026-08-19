@@ -1192,13 +1192,24 @@ export interface CardProps {
   cfg: Campaign;
   personalNote?: string;
   /**
-   * Who signs the email and the phone script. In team mode this is the
-   * volunteer: they send from their OWN address (GUIDE.md, the rule that
-   * keeps the campaign out of the spam folder), so a message signed by the
-   * campaign's single signatory arrives from one name under another. The
-   * letter is unaffected — it is signed by the candidate.
+   * Who signs — ALL THREE channels. In team mode this is the volunteer: they
+   * send from their OWN address (GUIDE.md, the rule that keeps the campaign
+   * out of the spam folder), so a message signed by the campaign's single
+   * signatory arrives from one name under another.
+   *
+   * The letter was excluded here while it was written at the candidate's own
+   * « je » and signed with the candidate's name. It is not any more — it is
+   * signed by whoever posts it — so leaving it out put the CAMPAIGN's
+   * signatory at the bottom of a letter a volunteer prints and stamps, which
+   * on a campaign configured by its coordination is the coordinator's name.
+   * Same defect as the account-less version's, one channel over.
    */
   signer?: string;
+  /**
+   * Whether this campaign telephones the mayors it writes to. Opt-in: unset
+   * means no, and the two sentences that promise a call render empty.
+   */
+  phoneOutreach?: boolean;
   status?: string | null;
   notes?: Note[];
   onBack: () => void;
@@ -1219,6 +1230,7 @@ export function Fiche({
   cfg,
   personalNote,
   signer,
+  phoneOutreach,
   status: initialStatus,
   notes = [],
   onBack,
@@ -1246,9 +1258,9 @@ export function Fiche({
   let error: string | null = null;
   try {
     rendered = {
-      ...M.email(mayor, cfg, { personalNote, signer }),
-      letter: M.letter(mayor, cfg, { personalNote }),
-      phone: M.phoneScript(mayor, cfg, { personalNote, signer }),
+      ...M.email(mayor, cfg, { personalNote, signer, phoneOutreach }),
+      letter: M.letter(mayor, cfg, { personalNote, signer, phoneOutreach }),
+      phone: M.phoneScript(mayor, cfg, { personalNote, signer, phoneOutreach }),
       address: M.recipientAddress(mayor),
       letterHead: M.letterHeader(mayor, cfg),
     };

@@ -251,10 +251,18 @@ export function consumeLinkToken(): string | null {
 
 export const savePersonalNote = (
   personalNote: string,
-): Promise<{ personal_note: string }> =>
+  // undefined = the caller says nothing about it, and the server leaves the
+  // volunteer's answer alone; null is itself an answer (« follow the
+  // campaign »), which is why the intent travels as its own flag.
+  phoneOutreach?: boolean | null,
+): Promise<{ personal_note: string; phone_outreach: boolean | null }> =>
   call("me/personal_note", {
     method: "POST",
-    body: { personal_note: personalNote },
+    body: {
+      personal_note: personalNote,
+      phone_outreach: phoneOutreach ?? null,
+      set_phone_outreach: phoneOutreach !== undefined,
+    },
   });
 
 /**
@@ -442,16 +450,24 @@ export const updateCampaign = (
   batchSize?: number,
   listed?: boolean,
   name?: string,
+  phoneOutreach?: boolean,
 ): Promise<{
   campaign: Record<string, string>;
   batch_size: number;
   listed: boolean;
+  phone_outreach: boolean;
   unfilled: string[];
   name: string;
 }> =>
   call("campaign", {
     method: "POST",
-    body: { campaign, batch_size: batchSize, listed, name },
+    body: {
+      campaign,
+      batch_size: batchSize,
+      listed,
+      name,
+      phone_outreach: phoneOutreach,
+    },
   });
 
 // The logo is its own call: an image does not fit in what a campaign body

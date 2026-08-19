@@ -10,7 +10,7 @@ Nous ne vous demandons pas d'adhérer à ces idées. Nous vous demandons d'envis
 
 {argument_personnel}
 
-Nous nous permettrons de vous appeler dans les prochaines semaines. Si vous préférez ne pas être {sollicite_e}, un mot suffira et nous le respecterons.
+{relance_telephone}
 
 Avec notre considération pour votre engagement au service {commune_de},
 
