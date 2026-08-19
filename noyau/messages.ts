@@ -46,6 +46,23 @@ export const CAMPAIGN_KEYS = [
 // it carries the reasoning; api/config.go holds the other copy.
 export const OPTIONAL_CAMPAIGN_KEYS = ["contact_tel", "site", "ville_envoi"];
 
+/**
+ * WHO SIGNS is the sender's, not the campaign's — the two keys a campaign
+ * hands to nobody.
+ *
+ * The other seven describe the candidate and how to reach the campaign, and
+ * they are meant to travel: that is the whole point of pre-filling. These two
+ * name a PERSON. In team mode each volunteer's own account supplies them, so
+ * the question never arises; the account-less version has no account, so they
+ * fell back to the campaign's — which is whoever filled the form, i.e. the
+ * coordination. Every message a volunteer produced went out over the
+ * coordinator's name and role, and the volunteer had no way to know.
+ *
+ * So they are NOT adopted, by either door. They stay at the template value,
+ * the screen says so, and the person sending signs for themselves.
+ */
+export const PERSONAL_CAMPAIGN_KEYS = ["signataire", "signataire_qualite"];
+
 // Values of the shipped template: letting them through would send
 // "Prénom NOM" to thousands of mayors.
 const TEMPLATE_VALUES = new Set([

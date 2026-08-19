@@ -13,7 +13,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import Browser from "./Browser.tsx";
-import { CAMPAIGN_FIELDS } from "./common.tsx";
+import { CAMPAIGN_FIELDS, EMPTY_CFG } from "./common.tsx";
 import * as DB from "./db.ts";
 
 // spy mode: real IndexedDB behavior everywhere, but a single test can make
@@ -345,6 +345,47 @@ describe("the offer banner, rendered", () => {
         {},
       );
       expect(stored.candidat ?? "").not.toBe(OFFERED.candidat);
+    });
+
+    // WHO SIGNS DOES NOT TRAVEL. The other seven describe the candidate and
+    // how to reach the campaign and exist to be handed over; these two name a
+    // PERSON — and the person who filled the campaign form is the
+    // coordination. Adopted with the rest, every message a volunteer produced
+    // in this mode went out over the coordinator's name and role, and nothing
+    // said so. Team mode never showed it: there, each account supplies its own.
+    it("takes the campaign's texts but never its signatory", async () => {
+      await servedByCampaign();
+      await until(
+        () =>
+          text().includes("Campagne d’essai") ||
+          text().includes("repris depuis son site"),
+        "the campaign lands",
+      );
+      const stored = await DB.readSetting<Record<string, string>>(
+        "campagne",
+        {},
+      );
+      // the campaign's own values: taken
+      expect(stored.candidat).toBe(OFFERED.candidat);
+      expect(stored.contact_email).toBe(OFFERED.contact_email);
+      // the person's: NOT taken, and left at the template value the form
+      // shows, so the screen can ask for them
+      expect(stored.signataire).not.toBe(OFFERED.signataire);
+      expect(stored.signataire_qualite).not.toBe(OFFERED.signataire_qualite);
+      expect(stored.signataire).toBe(EMPTY_CFG.signataire);
+    });
+
+    // …and the reader is TOLD, in the words that fit what is actually
+    // missing. « Campagne non configurée » would send them looking for a
+    // candidate already on their screen, and never say the signature at the
+    // bottom is theirs to give.
+    it("asks the volunteer to sign for themselves", async () => {
+      await servedByCampaign();
+      await until(
+        () => text().includes("Signez de votre nom"),
+        "the screen asks for a signature",
+      );
+      expect(text()).not.toContain("Campagne non configurée");
     });
 
     // A campaign may give a telephone number to nobody, run without a

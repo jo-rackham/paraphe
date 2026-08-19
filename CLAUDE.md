@@ -108,6 +108,19 @@ a train, has a door, and it is on the page they already landed on.
   It never overwrites what a volunteer typed (`untouchedCampaign`), and a
   `?org=` naming a DIFFERENT campaign keeps its offer — a link is a link
   wherever it is opened.
+  **WHO SIGNS DOES NOT TRAVEL** (`PERSONAL_CAMPAIGN_KEYS`). Seven of the nine
+  describe the candidate and how to reach the campaign, and they exist to be
+  handed over; `signataire` and `signataire_qualite` name a PERSON, and the
+  person who filled the campaign form is the coordination. Adopted with the
+  rest — which is what BOTH doors did — every message a volunteer produced in
+  the account-less version went out over the coordinator's name and role, to
+  mayors, with nothing on screen saying so. Team mode hid it completely:
+  there each account supplies its own, so the fallback to the campaign's
+  never fires. They are left at the template value on purpose, and the banner
+  then asks for them IN ITS OWN WORDS — the unconfigured-campaign sentence
+  would send a volunteer looking for a candidate already on their screen and
+  never mention the signature at the bottom. `campaignUnfilled` is that
+  distinction, and it is what decides which sentence shows.
   **« Aucune requête avant un clic » was never true**, and the test that said
   so now states the rule it was reaching for: zero requests to the host a
   LINK names, and the origin that already served the HTML, the bundle and

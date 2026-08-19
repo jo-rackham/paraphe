@@ -181,13 +181,21 @@ export default function Browser() {
    * ne quitte ce navigateur » promises does not happen. A failure costs the
    * picture and nothing else, so it does not undo the adoption.
    */
-  const adopt = useCallback(async (taken: Offer) => {
+  const adopt = useCallback(async (taken: Offer, current: Campaign) => {
+    // WHO SIGNS DOES NOT TRAVEL. Seven of the nine describe the candidate and
+    // how to reach the campaign, and they exist to be handed over; the other
+    // two name a PERSON. Adopted with the rest, every message this volunteer
+    // produced went out over the coordination's name and role — the person
+    // who happened to fill the form — and nothing on screen said so. Team
+    // mode never showed it: there, each account supplies its own.
+    const campaign = { ...taken.campaign };
+    for (const k of M.PERSONAL_CAMPAIGN_KEYS) campaign[k] = current[k] ?? "";
     // a rejected write (quota, private window, blocked base) must be SAID:
     // without the catch this returns having done nothing at all
     try {
-      await DB.writeSetting("campagne", taken.campaign);
-      setCfg(taken.campaign);
-      setDraft(taken.campaign);
+      await DB.writeSetting("campagne", campaign);
+      setCfg(campaign);
+      setDraft(campaign);
       if (taken.logo) {
         try {
           const inlined = await inlineLogo(taken.logo);
@@ -268,7 +276,7 @@ export default function Browser() {
         }
       }
       if (own && (!slug || slug === own.slug)) {
-        if (await adopt(own)) {
+        if (await adopt(own, c)) {
           setAdopted(
             `Les textes de la campagne « ${own.name} » sont repris depuis ` +
               "son site. Ils restent dans ce navigateur, et vous pouvez les " +
@@ -314,6 +322,14 @@ export default function Browser() {
   }, [fetchList, adopt]);
 
   const unfilled = useMemo(() => M.unfilledKeys(cfg), [cfg]);
+  // What is missing about the CAMPAIGN, as opposed to about the person
+  // sending. The two are told apart because only the second is the reader's
+  // to fix, and a campaign adopted from its own site is missing exactly the
+  // second.
+  const campaignUnfilled = useMemo(
+    () => unfilled.filter((k) => !M.PERSONAL_CAMPAIGN_KEYS.includes(k)),
+    [unfilled],
+  );
 
   // Derived, never stored: whether the draft differs from what is saved.
   // Without it, a keystroke landing during a save stayed on screen under a
@@ -663,7 +679,7 @@ export default function Browser() {
                   onAccept={async () => {
                     // the card — and the clicked button — unmounts
                     focusContenu();
-                    if (await adopt(offer)) {
+                    if (await adopt(offer, cfg)) {
                       setOffer(null);
                       setMessage({
                         tone: "ok",
@@ -680,11 +696,31 @@ export default function Browser() {
                   {/* one line, not the list of nine labels: the campaign tab
                   marks each missing field itself, and a banner repeated on
                   every screen must stay short enough to leave the screen
-                  to the work */}
-                  <strong>Campagne non configurée.</strong> Les messages
-                  contiennent encore des valeurs d'exemple :{" "}
-                  <strong>n'envoyez rien</strong> avant d'avoir rempli l'onglet
-                  « Ma campagne ».
+                  to the work.
+
+                  TWO SENTENCES, because two different things are missing and
+                  only one of them is the reader's to fix. A campaign taken
+                  from its own site arrives complete except the two keys that
+                  name a PERSON — those are deliberately not adopted — so the
+                  unconfigured-campaign wording would send its reader looking
+                  for a candidate already on their screen, and would never say
+                  that the signature at the bottom is theirs to give. */}
+                  {campaignUnfilled.length > 0 ? (
+                    <>
+                      <strong>Campagne non configurée.</strong> Les messages
+                      contiennent encore des valeurs d'exemple :{" "}
+                      <strong>n'envoyez rien</strong> avant d'avoir rempli
+                      l'onglet « Ma campagne ».
+                    </>
+                  ) : (
+                    <>
+                      <strong>Signez de votre nom.</strong> Les textes de la
+                      campagne sont là, mais c'est <strong>vous</strong> qui
+                      envoyez : renseignez votre nom et votre qualité dans « Ma
+                      campagne ». Sans cela les messages partiraient sous un nom
+                      d'exemple.
+                    </>
+                  )}
                   {tab !== "campagne" && (
                     <>
                       {" "}

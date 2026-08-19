@@ -36,6 +36,7 @@ export {
   isWoman,
   letterHeader,
   MissingField,
+  PERSONAL_CAMPAIGN_KEYS,
   postalCity,
   proseName,
   RANKS,
