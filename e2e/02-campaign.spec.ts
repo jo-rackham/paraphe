@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { COORDINATION, campaignOrigin, FIRST_CAMPAIGN } from "./config.ts";
-import { openTab, signIn } from "./helpers.ts";
+import { openManagement, openTab, signIn } from "./helpers.ts";
 
 // The volunteer's own path, end to end: configure the campaign, reserve a
 // batch, open a card, read the message the tool wrote, record the outcome.
@@ -17,7 +17,7 @@ test.describe
   .serial("a campaign at work", () => {
     test("its coordination fills in the campaign", async ({ page }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
 
       const exact = { exact: true };
       await page.getByLabel("Son nom", exact).fill(CANDIDATE);

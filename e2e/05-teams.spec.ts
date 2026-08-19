@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { COORDINATION, campaignOrigin, FIRST_CAMPAIGN } from "./config.ts";
-import { openTab, signIn } from "./helpers.ts";
+import { openManagement, openTab, signIn } from "./helpers.ts";
 
 // Local teams: a coordination draws a geographic perimeter, a lead opens
 // volunteer accesses inside it, and the walls hold — a team neither draws
@@ -30,7 +30,7 @@ test.describe
 
     test("coordination draws a team and its perimeter", async ({ page }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
 
       await page.getByLabel("Nom de l'équipe").fill(TEAM);
       await page
@@ -46,7 +46,7 @@ test.describe
       page,
     }) => {
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
 
       await page.getByLabel("Nom", { exact: true }).fill(LEAD.name);
       await page.getByLabel("Adresse email").fill(LEAD.email);
@@ -68,7 +68,7 @@ test.describe
       page,
     }) => {
       await signIn(page, ORIGIN, LEAD.email, leadPassword);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
 
       // a lead is offered no role and no team: whoever they create is a
       // volunteer of THEIR team, and nothing else
@@ -188,7 +188,7 @@ test.describe
       expect(before.status()).toBe(401);
 
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
       const queued = page.locator(".carte", { hasText: ASKED });
       await expect(queued).toContainText(APPLICANT.email);
 
@@ -218,7 +218,7 @@ test.describe
         page.getByRole("heading", { name: "Connexion" }),
       ).toBeVisible();
       await signIn(page, ORIGIN, APPLICANT.email, password);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
       await expect(
         page.getByText("vous ouvrez des accès bénévoles"),
       ).toBeVisible();
@@ -229,7 +229,7 @@ test.describe
 
     test("a deactivated access no longer opens", async ({ page }) => {
       await signIn(page, ORIGIN, LEAD.email, leadPassword);
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
       await page
         .locator("tr", { hasText: VOLUNTEER.email })
         .getByRole("button", { name: "désactiver" })

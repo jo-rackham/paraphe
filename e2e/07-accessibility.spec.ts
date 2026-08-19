@@ -9,7 +9,7 @@ import {
   INSTANCE_ADMIN,
   STATIC_ORIGIN,
 } from "./config.ts";
-import { openTab, signIn } from "./helpers.ts";
+import { openManagement, openTab, signIn } from "./helpers.ts";
 
 // Every screen of the three modes, scanned by axe against WCAG A + AA.
 //
@@ -257,9 +257,9 @@ test.describe
       await expect(page.getByText("Pourquoi cette personne")).toBeVisible();
       await checkA11y(page, "team:fiche");
 
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
       await expect(
-        page.getByRole("heading", { name: "Mon équipe" }),
+        page.getByRole("heading", { name: "Ma campagne" }),
       ).toBeVisible();
       await checkA11y(page, "team:equipe");
 
@@ -346,9 +346,9 @@ test.describe
         await expect(page.getByText("Pourquoi cette personne")).toBeVisible();
         await checkA11y(page, "team:fiche (sombre)");
 
-        await openTab(page, "Mon équipe");
+        await openManagement(page);
         await expect(
-          page.getByRole("heading", { name: "Mon équipe" }),
+          page.getByRole("heading", { name: "Ma campagne" }),
         ).toBeVisible();
         await checkA11y(page, "team:equipe (sombre)");
       });

@@ -160,6 +160,47 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+// The management screen is reached by two roles and is not the same thing
+// for them. A référent leads ONE team; the coordination has none — it holds
+// the campaign, its texts and every team — and « Mon équipe » there asks a
+// question the screen answers with « aucune équipe », which reads as the
+// tool having made them one.
+describe("what the management screen is called", () => {
+  const asRole = (role: "coordination" | "lead"): Me => ({
+    ...ALICE,
+    account: { ...ALICE.account, role },
+    may_manage: true,
+  });
+
+  it.each([
+    ["coordination", "Ma campagne", "Mon équipe"],
+    ["lead", "Mon équipe", "Ma campagne"],
+  ] as const)("names it %s → « %s »", async (role, shown, hidden) => {
+    const who = asRole(role);
+    vi.mocked(API.me).mockResolvedValueOnce(who);
+    vi.mocked(API.team).mockResolvedValue({
+      accounts: [],
+      teams: [],
+      departments: [],
+      requests: [],
+    });
+    await act(async () => {
+      root.render(<Team config={CONFIG} />);
+    });
+    await until(() => text().includes(shown), `the ${role} tab`);
+
+    // the TAB, and the heading behind it, and the document title: one
+    // function feeds all three, and a name written three times is a name
+    // that stays behind in two of them
+    expect(button(shown)).toBeDefined();
+    expect(text()).not.toContain(hidden);
+    await click(shown);
+    await until(() => text().includes("Les accès"), "the screen opens");
+    expect(container.querySelector("h1")?.textContent).toBe(shown);
+    expect(document.title).toContain(shown);
+  });
+});
+
 describe("unsent card work in team mode", () => {
   it("does not follow the computer to the next person", async () => {
     // Alice arrives by COOKIE — the scenario the guard exists for: a

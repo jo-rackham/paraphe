@@ -314,6 +314,30 @@ describe("the offer banner, rendered", () => {
     expect(text()).not.toContain("Reprendre la campagne");
     expect(window.location.search).not.toContain("org=");
   });
+
+  // A link that names a campaign and produces NOTHING is the same silence
+  // twice: whoever sent it believes it worked, and whoever opened it reads
+  // the example values as the campaign's own. The refusal itself is right —
+  // the values already here are this volunteer's, and a link does not
+  // overwrite them — so what was missing is the sentence.
+  it("says so when a campaign is already here, instead of ignoring the link", async () => {
+    await DB.writeSetting("campagne", { ...OFFERED, candidat: "Déjà Saisi" });
+    await act(async () => {
+      root.render(<Browser />);
+    });
+    await until(
+      () => text().includes("déjà enregistrée dans ce navigateur"),
+      "the link says why it did nothing",
+    );
+    // …and it is not the OTHER message: this link is not broken, and the
+    // campaign it names is not at fault
+    expect(text()).not.toContain("ne propose aucune campagne");
+    // the refusal still holds: no proposal, and the campaign already here
+    // is untouched
+    expect(text()).not.toContain("Ce lien propose une campagne");
+    await click("Ma campagne");
+    expect(firstCampaignField().value).toBe("Déjà Saisi");
+  });
 });
 
 describe("unsent work on a card", () => {

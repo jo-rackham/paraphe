@@ -6,7 +6,14 @@ import {
   FIRST_CAMPAIGN,
   INSTANCE_ADMIN,
 } from "./config.ts";
-import { linkIn, openTab, signIn, visit, waitForMail } from "./helpers.ts";
+import {
+  linkIn,
+  openManagement,
+  openTab,
+  signIn,
+  visit,
+  waitForMail,
+} from "./helpers.ts";
 
 // One journey, told in order: a stranger asks for a campaign, an instance
 // administrator decides, and only then does the campaign exist.
@@ -147,8 +154,9 @@ test.describe
       page,
     }) => {
       await signIn(page, campaignOrigin(SLUG), REQUESTER, coordinationPassword);
-      // « Mon équipe » only shows for someone who may manage accounts
-      await openTab(page, "Mon équipe");
+      // the management screen only shows for someone who may manage
+      // accounts, and it is called « Ma campagne » for a coordination
+      await openManagement(page);
       await expect(
         page.getByRole("heading", { name: "La campagne" }),
       ).toBeVisible();
@@ -199,7 +207,7 @@ test.describe
         "coord@directe.test",
         password,
       );
-      await openTab(page, "Mon équipe");
+      await openManagement(page);
       await expect(
         page.getByRole("heading", { name: "La campagne" }),
       ).toBeVisible();

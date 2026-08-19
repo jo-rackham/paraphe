@@ -74,7 +74,7 @@ export function Profil({ me, cfg, onError, onSaved }: ProfilProps) {
         <h2 style={{ marginTop: 0 }}>La campagne</h2>
         <p className="gris">
           Ces valeurs remplissent tous les messages. Seule la coordination peut
-          les changer, dans l'onglet « Mon équipe ».
+          les changer, dans son onglet « Ma campagne ».
         </p>
         <table>
           <tbody>

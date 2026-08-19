@@ -54,13 +54,21 @@ afterEach(async () => {
 });
 
 /** The screen a visitor with no session lands on. */
-async function signInScreen(browserVersionUrl: string) {
+async function signInScreen(
+  browserVersionUrl: string,
+  unfilled: string[] = [],
+) {
   vi.mocked(API.me).mockRejectedValue(
     new API_ERROR(401, "Session absente ou expirée."),
   );
   await act(async () => {
     root.render(
-      <Team config={teamConfig({ browser_version_url: browserVersionUrl })} />,
+      <Team
+        config={teamConfig({
+          browser_version_url: browserVersionUrl,
+          unfilled,
+        })}
+      />,
     );
   });
   await flush();
@@ -87,6 +95,23 @@ describe("the account-less version, offered from a campaign", () => {
   it("says what it costs, on the same screen", async () => {
     await signInScreen(OFFERED);
     expect(container.textContent).toContain("rien n'est coordonné");
+  });
+
+  // A campaign still at its template values pre-fills NOTHING: the API
+  // refuses it with a 409 rather than spread « Prénom NOM » to volunteers
+  // who have no way of knowing. The card promised the pre-fill anyway, and
+  // the same /api/config that carries this link carries `unfilled` — so the
+  // promise was one its reader discovered by paying for it.
+  it("promises the pre-fill only where it will happen", async () => {
+    await signInScreen(OFFERED, ["candidat", "signataire"]);
+    expect(container.textContent).not.toContain("déjà remplis");
+    expect(container.textContent).toContain("valeurs d'exemple");
+    // …and the door is still open: the tool works, it is the pre-fill that
+    // does not
+    expect(
+      linkTo(OFFERED),
+      "the link itself must survive an unconfigured campaign",
+    ).not.toHaveLength(0);
   });
 
   // An <a>, never a button dressed as one: /navigateur/ is a second build

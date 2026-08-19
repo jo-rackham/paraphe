@@ -189,6 +189,21 @@ export default function Browser() {
       // signature at the bottom of every email to a mayor.
       // …and REMEMBERED, never fetched here: see pendingSlug above.
       if (slug && untouchedCampaign(c)) setPendingSlug(slug);
+      // …and SAID when it is not offered. A link that names a campaign and
+      // produces nothing at all is the same silence twice over: whoever
+      // sent it believes it worked, and whoever opened it reads the
+      // example values as the campaign's own. It is not a refusal to
+      // reverse — the values already here are this volunteer's, and a link
+      // does not overwrite them — so it is a sentence and a way to act,
+      // in the slot the broken-link message already owns.
+      else if (slug) {
+        setOfferError(
+          `Ce lien propose la campagne « ${slug} », mais une campagne est ` +
+            "déjà enregistrée dans ce navigateur et un lien ne la remplace " +
+            "pas. Ouvrez « Ma campagne » pour la voir, ou effacez-la depuis " +
+            "« Mes données » avant de rouvrir le lien.",
+        );
+      }
     })().catch((e) => {
       // Rejecting instead of hanging changes nothing on screen without
       // this: `ready` stays false, the page renders "Chargement…" for
@@ -432,12 +447,13 @@ export default function Browser() {
           {/* persistent, like Alerte: a broken ?org= link resolves in the
               same breath as the first render, and the role sits on a
               text-only span with the button beside it */}
+          {/* The WHOLE sentence, not a prefix plus a detail: two things
+              land here now — a link whose campaign could not be fetched,
+              and a link that names one this browser will not replace — and
+              a fixed « ne propose aucune campagne » contradicted the
+              second. Each writer says what happened. */}
           <p className={offerError ? "alerte erreur" : "sr-only"}>
-            <span role="alert">
-              {offerError
-                ? `Ce lien ne propose aucune campagne : ${offerError}`
-                : ""}
-            </span>
+            <span role="alert">{offerError ?? ""}</span>
             {offerError && (
               <>
                 {" "}
@@ -494,7 +510,8 @@ export default function Browser() {
                         // later and overwrote this one, so a broken link
                         // failed in total silence
                         setOfferError(
-                          err instanceof Error ? err.message : String(err),
+                          "Ce lien ne propose aucune campagne : " +
+                            (err instanceof Error ? err.message : String(err)),
                         );
                         setPendingSlug(null);
                       } finally {

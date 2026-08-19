@@ -5,6 +5,7 @@ import {
   ChampsCampagne,
   campaignLabel,
   focusContenu,
+  gestionLabel,
   holdFocusThrough,
   label,
   ROLES,
@@ -537,7 +538,10 @@ export function GestionEquipe({
 
   return (
     <>
-      <h1>Mon équipe</h1>
+      {/* Through the SAME function as the tab that opened it: a heading
+          that disagrees with the tab is how a reader concludes they landed
+          on the wrong screen. */}
+      <h1>{gestionLabel(me)}</h1>
 
       {coordination && (
         <ConfigurationCampagne

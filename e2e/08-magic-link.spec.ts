@@ -5,6 +5,7 @@ import {
   emptyInbox,
   inbox,
   linkIn,
+  openManagement,
   signIn,
   visit,
   waitForMail,
@@ -92,9 +93,7 @@ test.describe
       await emptyInbox();
       const invited = "nouvelle.benevole@premiere.test";
       await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-      await page
-        .getByRole("button", { name: "Mon équipe", exact: true })
-        .click();
+      await openManagement(page);
 
       await page.getByLabel("Nom", { exact: true }).fill("Nouvelle Bénévole");
       await page.getByLabel("Adresse email", { exact: true }).fill(invited);

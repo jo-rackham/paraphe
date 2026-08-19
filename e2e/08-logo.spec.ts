@@ -6,7 +6,7 @@ import {
   FIRST_CAMPAIGN,
   mediaConfigured,
 } from "./config.ts";
-import { openTab, signIn } from "./helpers.ts";
+import { openManagement, openTab, signIn } from "./helpers.ts";
 
 // The campaign logo, across the whole stack: uploaded through the API,
 // stored in the object store, and fetched by the BROWSER from an origin
@@ -49,7 +49,7 @@ test.describe("le logo de campagne", () => {
     });
 
     await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    await openTab(page, "Mon équipe");
+    await openManagement(page);
 
     await page
       .getByLabel("Logo de la campagne (facultatif)")
@@ -88,7 +88,7 @@ test.describe("le logo de campagne", () => {
 
   test("retiré, l'en-tête revient à l'hexagone seul", async ({ page }) => {
     await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    await openTab(page, "Mon équipe");
+    await openManagement(page);
     await page
       .getByLabel("Logo de la campagne (facultatif)")
       .setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG });
@@ -105,7 +105,7 @@ test.describe("le logo de campagne", () => {
     page,
   }) => {
     await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
-    await openTab(page, "Mon équipe");
+    await openManagement(page);
     await page.getByLabel("Logo de la campagne (facultatif)").setInputFiles({
       name: "piege.svg",
       mimeType: "image/svg+xml",

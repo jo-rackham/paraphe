@@ -11,6 +11,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as API from "./api.ts";
+import { gestionLabel } from "./common.tsx";
 import Team from "./Team.tsx";
 import { teamConfig } from "./testing/fixtures.ts";
 import type { Me, ServerConfig, TeamRequest } from "./types.ts";
@@ -249,8 +250,13 @@ describe("the coordination's moderation queue", () => {
     await act(async () => {
       root.render(<Team config={CONFIG} />);
     });
-    await until(() => text().includes("Mon équipe"), "the app opens");
-    await click("Mon équipe");
+    // by the name the ROLE sees, through the app's own function: the
+    // coordination's screen is called « Ma campagne » and a référent's
+    // « Mon équipe », and a literal here would pin the label in a file that
+    // is about moderation
+    const onglet = gestionLabel(boss(role));
+    await until(() => text().includes(onglet), "the app opens");
+    await click(onglet);
     await until(() => text().includes("Les accès"), "the team screen");
   };
 

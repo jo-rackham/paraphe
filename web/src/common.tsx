@@ -10,7 +10,7 @@ import {
 } from "react";
 import GUIDE from "../../GUIDE.md?raw";
 import * as M from "./messages.ts";
-import type { Campaign, Logo, Mayor, Message, Note } from "./types.ts";
+import type { Campaign, Logo, Mayor, Me, Message, Note } from "./types.ts";
 
 // Vocabulary and components shared by both modes. The card above all: it
 // is what calls the message engine, and the rank drives the template
@@ -898,6 +898,27 @@ export function TableMaires({ children }: { children: ReactNode }) {
   );
   // biome-ignore-end lint/a11y/noRedundantRoles: single suppression site
 }
+
+/**
+ * What the management screen is CALLED, which is not the same thing for the
+ * two roles that reach it.
+ *
+ * A référent leads one team and manages its volunteers: « Mon équipe » is
+ * exactly what they opened. The coordination has no team — it holds the
+ * campaign, its texts, its logo, its accesses and every team — and reading
+ * « Mon équipe » there asks a question the screen then answers with « aucune
+ * équipe », which is how a coordinator concludes the tool made them one.
+ *
+ * ONE function, and it is not politeness: the name is written in four places
+ * — the tab, the document title, the heading, and the banner that points at
+ * it — and four copies is how three of them stay behind.
+ *
+ * The PATH does not move (`/equipe`). One screen with two addresses is a
+ * « précédent » that appears to do nothing, and a link shared between a
+ * coordinator and a référent must open the same screen for both.
+ */
+export const gestionLabel = (me: Me | null | undefined): string =>
+  me?.account.role === "coordination" ? "Ma campagne" : "Mon équipe";
 
 /**
  * A URL fit to be an href, or undefined. source_url and browser_version_url

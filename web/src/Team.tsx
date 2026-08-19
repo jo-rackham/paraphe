@@ -12,6 +12,7 @@ import {
   type CardDraft,
   Fiche,
   Guide,
+  gestionLabel,
   httpUrl,
   LogoCampagne,
   Marque,
@@ -38,7 +39,6 @@ const VIEW_TITLES: Record<string, string> = {
   guide: "Guide",
   tableau: "Mon tableau de bord",
   maires: "Les maires",
-  equipe: "Mon équipe",
   profil: "Mon profil",
 };
 
@@ -236,7 +236,9 @@ export default function Team({ config }: { config: ServerConfig }) {
         ? "Connexion"
         : tab === "fiche"
           ? (chosen?.mayor.commune ?? "Fiche")
-          : (VIEW_TITLES[tab] ?? "paraphe"),
+          : tab === "equipe"
+            ? gestionLabel(me)
+            : (VIEW_TITLES[tab] ?? "paraphe"),
   );
 
   if (!ready)
@@ -312,7 +314,7 @@ export default function Team({ config }: { config: ServerConfig }) {
                 className="lien"
                 onClick={() => setTab("equipe")}
               >
-                Ouvrir « Mon équipe »
+                Ouvrir « {gestionLabel(me)} »
               </button>
             </>
           )}
@@ -439,7 +441,9 @@ function Coquille({
     ["guide", "Guide"],
     ["tableau", "Mon tableau"],
     ["maires", "Les maires"],
-    ...(me?.may_manage ? [["equipe", "Mon équipe"] as [string, string]] : []),
+    ...(me?.may_manage
+      ? [["equipe", gestionLabel(me)] as [string, string]]
+      : []),
     ["profil", "Mon profil"],
   ];
   return (
@@ -554,11 +558,26 @@ function Connexion({
       {sansCompte && (
         <section className="carte">
           <h2>Sans compte, dans votre navigateur</h2>
-          <p>
-            Les textes de cette campagne — candidat, contacts, signature — vous
-            seront proposés déjà remplis, et vous les verrez avant que rien ne
-            soit enregistré. Tout reste sur votre poste.
-          </p>
+          {/* The pre-fill is promised only where it will HAPPEN. A campaign
+              still at its template values pre-fills nothing — the API
+              refuses it with a 409, deliberately, rather than spread
+              « Prénom NOM » to volunteers with no way of knowing — and the
+              same /api/config that carries this link carries `unfilled`.
+              Promised unconditionally, the sentence was a promise its reader
+              discovered by paying for it. */}
+          {cfg.unfilled?.length > 0 ? (
+            <p>
+              Cette campagne n'a pas encore rempli ses textes : la version
+              navigateur s'ouvrira avec des valeurs d'exemple, à vous de les
+              renseigner. <strong>N'envoyez rien</strong> avant.
+            </p>
+          ) : (
+            <p>
+              Les textes de cette campagne — candidat, contacts, signature —
+              vous seront proposés déjà remplis, et vous les verrez avant que
+              rien ne soit enregistré. Tout reste sur votre poste.
+            </p>
+          )}
           <p>
             En échange, <strong>rien n'est coordonné</strong> : cette version
             ignore qu'un autre bénévole a déjà appelé le même maire. Pour

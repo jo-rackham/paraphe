@@ -21,6 +21,22 @@ export async function openTab(page: Page, name: string) {
   await page.getByRole("button", { name, exact: true }).click();
 }
 
+/**
+ * The management screen, whose tab is NAMED FOR THE ROLE that opens it:
+ * « Ma campagne » for a coordination, which has no team and holds the
+ * campaign, « Mon équipe » for a référent, who leads one.
+ *
+ * Either name, because a journey about logos or invitations is not about
+ * what the tab is called. The names themselves are pinned where they belong
+ * — `web/src/Team.test.tsx`, which drives both roles — and by the heading
+ * assertions in the accessibility sweep.
+ */
+export async function openManagement(page: Page) {
+  await page
+    .getByRole("button", { name: /^(Ma campagne|Mon équipe)$/ })
+    .click();
+}
+
 // The throwaway relay, read back. Shared because two journeys open a link
 // that arrived by email — one asked for from a screen, one minted by an
 // approval on the apex — and the public forms behind them are plafonnés per
