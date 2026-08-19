@@ -199,6 +199,12 @@ parrain connu ou non) sont modifiables depuis « Ma campagne », et chaque
 - **Pour revenir en arrière** : videz le cadre, ou « Revenir au texte fourni ».
   Rien n'est perdu — le texte d'origine n'a jamais été remplacé, seulement
   masqué.
+- **Sans compte, dans le navigateur** : les textes de la campagne sont repris
+  en même temps que ses autres champs, au moment où vous la reprenez. Ils
+  deviennent alors les vôtres — vous les relisez et les modifiez depuis « Ma
+  campagne », et ils restent dans ce navigateur comme le reste. Une correction
+  faite ensuite par la coordination ne vous parviendra pas : reprenez la
+  campagne à nouveau pour la recevoir.
 
 ## 6. Pour le coordinateur / la coordinatrice
 

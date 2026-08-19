@@ -8,10 +8,11 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as API from "./api.ts";
 import { Fiche } from "./common.tsx";
 import * as M from "./messages.ts";
+import { readOffer } from "./prefill.ts";
 import { ModelesMessages } from "./Templates.tsx";
 import { teamConfig } from "./testing/fixtures.ts";
 import type { Mayor, Templates } from "./types.ts";
@@ -57,10 +58,14 @@ afterEach(async () => {
 });
 
 const editor = async (
-  niveau: "campaign" | "team",
+  niveau: "campaign" | "team" | "navigateur",
   propres: Templates,
   herites: Templates = {},
   onEnregistre: (t: Templates) => void = () => {},
+  onSave: (t: Templates) => Promise<Templates> = async (t) =>
+    niveau === "team"
+      ? (await API.updateTeamTemplates(t)).templates
+      : (await API.updateCampaignTemplates(t)).templates,
 ) => {
   await act(async () => {
     root.render(
@@ -68,6 +73,7 @@ const editor = async (
         niveau={niveau}
         propres={propres}
         herites={herites}
+        onSave={onSave}
         onEnregistre={onEnregistre}
         onError={() => {}}
         onMessage={() => {}}
@@ -191,4 +197,81 @@ it("renders a card from the team's text, then the campaign's, then the image's",
   );
   // and with no layer at all, the image's own letter
   expect(await render([])).toContain(cfg.signataire);
+});
+
+// THE ACCOUNT-LESS VERSION, which has no server to ask and no live link to
+// the campaign it adopted.
+describe("the templates a campaign hands to the browser version", () => {
+  const answer = (templates: unknown) => ({
+    slug: "campagne",
+    name: "Campagne",
+    campaign: Object.fromEntries(
+      M.CAMPAIGN_KEYS.map((k) => [k, `valeur de ${k}`]),
+    ),
+    templates,
+  });
+
+  it("carries the campaign's own texts through the offer", () => {
+    const offer = readOffer(answer({ "courrier.txt": "Notre lettre.\n" }));
+    expect(offer.templates).toEqual({ "courrier.txt": "Notre lettre.\n" });
+  });
+
+  it("adopts the shipped texts when the campaign has rewritten none", () => {
+    expect(readOffer(answer({})).templates).toEqual({});
+    expect(readOffer(answer(undefined)).templates).toEqual({});
+  });
+
+  // FILTERED, not refused: a key outside the six is a text nothing renders,
+  // and throwing would refuse a whole campaign — nine fields and a logo — over
+  // one stray key that changes nothing.
+  it.each([
+    ["a name nothing renders", { "courriel.txt": "x" }],
+    ["a value that is not a string", { "courrier.txt": 42 }],
+    ["an empty text, which means inherit", { "courrier.txt": "   " }],
+  ])("drops %s rather than refusing the campaign", (_case, templates) => {
+    const offer = readOffer(answer(templates));
+    expect(offer.templates).toEqual({});
+    // …and the nine values still came through, which is the point
+    expect(offer.campaign.candidat).toBe("valeur de candidat");
+  });
+
+  // THE ONE BOUND THAT IS NOT COSMETIC. This mode stores what it adopts and
+  // promises to hold only what its owner put there; a campaign answering with
+  // a megabyte per file would fill a volunteer's disk on one click.
+  it("refuses a template past the size the server itself applies", () => {
+    const huge = "é".repeat(M.MAX_TEMPLATE_RUNES + 1);
+    expect(readOffer(answer({ "courrier.txt": huge })).templates).toEqual({});
+    const atTheLimit = "é".repeat(M.MAX_TEMPLATE_RUNES);
+    expect(readOffer(answer({ "courrier.txt": atTheLimit })).templates).toEqual(
+      { "courrier.txt": atTheLimit },
+    );
+  });
+
+  // No server here to reproduce the engine's rules, so the engine is asked
+  // directly — and at BOTH ranks, because a template is chosen by rank and
+  // checking one leaves the other to be found by a mayor.
+  it.each([
+    ["an unknown placeholder", { "courrier.txt": "Bonjour {prénom}." }],
+    [
+      "the other rank's placeholder",
+      { "courrier_decouverte.txt": "En {annee_recente}." },
+    ],
+    ["an email with no subject", { "email.txt": "Bonjour {salutation}." }],
+  ])("says why %s cannot be used", (_case, overlay) => {
+    const why = M.invalidTemplate(
+      M.mergeTemplates(M.SHIPPED_TEMPLATES, overlay),
+    );
+    expect(why).toBeTruthy();
+  });
+
+  it("accepts the texts the campaign actually sends", () => {
+    expect(M.invalidTemplate(M.SHIPPED_TEMPLATES)).toBeNull();
+    expect(
+      M.invalidTemplate(
+        M.mergeTemplates(M.SHIPPED_TEMPLATES, {
+          "courrier.txt": "Bonjour {salutation} de {commune_de}.\n",
+        }),
+      ),
+    ).toBeNull();
+  });
 });

@@ -54,7 +54,9 @@ test.describe
 
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
       await page.getByLabel("Note").fill("noté hors ligne");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
       await expect(page.getByText("noté hors ligne")).toBeVisible();
 
       // the arrow is decorative (aria-hidden): not part of the button's name
@@ -129,7 +131,9 @@ test.describe
       for (const [label, value] of fields) {
         await page.getByLabel(label, { exact: true }).fill(value);
       }
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
       await expect(
         page.getByText("Campagne enregistrée dans ce navigateur."),
       ).toBeVisible();
@@ -153,7 +157,9 @@ test.describe
       await first.click();
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
       await page.getByLabel("Note").fill("avant la sauvegarde");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
       await expect(page.getByText("avant la sauvegarde")).toBeVisible();
 
       // Self-contained on purpose: Playwright hands each test a fresh
@@ -161,7 +167,9 @@ test.describe
       // here. The backup must carry BOTH the tracking and the campaign.
       await page.getByRole("button", { name: "Ma campagne" }).click();
       await page.getByLabel("Son nom", { exact: true }).fill(CANDIDATE);
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
       await expect(
         page.getByText("Campagne enregistrée dans ce navigateur."),
       ).toBeVisible();

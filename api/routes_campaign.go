@@ -428,7 +428,23 @@ func (s *Server) routePublicCampaign(w http.ResponseWriter, r *http.Request) {
 	// That build then downloads it ONCE and keeps a data URI: it promises
 	// that nothing leaves the browser, and a remote URL in its header would
 	// make that false at every load.
+	// THE CAMPAIGN'S OWN TEXTS travel too, so the account-less version writes
+	// what this campaign writes rather than what the image ships. Without
+	// them a campaign that rewrote its letter had two voices — one for the
+	// volunteers with an account, one for the volunteers without — and
+	// nothing on either screen saying which.
+	//
+	// Public, like the nine values beside them and for the same reason: this
+	// is the body an account-less volunteer adopts, and these texts are what
+	// the campaign already sends to five hundred elected officials. Only the
+	// CAMPAIGN's layer travels — a team's overlay is its team's, and this
+	// mode has no team.
+	templates, err := s.campaignTemplates(r)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	replyJSON(w, http.StatusOK, map[string]any{
 		"slug": org.Slug, "name": org.Name, "campaign": campaign,
-		"logo": s.logoOf(org)})
+		"templates": templates, "logo": s.logoOf(org)})
 }

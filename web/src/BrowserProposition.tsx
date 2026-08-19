@@ -40,6 +40,23 @@ export function Proposition({
           ))}
         </tbody>
       </table>
+      {/* THE TEXTS THEMSELVES, when this campaign has rewritten any. The nine
+          values above fill the messages; these ARE the messages, so a link
+          that carries them is proposing more than a name and a telephone
+          number. Said in a sentence rather than shown in full: six templates
+          of two thousand characters on a confirmation screen is a screen
+          nobody reads, and the volunteer can read every one of them, and
+          change them, on « Ma campagne » the moment they accept. */}
+      {Object.keys(offer.templates).length > 0 && (
+        <p>
+          <strong>
+            Cette campagne fournit aussi ses propres textes de messages
+          </strong>{" "}
+          ({Object.keys(offer.templates).length} sur 6). Ils remplaceront les
+          textes fournis avec l'application. Vous pourrez les lire et les
+          modifier dans « Ma campagne ».
+        </p>
+      )}
       <p>
         <button type="button" onClick={onAccept}>
           Reprendre cette campagne

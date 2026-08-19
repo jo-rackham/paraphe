@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -471,5 +472,54 @@ func TestSixTemplatesAtEveryCeilingStillFitInOneBody(t *testing.T) {
 	campaign, _ := layersOf(t, c)
 	if len(campaign) != len(templateFiles) {
 		t.Errorf("stored %d of %d templates", len(campaign), len(templateFiles))
+	}
+}
+
+// THE ACCOUNT-LESS VERSION ADOPTS THE CAMPAIGN'S TEXTS, and this is the wire
+// it reads them off.
+//
+// Without them a campaign that had rewritten its letter spoke with two voices
+// — one to the volunteers with an account, one to the volunteers without —
+// and nothing on either screen said which. Only the CAMPAIGN's layer: a
+// team's overlay is its team's, and that mode has no team.
+func TestTheBrowserVersionIsOfferedTheCampaignsOwnTexts(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	s, srv := testServer(t)
+	org := orgID(t, s, testSlug)
+	team := createTeamIn(t, s, org, "Nord", "01")
+	execAsMaintenance(t, s,
+		"UPDATE teams SET templates=$3::jsonb WHERE org_id=$1 AND id=$2",
+		org, team, `{"courrier.txt":"Le texte de l'équipe Nord."}`)
+
+	public := func() map[string]any {
+		t.Helper()
+		c := clientOn(t, srv, testSlug+".paraphe.test")
+		code, body := c.call(http.MethodGet, "/api/campaign/public", nil)
+		if code != http.StatusOK {
+			t.Fatalf("/api/campaign/public: %d %v", code, body)
+		}
+		return body
+	}
+
+	// nothing rewritten: an empty overlay, which IS the shipped texts
+	if got, _ := public()["templates"].(map[string]any); len(got) != 0 {
+		t.Errorf("a campaign that rewrote nothing offers %v", got)
+	}
+
+	const own = "Le texte de la campagne pour {salutation}.\n"
+	execAsMaintenance(t, s,
+		"UPDATE orgs SET templates=$2::jsonb WHERE id=$1", org,
+		`{"courrier.txt":`+strconv.Quote(own)+`}`)
+
+	offered, _ := public()["templates"].(map[string]any)
+	if offered["courrier.txt"] != own {
+		t.Errorf("the campaign's own letter is not offered: %v", offered)
+	}
+	// and the TEAM's is not: it crossed no wall to get here, and this mode
+	// has no team to be one of
+	for _, text := range offered {
+		if text == "Le texte de l'équipe Nord." {
+			t.Error("a team's overlay reached the account-less version")
+		}
 	}
 }

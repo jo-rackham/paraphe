@@ -569,6 +569,21 @@ export const TEMPLATE_FILES = [
 ];
 
 /**
+ * The longest ONE template may be, in runes.
+ *
+ * The server applies it (`api/templates.go`, `maxTemplateRunes`, where the
+ * number is arithmetic against the body limit); this copy exists because the
+ * account-less version accepts templates from a campaign it adopts and has no
+ * server to ask. A campaign whose answer carried a megabyte of "template"
+ * would fill a volunteer's IndexedDB in one click, and this mode's whole
+ * promise is that it holds only what its owner put there.
+ *
+ * Two copies, held together by a canary — `outils/deploiement.test.ts`, the
+ * same dispositif as the password floor one file over.
+ */
+export const MAX_TEMPLATE_RUNES = 5000;
+
+/**
  * The {placeholders} ONE template file may use, shown to whoever edits it.
  *
  * Derived from `fields()` rather than listed again: a vocabulary written out
@@ -634,6 +649,51 @@ export interface Engine {
   ): { subject: string; body: string };
   letter(mayor: Mayor, cfg: Campaign, opts?: Options): string;
   phoneScript(mayor: Mayor, cfg: Campaign, opts?: Options): string;
+}
+
+/**
+ * Why this SET of templates could not be used, or null — the engine's own
+ * refusal, obtained by running it.
+ *
+ * `api/templates.go` reproduces these rules in Go so a campaign with a server
+ * is refused at SAVE rather than at send. The account-less version has no
+ * server to ask, and this is what it asks instead: the engine itself, against
+ * a mayor who does not exist, at BOTH ranks and on all three channels —
+ * because a template is chosen by rank, and checking one rank leaves the other
+ * to be discovered by a mayor.
+ *
+ * `MissingField` is deliberately not reported. That is DATA missing for one
+ * mayor, which every real list has some of; it says nothing about the text.
+ */
+export function invalidTemplate(templates: Templates): string | null {
+  const engine = createEngine(templates);
+  const cfg: Campaign = Object.fromEntries(
+    CAMPAIGN_KEYS.map((k) => [k, `valeur de ${k}`]),
+  );
+  const sample: Mayor = {
+    title: "Mme",
+    first_name: "Prénom",
+    last_name: "NOM",
+    commune: "Commune",
+    department: "Département",
+    insee_code: "00000",
+    recent_candidate: "Candidat",
+    recent_year: "2022",
+    endorsement_history: "2022: NOM Candidat (A)",
+    predecessor: "Prédécesseur NOM",
+    predecessor_mayor: "oui",
+  };
+  for (const rank of ["has_endorsed", "no_signal"]) {
+    const mayor = { ...sample, rank };
+    for (const render of [engine.email, engine.letter, engine.phoneScript]) {
+      try {
+        render(mayor, cfg);
+      } catch (e) {
+        if (e instanceof InvalidTemplate) return e.message;
+      }
+    }
+  }
+  return null;
 }
 
 /**

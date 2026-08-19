@@ -1,5 +1,4 @@
 import { useState } from "react";
-import * as API from "./api.ts";
 import { useSubmitGuard } from "./common.tsx";
 import * as M from "./messages.ts";
 import type { Message, Templates } from "./types.ts";
@@ -50,17 +49,25 @@ const CHANNELS: { file: string; label: string; audience: string }[] = [
 export function ModelesMessages({
   /** "campaign" = a coordination's, "team" = one team's over its campaign's. */
   niveau,
-  /** This level's own overrides, as the API last reported them. */
+  /** This level's own overrides, as they were last stored. */
   propres,
   /** What an empty box falls back to: the campaign's texts, or the image's. */
   herites,
+  onSave,
   onEnregistre,
   onError,
   onMessage,
 }: {
-  niveau: "campaign" | "team";
+  niveau: "campaign" | "team" | "navigateur";
   propres: Templates;
   herites: Templates;
+  /**
+   * Stores the overlay and gives back WHAT WAS STORED — which is not what was
+   * sent: an emptied text is an override removed. A route in team mode, an
+   * IndexedDB write in the account-less one. Where they are saved is the
+   * caller's business; `niveau` decides only the WORDS on screen.
+   */
+  onSave: (templates: Templates) => Promise<Templates>;
   onEnregistre: (templates: Templates) => void;
   onError: (e: unknown) => void;
   onMessage: (m: Message) => void;
@@ -82,16 +89,12 @@ export function ModelesMessages({
     if (busy()) return; // a REF: state is a render behind
     setEnvoi(true);
     try {
-      const call =
-        niveau === "team"
-          ? API.updateTeamTemplates
-          : API.updateCampaignTemplates;
       // what came BACK, not what went out: a text emptied is an override
       // removed, and the box has to show the inherited one in its place
-      const r = await call(brouillon);
-      setBrouillon(r.templates);
-      onEnregistre(r.templates);
-      const n = Object.keys(r.templates).length;
+      const stored = await onSave(brouillon);
+      setBrouillon(stored);
+      onEnregistre(stored);
+      const n = Object.keys(stored).length;
       onMessage({
         tone: "ok",
         text:
@@ -102,8 +105,10 @@ export function ModelesMessages({
               `personnalisé${n > 1 ? "s" : ""}).`,
       });
     } catch (err) {
-      // the server's own sentence — it names the file and the placeholder,
-      // which is what the person looking at this box needs
+      // the ENGINE's own sentence, whoever raised it — the server reproduces
+      // it in team mode, the engine itself answers in the account-less one —
+      // and it names the file and the placeholder, which is what the person
+      // looking at this box needs
       onError(err);
     } finally {
       done();
@@ -115,13 +120,19 @@ export function ModelesMessages({
     <form className="carte" onSubmit={save}>
       <h2 style={{ marginTop: 0 }}>Les modèles de messages</h2>
       <p className="gris">
-        {niveau === "team"
-          ? "Les textes que votre équipe envoie. Laissés vides, ils suivent " +
+        {niveau === "team" &&
+          "Les textes que votre équipe envoie. Laissés vides, ils suivent " +
             "ceux de la campagne — y compris quand la coordination les " +
-            "corrige ensuite."
-          : "Les textes que la campagne envoie. Laissés vides, ils suivent " +
+            "corrige ensuite."}
+        {niveau === "campaign" &&
+          "Les textes que la campagne envoie. Laissés vides, ils suivent " +
             "ceux fournis avec l'application — y compris quand une nouvelle " +
             "version les améliore. Chaque équipe peut les réécrire à son tour."}
+        {niveau === "navigateur" &&
+          "Les textes que vous envoyez. Laissés vides, ils suivent ceux " +
+            "fournis avec l'application. Reprendre une campagne remplace ces " +
+            "textes par les siens, comme elle remplace les autres champs. " +
+            "Tout reste dans ce navigateur."}
       </p>
       <p>
         <label htmlFor="modele-choisi">Modèle</label>
@@ -168,8 +179,13 @@ export function ModelesMessages({
           : "Ce modèle remercie un parrainage réel."}
       </p>
       <p>
+        {/* NAMED FOR WHAT IT SAVES. « Ma campagne » in the account-less
+            version now carries two save buttons — the nine fields, and these
+            six texts — and two controls called « Enregistrer » on one screen
+            are two controls a screen reader enumerates identically, with
+            nothing to tell them apart. */}
         <button type="submit" aria-disabled={envoi}>
-          {envoi ? "Enregistrement…" : "Enregistrer"}
+          {envoi ? "Enregistrement…" : "Enregistrer les modèles"}
         </button>{" "}
         {propre && (
           <button

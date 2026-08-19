@@ -517,6 +517,36 @@ describe("the deployment files", () => {
     ).toBe(Number(declared?.[1]));
   });
 
+  // The same shape, one ceiling over. The server applies the size of a
+  // template — where the number is ARITHMETIC, six of them against the body
+  // limit — and the account-less version applies its own copy, because it
+  // accepts templates from a campaign it adopts and has no server to ask.
+  // Two numbers are two numbers: raised on the server alone, a campaign saves
+  // a long template that every account-less volunteer then silently drops,
+  // and their messages go out in the shipped words while the team's go out in
+  // the campaign's.
+  it("bound a template to the same size at both ends", () => {
+    const declared = /maxTemplateRunes = (\d+)/.exec(
+      readFileSync(join(ROOT, "api/templates.go"), "utf8"),
+    );
+    expect(
+      declared,
+      "maxTemplateRunes is no longer where this test reads it",
+    ).toBeTruthy();
+    const applied = /export const MAX_TEMPLATE_RUNES = (\d+);/.exec(
+      readFileSync(join(ROOT, "noyau", "messages.ts"), "utf8"),
+    );
+    expect(
+      applied,
+      "MAX_TEMPLATE_RUNES is no longer where this test reads it",
+    ).toBeTruthy();
+    expect(
+      Number(applied?.[1]),
+      "the account-less version drops templates the API accepts, or keeps " +
+        "ones it refuses",
+    ).toBe(Number(declared?.[1]));
+  });
+
   // …and EVERY marker, not that one. There are three now — `paraphe-mode`,
   // which says an API answers here; `paraphe-instance`, which says which
   // instance a `?org=` resolves against; and `paraphe-served-by`, which says

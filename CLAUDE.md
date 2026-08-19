@@ -990,9 +990,41 @@ campaign → image** by `mergeTemplates`.
   (`app.appel_telephonique` against `orgs.phone_outreach`) and is the same
   here. A campaign that customises its templates in the app and then runs
   `task messages` gets the image's.
-- Browser mode is untouched: an account-less volunteer renders from the
-  templates the image carries. The campaign values travel through `?org=` and
-  through the origin; the templates do not, yet.
+- **THE ACCOUNT-LESS VERSION ADOPTS THEM TOO**, through both doors, because a
+  campaign that had rewritten its letter otherwise spoke with two voices — one
+  to the volunteers with an account, one to the volunteers without, and
+  nothing on either screen saying which. Only the CAMPAIGN's layer travels: a
+  team's overlay is its team's, and that mode has no team.
+  **ONE overlay there, not two.** In team mode the campaign's layer is LIVE —
+  a coordination corrects its letter and every team that did not rewrite it
+  gets the correction — so the two are kept apart and the inherited one is
+  only ever a placeholder. In browser mode nothing is live by promise:
+  adopting COPIES the texts, exactly as it copies the nine fields, and after
+  that they are this browser's. Showing them as the value is the honest
+  reading; pretending they are inherited would promise an update that can
+  never arrive.
+  **Bounded on the way in** (`offeredTemplates`), and that bound is the one
+  thing there that is not cosmetic: this mode stores what it adopts and
+  promises to hold only what its owner put there, so a campaign answering with
+  a megabyte per file would fill a volunteer's disk on one click. The number
+  is `MAX_TEMPLATE_RUNES`, the server's own, held in step by
+  `outils/deploiement.test.ts` like the password floor. A key outside the six
+  or a value that is not a string is DROPPED rather than refused — a stray key
+  changes nothing, and throwing would refuse a whole campaign, nine fields and
+  a logo, over it. The same reader judges what comes off the wire and what
+  comes out of IndexedDB, since a restored backup or an older version can have
+  written anything there.
+  **The confirmation screen says so in a sentence**, not by showing six
+  templates of two thousand characters: that is a screen nobody reads, and the
+  volunteer can read and change every one of them on « Ma campagne » the
+  moment they accept.
+  **And the refusal is the ENGINE's, asked directly** (`invalidTemplate`),
+  because there is no server here to reproduce its rules — run against a mayor
+  who does not exist, at BOTH ranks, since a template is chosen by rank and
+  checking one leaves the other to be found by a mayor.
+  The save button is named « Enregistrer les modèles »: that screen now
+  carries two, and two controls of one name are two a screen reader
+  enumerates identically.
 
 ## Signing in by email
 

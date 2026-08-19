@@ -23,9 +23,14 @@
 // messages sent to elected officials. A parameter carrying the configuration
 // itself, or a URL to fetch it from, would have exactly that hole.
 
-import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
+import {
+  CAMPAIGN_KEYS,
+  MAX_TEMPLATE_RUNES,
+  TEMPLATE_FILES,
+  unfilledKeys,
+} from "../../noyau/messages.ts";
 import { LOGO_MAX_BYTES } from "./common.tsx";
-import type { Campaign } from "./types.ts";
+import type { Campaign, Templates } from "./types.ts";
 
 export interface Offer {
   slug: string;
@@ -33,6 +38,41 @@ export interface Offer {
   campaign: Campaign;
   /** the campaign's logo, as an absolute URL on the instance's media origin */
   logo: string;
+  /**
+   * The campaign's OWN message templates, over the six the image carries.
+   * Empty for every campaign that has rewritten none, which is the normal
+   * case — and adopting an empty overlay is adopting the shipped texts.
+   */
+  templates: Templates;
+}
+
+/**
+ * The templates an answer offers, and nothing else it happens to carry.
+ *
+ * BOUNDED AND FILTERED rather than refused. A key outside the six is a text
+ * nothing renders, and a value that is not a string is not a template: both
+ * are dropped, because throwing would refuse a whole campaign — nine fields, a
+ * logo and all — over one stray key that changes nothing. That is the
+ * difference between these and the nine: a missing campaign value is a message
+ * with a hole in it, a missing template is the shipped text.
+ *
+ * The SIZE bound is the one thing here that is not cosmetic. This mode stores
+ * what it adopts in IndexedDB and promises to hold only what its owner put
+ * there; an answer carrying a megabyte per file would fill a volunteer's disk
+ * on one click. The server applies the same number when a coordination saves.
+ */
+export function offeredTemplates(value: unknown): Templates {
+  const out: Templates = {};
+  if (!value || typeof value !== "object") return out;
+  for (const file of TEMPLATE_FILES) {
+    const text = (value as Record<string, unknown>)[file];
+    if (typeof text !== "string" || text.trim() === "") continue;
+    // runes and not bytes, like the server: a French template refused for
+    // being long in a unit nobody wrote it in
+    if ([...text].length > MAX_TEMPLATE_RUNES) continue;
+    out[file] = text;
+  }
+  return out;
 }
 
 /**
@@ -282,6 +322,7 @@ export function readOffer(body: unknown, slug?: string): Offer {
     name?: unknown;
     campaign?: Record<string, string>;
     logo?: { url?: unknown };
+    templates?: unknown;
   } | null;
   const campaign = answer?.campaign;
   // Every key present and a STRING is this end's own question: a value that
@@ -335,5 +376,6 @@ export function readOffer(body: unknown, slug?: string): Offer {
     name: String(answer?.name ?? which),
     campaign,
     logo,
+    templates: offeredTemplates(answer?.templates),
   };
 }

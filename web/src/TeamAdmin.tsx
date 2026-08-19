@@ -629,6 +629,13 @@ export function GestionEquipe({
             (coordination ? me.templates?.campaign : me.templates?.team) ?? {}
           }
           herites={(coordination ? {} : me.templates?.campaign) ?? {}}
+          onSave={async (t) =>
+            (
+              await (coordination
+                ? API.updateCampaignTemplates(t)
+                : API.updateTeamTemplates(t))
+            ).templates
+          }
           onError={onError}
           onMessage={onMessage}
           onEnregistre={(templates) =>

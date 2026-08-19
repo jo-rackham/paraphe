@@ -124,6 +124,40 @@ test.describe
       await expect(box(page)).toHaveValue("");
     });
 
+    // THE ACCOUNT-LESS VERSION SPEAKS THE CAMPAIGN'S WORDS TOO.
+    //
+    // Without this a campaign that had rewritten its letter had two voices:
+    // one to the volunteers with an account, one to the volunteers without,
+    // and nothing on either screen saying which. Driven on the campaign's OWN
+    // origin, where the account-less build fills itself in with no click.
+    test("the browser version adopts the campaign's own texts", async ({
+      page,
+    }) => {
+      await page.goto(`${ORIGIN}/navigateur/`);
+      // it is the account-less build: no mode marker, on the very origin
+      // that serves an API
+      await expect(page.locator('meta[name="paraphe-mode"]')).toHaveCount(0);
+      await expect(page.getByText(/repris depuis son site/)).toBeVisible({
+        timeout: 20_000,
+      });
+
+      await expect(page.locator("table button.lien").first()).toBeVisible({
+        timeout: 20_000,
+      });
+      await page.locator("table button.lien").first().click();
+      await page.getByText("📮 Courrier").click();
+      const letter = await page.locator("pre.lettre").innerText();
+      expect(letter).toContain("Notre texte à nous");
+      // rendered, not copied through
+      expect(letter).not.toMatch(/\{[^}]+\}/);
+
+      // …and the volunteer can read and change them, which is what the
+      // adoption screen promises
+      await page.getByRole("button", { name: "Ma campagne" }).click();
+      await choose(page, "courrier.txt");
+      await expect(box(page)).toHaveValue(OWN_LETTER);
+    });
+
     // « Revenir au texte fourni » puts the campaign back on the image's text
     // and keeps it there: the override is REMOVED, not emptied.
     test("the campaign can go back to the shipped text", async ({ page }) => {

@@ -30,6 +30,7 @@ import {
   fetchCampaign,
   inlineLogo,
   type Offer,
+  offeredTemplates,
   ownCampaign,
   requestedSlug,
   servingInstanceHome,
@@ -66,6 +67,15 @@ export default function Browser() {
   // carries it because it walks the settings.
   const [logo, setLogo] = useState("");
   const [personalNote, setPersonalNote] = useState("");
+  // THE CAMPAIGN'S OWN TEXTS, over the six the image carries. Adopted with
+  // the rest and stored like the rest — a new key in the existing `settings`
+  // store, so no VERSION bump and the export carries it, exactly as the logo
+  // beside it does.
+  //
+  // Without them a campaign that had rewritten its letter spoke with two
+  // voices: one to the volunteers with an account, one to the volunteers
+  // without, and nothing on either screen saying which.
+  const [templates, setTemplates] = useState<M.Templates>({});
   // OPT-IN, so `false` until this volunteer says otherwise. The email used to
   // ask for a telephone exchange and the letter to announce a call whatever
   // the campaign actually did — a promise to elected officials made by a tool
@@ -202,6 +212,13 @@ export default function Browser() {
       await DB.writeSetting("campagne", campaign);
       setCfg(campaign);
       setDraft(campaign);
+      // In the SAME act as the nine values, because they are the same
+      // decision: whoever adopts this campaign writes what this campaign
+      // writes. An overlay it has rewritten nothing of is `{}`, which is the
+      // shipped texts — so this line is also what CLEARS a previous
+      // campaign's texts when another is adopted over it.
+      await DB.writeSetting("modeles", taken.templates);
+      setTemplates(taken.templates);
       if (taken.logo) {
         try {
           const inlined = await inlineLogo(taken.logo);
@@ -223,7 +240,7 @@ export default function Browser() {
 
   useEffect(() => {
     (async () => {
-      const [m, s, c, a, g, l, tel] = await Promise.all([
+      const [m, s, c, a, g, l, tel, mod] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
@@ -233,12 +250,19 @@ export default function Browser() {
         // opt-in: a database written before this setting existed answers
         // false, which is the answer that promises nothing
         DB.readSetting<boolean>("appel_telephonique", false),
+        // absent in a database written before this existed: `{}` is the
+        // shipped texts, which is what those volunteers were already reading.
+        // Read back through the SAME filter as the wire (`offeredTemplates`):
+        // a restored backup, another tab or an older version can have written
+        // anything here, and a stored overlay is judged like an offered one.
+        DB.readSetting<unknown>("modeles", {}),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
       setAppelTelephonique(tel === true);
+      setTemplates(offeredTemplates(mod));
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
@@ -476,7 +500,7 @@ export default function Browser() {
       const report = await DB.importAll(JSON.parse(await file.text()), {
         merge,
       });
-      const [m, s, c, a, g, l, tel] = await Promise.all([
+      const [m, s, c, a, g, l, tel, mod] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
@@ -491,12 +515,19 @@ export default function Browser() {
         // …and it carries this one, so a restored backup keeps its answer
         // rather than silently reverting to « we do not telephone »
         DB.readSetting<boolean>("appel_telephonique", false),
+        // absent in a database written before this existed: `{}` is the
+        // shipped texts, which is what those volunteers were already reading.
+        // Read back through the SAME filter as the wire (`offeredTemplates`):
+        // a restored backup, another tab or an older version can have written
+        // anything here, and a stored overlay is judged like an offered one.
+        DB.readSetting<unknown>("modeles", {}),
       ]);
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
       setAppelTelephonique(tel === true);
+      setTemplates(offeredTemplates(mod));
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
@@ -795,6 +826,9 @@ export default function Browser() {
                   cfg={cfg}
                   personalNote={personalNote}
                   phoneOutreach={appelTelephonique}
+                  // the campaign's own texts, over the image's. One layer and
+                  // not two: this mode has no team.
+                  templates={[templates]}
                   drafts={cardDrafts}
                   status={tracking[chosen.insee_code as string]?.status}
                   notes={(
@@ -846,6 +880,28 @@ export default function Browser() {
                   note={noteDraft}
                   dirty={dirty}
                   logo={logo}
+                  templates={templates}
+                  onMessage={setMessage}
+                  // REFUSED BEFORE IT IS STORED, by the engine itself. There
+                  // is no server here to reproduce its rules, so the rules are
+                  // asked of the engine directly — against a mayor who does
+                  // not exist, at both ranks. Written straight to IndexedDB
+                  // once it renders: the card would show the error a moment
+                  // later anyway, but « enregistré » followed by a broken card
+                  // is a screen that lied first.
+                  onTemplates={async (next) => {
+                    const stored: M.Templates = {};
+                    for (const [file, text] of Object.entries(next)) {
+                      if (text.trim() !== "") stored[file] = text;
+                    }
+                    const why = M.invalidTemplate(
+                      M.mergeTemplates(M.SHIPPED_TEMPLATES, stored),
+                    );
+                    if (why) throw new Error(why);
+                    await DB.writeSetting("modeles", stored);
+                    setTemplates(stored);
+                    return stored;
+                  }}
                   onEdit={setDraft}
                   onNote={setNoteDraft}
                   // Written straight away, not with the form: the file is

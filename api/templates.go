@@ -245,13 +245,11 @@ func storableTemplates(in map[string]string) (map[string]string, error) {
 // Both statements are written OUT, at the call that runs them, rather than
 // handed to one helper that takes SQL: a statement the canary cannot read is a
 // statement nothing can say the campaign is named in, and `teams` is walled.
+// `campaignTemplates` is a helper of that kind and not of the other — it holds
+// its own literal statement rather than being handed one.
 func (s *Server) templateLayers(r *http.Request, c *Account) (
 	map[string]string, map[string]string, error) {
-	var raw string
-	// `orgs` IS the campaign: the row is the scope itself, bound as $1.
-	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT templates::text FROM orgs WHERE id=$1", scopeOrg(r)).Scan(&raw)
-	campaign, err := decodeTemplates(raw, err)
+	campaign, err := s.campaignTemplates(r)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -261,7 +259,7 @@ func (s *Server) templateLayers(r *http.Request, c *Account) (
 	if c == nil || c.MyTeam() == NationalTeam {
 		return campaign, map[string]string{}, nil
 	}
-	raw = ""
+	var raw string
 	err = s.tx(r).QueryRow(r.Context(),
 		"SELECT templates::text FROM teams WHERE org_id=$1 AND id=$2",
 		scopeOrg(r), c.MyTeam()).Scan(&raw)
@@ -270,6 +268,20 @@ func (s *Server) templateLayers(r *http.Request, c *Account) (
 		return nil, nil, err
 	}
 	return campaign, team, nil
+}
+
+// campaignTemplates: the overlay THIS campaign carries, over the image's six.
+//
+// Its own function because three callers want it — the two layers a signed-in
+// account renders from, and the public route the account-less version asks
+// when it adopts a campaign. The statement stays LITERAL here, at the call
+// that runs it, so the isolation canary reads it: `orgs` IS the campaign, and
+// the row is the scope itself, bound as $1.
+func (s *Server) campaignTemplates(r *http.Request) (map[string]string, error) {
+	var raw string
+	err := s.tx(r).QueryRow(r.Context(),
+		"SELECT templates::text FROM orgs WHERE id=$1", scopeOrg(r)).Scan(&raw)
+	return decodeTemplates(raw, err)
 }
 
 // decodeTemplates: the overlay a row carries, or an empty one.
