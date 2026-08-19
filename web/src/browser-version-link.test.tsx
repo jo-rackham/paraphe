@@ -97,6 +97,17 @@ describe("the account-less version, offered from a campaign", () => {
     expect(container.textContent).toContain("rien n'est coordonné");
   });
 
+  // The other half of the assertion below, and the reason it is written:
+  // « n'annonce pas » alone stays green when the sentence goes away
+  // entirely. What the card promises a CONFIGURED campaign is that the
+  // texts are already there — no step, no confirmation. That version
+  // arrives filled in, so a card describing a screen to accept first would
+  // be a promise nobody can keep.
+  it("promises a configured campaign that the texts are already in", async () => {
+    await signInScreen(OFFERED);
+    expect(container.textContent).toContain("déjà remplis");
+  });
+
   // A campaign still at its template values pre-fills NOTHING: the API
   // refuses it with a 409 rather than spread « Prénom NOM » to volunteers
   // who have no way of knowing. The card promised the pre-fill anyway, and

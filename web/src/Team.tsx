@@ -574,9 +574,9 @@ function Connexion({
             </p>
           ) : (
             <p>
-              Les textes de cette campagne — candidat, contacts, signature —
-              vous seront proposés déjà remplis, et vous les verrez avant que
-              rien ne soit enregistré. Tout reste sur votre poste.
+              Les textes de cette campagne — candidat, contacts, signature — y
+              sont déjà remplis, repris de cette page. Tout reste sur votre
+              poste.
             </p>
           )}
           <p>
