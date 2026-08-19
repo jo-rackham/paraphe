@@ -6,7 +6,7 @@ import {
   FIRST_CAMPAIGN,
   mediaConfigured,
 } from "./config.ts";
-import { openManagement, openTab, signIn } from "./helpers.ts";
+import { openManagement, signIn } from "./helpers.ts";
 
 // The campaign logo, across the whole stack: uploaded through the API,
 // stored in the object store, and fetched by the BROWSER from an origin

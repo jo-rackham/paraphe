@@ -9,7 +9,6 @@ import {
 import {
   linkIn,
   openManagement,
-  openTab,
   signIn,
   visit,
   waitForMail,
