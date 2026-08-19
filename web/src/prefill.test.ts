@@ -241,6 +241,34 @@ describe("what counts as a campaign", () => {
       /campagne complète/,
     );
   });
+
+  // A campaign is allowed to give a telephone number to nobody, to run
+  // without a website and not to name the town its letters leave from —
+  // `campaign-optional.json` is the referee both languages answer to, and
+  // the API applies it: those keys empty, /api/campaign/public answers 200
+  // and the campaign IS configured.
+  //
+  // Refusing them here made the two ends disagree about what a campaign is,
+  // and the disagreement was silent: the API said « voici la campagne », the
+  // browser version said « ça ne ressemble pas à une campagne » and pre-
+  // filled nothing, leaving « Prénom NOM » on screen under a « campagne non
+  // configurée » banner — on a campaign whose team version substitutes
+  // correctly.
+  it.each(["contact_tel", "site", "ville_envoi"])(
+    "accepts a campaign that left %s empty, as the API does",
+    async (key) => {
+      withDomain("paraphe.fr");
+      vi.stubGlobal("fetch", () =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ campaign: { ...whole(), [key]: "" } }),
+        }),
+      );
+      const offer = await fetchCampaign("campagne");
+      expect(offer.campaign[key]).toBe("");
+      expect(offer.campaign.candidat).toBe(whole().candidat);
+    },
+  );
 });
 
 // The offer is for a campaign NOBODY has touched. "Not complete" is the

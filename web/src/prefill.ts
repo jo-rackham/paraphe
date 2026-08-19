@@ -121,6 +121,28 @@ const bakedInstance = (): string =>
 export const instanceDomain = (): string => markedInstance() || bakedInstance();
 
 /**
+ * THE WAY BACK to the account version, or "" when there is none.
+ *
+ * An instance serving this build says so at startup (api/pages.go,
+ * markBrowserVersion), and that marker is the whole signal: the account
+ * version is at the ROOT of the origin that served this page. A static
+ * publication carries no marker and offers no way back, because there is
+ * nowhere to send anybody.
+ *
+ * NOT derived from `instanceDomain()`. A single-campaign instance names no
+ * domain and serves an account version all the same, so reading the door
+ * back out of the domain would have opened it only on multi-campaign
+ * instances — and the one every developer runs is the other kind.
+ */
+export const servingInstanceHome = (): string =>
+  document
+    .querySelector('meta[name="paraphe-served-by"]')
+    ?.getAttribute("content")
+    ?.trim() === "instance"
+    ? "/"
+    : "";
+
+/**
  * Where a campaign of this instance publishes itself.
  *
  * The HOST is `<slug>.<instance>` and nothing else — that is the whole
@@ -177,16 +199,27 @@ function publicCampaignUrl(slug: string): string {
  * answer, not a failure to report.
  */
 export async function ownCampaign(): Promise<Offer | null> {
+  let body: unknown;
   try {
     const response = await fetch("/api/campaign/public", {
       credentials: "omit",
       redirect: "error",
     });
+    // 404 on an apex, 409 on a campaign not configured, HTML on a static
+    // publication, nothing at all behind a captive portal: « there is no
+    // campaign here » is this door's NORMAL answer, and it owes nobody a
+    // sentence.
     if (!response.ok) return null;
-    return readOffer(await response.json());
+    body = await response.json();
   } catch {
     return null;
   }
+  // Past here the origin ANSWERED a campaign, and a refusal stops being an
+  // absence: it is an answer this build could not take. Swallowed with the
+  // rest, that is how the two ends disagreed about what a campaign is for a
+  // whole release without one word on screen or in a console — so it throws,
+  // and the screen says so.
+  return readOffer(body);
 }
 
 /** The slug asked for in the address bar, or null. */
@@ -251,12 +284,27 @@ export function readOffer(body: unknown, slug?: string): Offer {
     logo?: { url?: unknown };
   } | null;
   const campaign = answer?.campaign;
-  const complete =
+  // Every key present and a STRING is this end's own question: a value that
+  // is not one replaced the whole screen with the error boundary.
+  const typed =
     campaign &&
     typeof campaign === "object" &&
-    CAMPAIGN_KEYS.every(
-      (k) => typeof campaign[k] === "string" && campaign[k].trim(),
-    );
+    CAMPAIGN_KEYS.every((k) => typeof campaign[k] === "string");
+  // WHETHER IT IS CONFIGURED is not this end's question to answer its own
+  // way. `unfilledKeys` is the referee both languages read — the API applied
+  // it before answering 200, the banner on this very screen reads it — and
+  // it says an EMPTY key is a choice where `campaign-optional.json` allows
+  // one, while a key still carrying « 06 00 00 00 00 » is not.
+  //
+  // Written here as « every key non-empty », the two ends disagreed about
+  // what a campaign is, and disagreed IN SILENCE: a campaign that had
+  // declined to give a telephone number, a website or a town of posting got
+  // a 200 saying « voici la campagne » and a browser version answering « ça
+  // ne ressemble pas à une campagne ». It pre-filled nothing and said
+  // nothing, so the volunteer read « Prénom NOM » under a « campagne non
+  // configurée » banner — on a campaign whose team version substitutes
+  // correctly.
+  const complete = typed && unfilledKeys(campaign as Campaign).length === 0;
   if (!complete) {
     throw new Error(
       "La réponse ne ressemble pas à une campagne complète. Un intermédiaire " +

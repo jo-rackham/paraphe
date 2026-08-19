@@ -32,6 +32,7 @@ import {
   type Offer,
   ownCampaign,
   requestedSlug,
+  servingInstanceHome,
   untouchedCampaign,
 } from "./prefill.ts";
 import { navigate, useView } from "./route.tsx";
@@ -248,7 +249,24 @@ export default function Browser() {
       //
       // Only on an untouched campaign, like everything else that writes
       // these nine values: what the volunteer typed is theirs.
-      const own = untouchedCampaign(c) ? await ownCampaign() : null;
+      let own: Offer | null = null;
+      if (untouchedCampaign(c)) {
+        try {
+          own = await ownCampaign();
+        } catch (e) {
+          // The campaign that served this page ANSWERED, and this build
+          // could not take what it said. Absence is silent — an apex, a
+          // static host — but an answer refused is not: silence here left
+          // « Prénom NOM » on screen looking exactly like a tool that had
+          // failed to substitute anything. Not fatal, so it is a sentence
+          // and a way to act rather than the error boundary.
+          setOfferError(
+            "Les textes de cette campagne n'ont pas pu être repris " +
+              `automatiquement. ${e instanceof Error ? e.message : String(e)} ` +
+              "Vous pouvez les saisir vous-même dans « Ma campagne ».",
+          );
+        }
+      }
       if (own && (!slug || slug === own.slug)) {
         if (await adopt(own)) {
           setAdopted(
@@ -815,7 +833,11 @@ export default function Browser() {
           )}
         </main>
       </RenderGuard>
-      <PiedDePage>
+      {/* The way back, on every screen — the mirror of the link that brought
+          them here, which every screen of the account version carries. Read
+          from the page at render: an instance says at startup that it serves
+          this build, and a static publication says nothing. */}
+      <PiedDePage teamUrl={servingInstanceHome()}>
         <p>
           <strong>Cette version ne coordonne rien.</strong> Elle ne sait pas si
           un autre bénévole a déjà appelé le même maire : elle convient à une

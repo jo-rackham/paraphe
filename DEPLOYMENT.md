@@ -414,6 +414,12 @@ with a sentence saying where they came from. Anything the volunteer has
 already typed is left alone. Each campaign's sign-in screen carries the link,
 and so does the footer of every screen of it.
 
+**The door goes both ways.** The browser version's own footer links back to
+the account version, at the root of the origin serving it. It appears only
+where there is one to go back to: the page is stamped at startup with
+`<meta name="paraphe-served-by" content="instance">`, which a build published
+elsewhere never carries.
+
 **A `?org=<slug>` link is the other door, and it is the one that asks.** It
 names a campaign that need not be the one serving the page — a link sent from
 elsewhere, or opened on a build published elsewhere — so its values are shown

@@ -250,7 +250,9 @@ describe("the offer banner, rendered", () => {
   // screen are written to look exactly like placeholders.
   describe("the campaign this origin is", () => {
     /** An instance serving its own browser version, with no ?org= at all. */
-    const servedByCampaign = async () => {
+    const servedByCampaign = async (
+      campaign: Record<string, string> = OFFERED,
+    ) => {
       window.history.replaceState({}, "", "/");
       vi.stubGlobal("fetch", (url: string) =>
         Promise.resolve(
@@ -261,7 +263,7 @@ describe("the offer banner, rendered", () => {
                   Promise.resolve({
                     slug: "sienne",
                     name: "Camille Sienne",
-                    campaign: OFFERED,
+                    campaign,
                   }),
               }
             : { ok: false, status: 404, json: () => Promise.resolve({}) },
@@ -343,6 +345,103 @@ describe("the offer banner, rendered", () => {
         {},
       );
       expect(stored.candidat ?? "").not.toBe(OFFERED.candidat);
+    });
+
+    // A campaign may give a telephone number to nobody, run without a
+    // website and not name the town its letters leave from. The API applies
+    // that rule before answering 200 — so a build that then calls the same
+    // answer "not a complete campaign" pre-fills NOTHING, and says nothing.
+    //
+    // Reported from production, on a configured campaign whose account
+    // version substitutes correctly: « Prénom NOM » on screen under a
+    // « Campagne non configurée » banner, which reads as an engine that
+    // failed to substitute rather than as two ends disagreeing.
+    it.each(["contact_tel", "site", "ville_envoi"])(
+      "takes a campaign that left %s empty, as the API says it may",
+      async (key) => {
+        await servedByCampaign({ ...OFFERED, [key]: "" });
+        await until(
+          () => text().includes("Camille Sienne"),
+          `the campaign lands with ${key} empty`,
+        );
+        const stored = await DB.readSetting<Record<string, string>>(
+          "campagne",
+          {},
+        );
+        expect(stored.candidat).toBe(OFFERED.candidat);
+        expect(stored[key]).toBe("");
+      },
+    );
+
+    // Absence is silent — an apex, a static host, a captive portal. An
+    // ANSWER this build cannot take is not absence, and swallowing it is
+    // exactly how the disagreement above survived a release without one
+    // word on screen.
+    it("says so when the origin answers something it cannot take", async () => {
+      // campaign-shaped, and unusable: a required key blank
+      await servedByCampaign({ ...OFFERED, candidat: "" });
+      await until(
+        () => text().includes("n'ont pas pu être repris"),
+        "the refusal is said out loud",
+      );
+      // …and it is not a dead end: the tool works, the texts are there to
+      // be typed
+      expect(text()).toContain("Ma campagne");
+    });
+  });
+
+  // THE WAY BACK. Every screen of the account version has carried a door
+  // out to this one since it was built; this one had no door back, so a
+  // volunteer who took it had left for good.
+  describe("the way back to the account version", () => {
+    const servedBy = (marker: boolean) => {
+      for (const m of document.querySelectorAll(
+        'meta[name="paraphe-served-by"]',
+      )) {
+        m.remove();
+      }
+      if (marker) {
+        const meta = document.createElement("meta");
+        meta.setAttribute("name", "paraphe-served-by");
+        meta.setAttribute("content", "instance");
+        document.head.appendChild(meta);
+      }
+    };
+    afterEach(() => servedBy(false));
+
+    const open = async () => {
+      window.history.replaceState({}, "", "/");
+      vi.stubGlobal("fetch", () =>
+        Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({}),
+        }),
+      );
+      await act(async () => {
+        root.render(<Browser />);
+      });
+      await until(() => text().includes("Bourg-Réel"), "the app opens");
+    };
+
+    it("is offered when an instance is the one serving this build", async () => {
+      servedBy(true);
+      await open();
+      const back = [...container.querySelectorAll("a")].find((a) =>
+        a.textContent?.includes("version avec compte"),
+      );
+      expect(back).toBeDefined();
+      // the ROOT of this very origin: the account version is what the
+      // instance serves there, and no other address is knowable from here
+      expect(back?.getAttribute("href")).toBe("/");
+    });
+
+    // A static publication has no account version to send anybody to, and a
+    // link to its own root is a link back to this same build.
+    it("is absent from a build nobody marked", async () => {
+      servedBy(false);
+      await open();
+      expect(text()).not.toContain("version avec compte");
     });
   });
 

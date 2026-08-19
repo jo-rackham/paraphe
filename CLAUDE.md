@@ -125,6 +125,22 @@ a train, has a door, and it is on the page they already landed on.
   refusal — the link door owes its reader a sentence, the origin door treats
   it as "there is no campaign here", which is its normal state on an apex, a
   static host or a captive portal.
+  **What counts as CONFIGURED is not its question to answer its own way.**
+  Written as "every key non-empty", it disagreed with the API that had just
+  answered 200: three of the nine keys may be EMPTY
+  (`campaign-optional.json` — a campaign may give a telephone number to
+  nobody, run without a website, and not name the town its letters leave
+  from), and a campaign that had exercised that right was refused by the
+  build as "not a complete campaign". `unfilledKeys` is the referee both
+  languages read, and it is the one this reads now; the emptiness test that
+  remains is that every key is a STRING, which is this end's own question.
+  **And the disagreement was SILENT**, which is what made it cost a
+  release: `ownCampaign` swallowed every failure alike, so the screen showed
+  « Prénom NOM » under a « Campagne non configurée » banner — indis-
+  tinguishable from an engine that had failed to substitute, and reported as
+  exactly that. Absence stays silent (a 404, a 409, HTML from a static host);
+  an ANSWER this build could not take is said out loud, in the slot the
+  broken-link message already owns.
 - **The provenance sentence has a slot of its own**, like `offerError`. Sent
   through the general message, the list download wiped it a second later
   (« 34 826 maires chargés ») and the campaign's texts appeared with nothing
@@ -173,6 +189,20 @@ a train, has a door, and it is on the page they already landed on.
   `requestedSlug` where it happened to be checked: `fetchCampaign`
   interpolates that label into a hostname, and one new call site would have
   withdrawn the promise silently.
+- **THE WAY BACK, and it is a THIRD marker** (`paraphe-served-by`), stamped
+  whatever the mode. Every screen of the account version has carried a door
+  out to the browser version since it was built; the browser version had no
+  door back, so a volunteer who took the first one had left for good, with
+  the account version's address nowhere on their screen. The marker says the
+  one thing no domain does — an INSTANCE is serving this build — so the
+  account version is at the ROOT of this very origin, and a static
+  publication, carrying no marker, offers nothing.
+  **Not derived from the instance marker beside it**: a single-campaign
+  instance names no domain, so a door read out of the domain would have
+  opened only on multi-campaign instances — and the one every developer runs
+  is the other kind. `outils/deploiement.test.ts` reads the stamped set out
+  of `pages.go` and demands a reader for each, so a fourth marker cannot be
+  stamped without one.
 - The e2e suite builds it with `PARAPHE_BASE_DOMAIN` DELIBERATELY EMPTY, as
   the image is: a green journey there is a statement about the injection and
   nothing else.

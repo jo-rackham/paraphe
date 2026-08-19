@@ -160,6 +160,29 @@ func TestASingleCampaignInstanceNamesNoInstanceOnTheBrowserPage(t *testing.T) {
 	}
 }
 
+// THE WAY BACK, and the single-campaign case is the one worth a test of its
+// own: that instance names no domain, and derived from the domain the door
+// back to the account version would have opened only on a multi-campaign
+// instance. Both modes serve an account version at the root of this origin,
+// so both say so.
+func TestTheBrowserPageSaysAnInstanceServesIt(t *testing.T) {
+	for name, domain := range map[string]string{
+		"single-campaign": "", "multi-campaign": "paraphe.test",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("PARAPHE_BASE_DOMAIN", domain)
+			_, srv := browserFixture(t)
+
+			resp := browserGet(t, srv, "/navigateur/")
+			if !strings.Contains(resp.body,
+				`<meta name="paraphe-served-by" content="instance">`) {
+				t.Fatalf("an instance serves this build and the page does not "+
+					"say so, so it offers no way back:\n%s", resp.body)
+			}
+		})
+	}
+}
+
 // The value becomes an HTML attribute. It goes through the SAME check the
 // start applies to the setting — a guard that re-states the rule is the copy
 // that drifts — so a domain that could close the attribute fails the start

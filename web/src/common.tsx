@@ -965,6 +965,7 @@ export function PiedDePage({
   children,
   sourceUrl,
   browserUrl,
+  teamUrl,
 }: {
   children?: ReactNode;
   sourceUrl?: string;
@@ -974,6 +975,16 @@ export function PiedDePage({
    * page offers it in its own words.
    */
   browserUrl?: string;
+  /**
+   * THE WAY BACK, and the mirror of the line above. Passed by browser mode
+   * only, and only when an instance is the one serving it: the account
+   * version is at the root of this very origin. A static publication passes
+   * nothing, having nowhere to send anybody.
+   *
+   * It is not `httpUrl`'d like the two beside it — those carry values an
+   * operator set, this one is a constant this application produces.
+   */
+  teamUrl?: string;
 }) {
   const source = httpUrl(sourceUrl);
   const sansCompte = httpUrl(browserUrl);
@@ -983,6 +994,13 @@ export function PiedDePage({
       {sansCompte && (
         <p className="sans-compte">
           <a href={sansCompte}>Travailler sans compte, dans mon navigateur</a>
+        </p>
+      )}
+      {teamUrl && (
+        <p className="sans-compte">
+          <a href={teamUrl}>
+            Revenir à la version avec compte, pour travailler à plusieurs
+          </a>
         </p>
       )}
       {source && (

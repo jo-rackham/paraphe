@@ -144,6 +144,32 @@ test.describe
       expect(body).not.toMatch(/\{[^}]+\}/);
     });
 
+    // THE WAY BACK, and only an end-to-end run can prove it: the two builds
+    // are two documents, so a unit test can assert an href and never that
+    // pressing it lands anywhere. Every screen of the account version has
+    // carried a door out to this one since it was built, and this one had
+    // no door back — a volunteer who took it had left for good, with the
+    // account version's address nowhere on their screen.
+    test("leads back to the account version", async ({ page }) => {
+      await page.goto(`${ORIGIN}/navigateur/`);
+      await expect(page.getByText(/repris depuis son site/)).toBeVisible({
+        timeout: 20_000,
+      });
+
+      await page
+        .getByRole("link", {
+          name: "Revenir à la version avec compte, pour travailler à plusieurs",
+        })
+        .click();
+
+      // the account version of THIS campaign: its own sign-in screen, on the
+      // origin that served the browser build
+      await expect(page).toHaveURL(`${ORIGIN}/`);
+      await expect(
+        page.getByRole("button", { name: "Se connecter" }),
+      ).toBeVisible({ timeout: 20_000 });
+    });
+
     test("a signed-in volunteer still finds it, in the footer", async ({
       page,
     }) => {

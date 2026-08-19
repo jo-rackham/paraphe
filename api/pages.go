@@ -72,9 +72,18 @@ func markBrowserVersion(dir, domain string) ([]byte, error) {
 			"build would never switch to browser mode. Point browser_web_dir "+
 			"at a build made for /navigateur/, not at web_dir", dir)
 	}
-	if domain == "" {
-		return []byte(page), nil
-	}
+	// THE WAY BACK, and it is injected whatever the mode. It says the one
+	// thing no domain does: an INSTANCE is serving this page, so the account
+	// version is at the root of this very origin. The door out of the
+	// account version has been on every screen of a campaign since it was
+	// built; the door back in was on none, and a volunteer who took the
+	// first one had left for good.
+	//
+	// Not derived from the instance marker below, which a SINGLE-campaign
+	// instance does not carry: the way back would then have existed only on
+	// a multi-campaign one — the deployment shape whose absence nobody
+	// notices, because the developer's own instance is the other one.
+	markers := []string{`<meta name="paraphe-served-by" content="instance">`}
 	// Through the SAME functions the rest of the application uses, not a
 	// copy of them: this value becomes an HTML attribute, and the lesson of
 	// mediaOrigin is that a guard which re-states a rule is the copy that
@@ -90,17 +99,22 @@ func markBrowserVersion(dir, domain string) ([]byte, error) {
 	// the check lowercases and trims before judging, so `PARAPHE.TEST `
 	// passes it, and written out raw it puts a space inside the URL the
 	// pre-fill builds.
-	if err := validBaseDomain(domain); err != nil {
-		return nil, err
+	if domain != "" {
+		if err := validBaseDomain(domain); err != nil {
+			return nil, err
+		}
+		domain = normaliseHost(domain)
+		markers = append(markers,
+			fmt.Sprintf(`<meta name="paraphe-instance" content=%q>`, domain))
 	}
-	domain = normaliseHost(domain)
 	if !strings.Contains(page, "</head>") {
-		return nil, fmt.Errorf("%s/index.html has no </head>: the instance "+
-			"cannot be named, and a ?org= link would offer a campaign this "+
-			"build cannot fetch", dir)
+		return nil, fmt.Errorf("%s/index.html has no </head>: this build "+
+			"cannot be told an instance serves it, so it would offer no way "+
+			"back to the account version — and a ?org= link would offer a "+
+			"campaign it cannot fetch", dir)
 	}
-	marker := fmt.Sprintf(`<meta name="paraphe-instance" content=%q>`, domain)
-	return []byte(strings.Replace(page, "</head>", marker+"\n</head>", 1)), nil
+	return []byte(strings.Replace(
+		page, "</head>", strings.Join(markers, "\n")+"\n</head>", 1)), nil
 }
 
 // gzipBytes compresses once, at startup. BestCompression because this runs

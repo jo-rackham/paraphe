@@ -119,7 +119,9 @@ Un lien `…/?org=nom-de-la-campagne` qu'on vous envoie, lui, désigne une
 campagne qui n'est pas forcément celle de la page : l'application vous montre
 alors ses valeurs et vous demande avant de rien enregistrer — ce sont elles
 que liront les maires.
-Vous travaillez entièrement dans votre navigateur, sans compte.
+Vous travaillez entièrement dans votre navigateur, sans compte. Pour
+revenir à la version avec compte, le lien est en pied de page, sur tous les
+écrans.
 Attention à ce que cela implique : cette version **ne coordonne rien**. Elle
 ignore qu'un autre bénévole a déjà appelé le même maire. Convenez d'un
 partage (par département, par tranche de la liste) ou acceptez la

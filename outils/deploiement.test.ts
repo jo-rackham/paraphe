@@ -517,10 +517,13 @@ describe("the deployment files", () => {
     ).toBe(Number(declared?.[1]));
   });
 
-  // …and EVERY marker, not that one. There are two now — `paraphe-mode`,
-  // which says an API answers here, and `paraphe-instance`, which says which
-  // instance a `?org=` resolves against — stamped by two functions in one
-  // file and read in two others. The test above walks one row of that grid,
+  // …and EVERY marker, not that one. There are three now — `paraphe-mode`,
+  // which says an API answers here; `paraphe-instance`, which says which
+  // instance a `?org=` resolves against; and `paraphe-served-by`, which says
+  // an instance is serving this build at all, hence that there is an account
+  // version to go back to at the root of this origin — stamped by two
+  // functions in one file and read in three others. The test above walks one
+  // row of that grid,
   // and a grid walked at some positions and not others certifies an
   // agreement that does not hold: rename the second marker on the server,
   // rename it in the Go test beside it, and both sides stay green while
@@ -537,7 +540,7 @@ describe("the deployment files", () => {
       [...new Set(stamped)].sort(),
       "api/pages.go stamps a different set of markers than this test knows: " +
         "if that is a new one, the check below already demands its reader",
-    ).toEqual(["paraphe-instance", "paraphe-mode"]);
+    ).toEqual(["paraphe-instance", "paraphe-mode", "paraphe-served-by"]);
 
     const src = join(ROOT, "web", "src");
     const readers = readdirSync(src)
