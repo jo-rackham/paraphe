@@ -99,10 +99,20 @@ the others.
 - Coordination creates the **teams** (a name, some departments) and their
   **leads**. Each lead then opens access for their volunteers: the app
   generates a temporary password, shown **once**.
+- **Everyone chooses their own password**, in « Mon profil »: the current one
+  is required — a session cookie alone must not be enough to take an account
+  over — and the change **signs every other session out**, which is what it
+  is for when somebody thinks theirs has leaked. At least 12 characters, no
+  composition rules. A revoked session falls at its next request; there is no
+  push channel.
+- **A password lost is drawn again by a manager**, from the accounts list:
+  coordination for anyone, a lead for the volunteers of their own team. Shown
+  once, like the one an access opens with, and it closes the sessions opened
+  under the old one.
 - **Signing in by email** (only when `PARAPHE_SMTP_URL` is set): the sign-in
   screen offers a link, and opening an account sends an invitation carrying
-  one. It is what a volunteer who forgot their password has — there is no
-  other recovery. The token lives 15 minutes (7 days for an invitation), is
+  one. It is the recovery a volunteer can use without asking anybody. The
+  token lives 15 minutes (7 days for an invitation), is
   single-use, is stored only as a SHA-256, and travels in the URL's
   **fragment**: never sent to a server, hence in no access log, and invisible
   to the URL scanners corporate mail systems run — which otherwise spend a
@@ -111,9 +121,12 @@ the others.
   that always worked.
 - A lead can only create volunteers, and only in their own team. Any attempt
   to raise the role or change team is ignored server-side.
-- **Walls**: a team sees its own reservations and the free pool; cards
-  reserved by another team are refused (403). Campaign counters (statuses,
-  departments covered) stay visible to everyone, **with no names**.
+- **Walls**: between CAMPAIGNS, absolute — every query names the campaign.
+  Between teams of one campaign there is information and no refusal: every
+  team reads every card, and a card another team is working comes back naming
+  that TEAM with no person on it. Campaign counters stay visible to everyone,
+  **with no names**. What a team's perimeter bounds is one act — `/api/batch`,
+  where it is handed its work.
 - Deactivating an account takes effect at the next request, without waiting
   for a sign-out — **and it survives a restart**, including for the account
   `PARAPHE_ADMIN_EMAIL` seeds. Startup then refuses rather than serve a

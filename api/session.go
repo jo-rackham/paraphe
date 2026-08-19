@@ -157,10 +157,15 @@ func (s *Sessions) Clear(w http.ResponseWriter) {
 // signature, an expiry, a campaign that is not a campaign — yields the same
 // result: nobody. There is nothing an attacker can learn from which of them
 // it was.
-func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, bool) {
+// The instant it was MINTED comes back with it, and that is what makes a
+// password change sign the other sessions out: a token issued before the
+// change is refused (auth.go). There is no session table to delete from —
+// the token is stateless by design — so the account carries the instant and
+// every token is judged against it.
+func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, time.Time, bool) {
 	c, err := r.Cookie(SessionCookieName)
 	if err != nil {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	return s.verify(c.Value, now)
 }
@@ -171,31 +176,31 @@ func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, bool) {
 // check would then be the amplifier. A real token is under 400 bytes.
 const maxToken = 4096
 
-func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
+func (s *Sessions) verify(token string, now time.Time) (string, int, time.Time, bool) {
 	if len(token) > maxToken {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	// Exactly three segments. Counting "at least three" is how a fourth one
 	// gets ignored, and a JWS with a fourth segment is not a JWS.
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	// The header is compared, never parsed. See jwtHeader.
 	if parts[0] != base64.RawURLEncoding.EncodeToString([]byte(jwtHeader)) {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	signingInput := parts[0] + "." + parts[1]
 	// Constant time: a byte-by-byte comparison leaks how much of a forged
 	// signature was right, which is enough to build the rest one byte at a
 	// time.
 	if !hmac.Equal([]byte(parts[2]), []byte(s.sign(signingInput))) {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	// DisallowUnknownFields: a claim this code does not know is a claim it
 	// cannot honour, and a token carrying one was minted by something else.
@@ -203,7 +208,7 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
 	dec.DisallowUnknownFields()
 	var cl claims
 	if err := dec.Decode(&cl); err != nil {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	// A second document after the claims is not part of them. Decode stops
 	// at the end of the first value and says nothing about what follows, so
@@ -211,14 +216,14 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
 	// second ignored — DisallowUnknownFields guards the inside of the
 	// object, not what comes after it.
 	if dec.More() {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 
 	if cl.Iss != jwtIssuer || cl.Sub == "" {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	if cl.Exp == 0 || now.Unix() >= cl.Exp {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	// Bounded on BOTH sides. `iat` at MaxInt64 overflows time.Unix into a
 	// date in the past, so the "not in the future" check passed and the
@@ -226,14 +231,14 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, bool) {
 	// is the only shape that means anything.
 	if cl.Iat <= 0 || cl.Iat >= cl.Exp ||
 		time.Unix(cl.Iat, 0).After(now.Add(jwtSkew)) {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	org, err := strconv.Atoi(cl.Aud)
 	// OrgMaintenance crosses campaigns and no HTTP request may ever reach
 	// it. It cannot be reached through a token either — signing one would
 	// take the key, but the refusal is written here rather than assumed.
 	if err != nil || org < 0 {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
-	return cl.Sub, org, true
+	return cl.Sub, org, time.Unix(cl.Iat, 0), true
 }

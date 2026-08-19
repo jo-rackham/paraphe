@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as API from "./api.ts";
 import {
   ChampLogo,
@@ -23,6 +23,13 @@ import type {
 // well as the person: two volunteers can share a name, and a sentence
 // identical to the one already in the region is never read out again.
 function creation(c: NewAccess): string {
+  if (c.reset) {
+    return (
+      `Un nouveau mot de passe vient d'être tiré pour ${c.name} ` +
+      `(${c.email}). Il est affiché à l'écran, une seule fois, à transmettre ` +
+      "de vive voix. Les sessions ouvertes avec l'ancien sont fermées."
+    );
+  }
   return (
     `Un accès vient d'être créé pour ${c.name} (${c.email}). ` +
     (c.invitation_sent ? `Une invitation est partie à ${c.email}. ` : "") +
@@ -39,12 +46,25 @@ function creation(c: NewAccess): string {
 // confirmation to make.
 const seal = (r: TeamRequest) => `${r.id}:${r.requester_email}`;
 
-/** An access just opened, whose password is shown once and never again. */
+/**
+ * A one-time password on screen: an access just opened, or one drawn again
+ * for somebody who lost theirs. Shown once and stored nowhere.
+ */
 interface NewAccess {
+  /**
+   * A COUNTER, not the address. Two cards can now name one person — draw a
+   * password, forget to note it, draw another — and React calls duplicate
+   * keys unsupported: the second card replaced the first in place, so the
+   * password nobody had written down went off the only screen it existed on.
+   * The same lesson the instance's moderation screen already paid for.
+   */
+  id: number;
   email: string;
   name: string;
-  role: string;
+  role?: string;
   password: string;
+  /** drawn again for an existing account, rather than opening a new one */
+  reset?: boolean;
   // The invitation the API tried to send with it. Absent when the instance
   // sends no email at all; false with a reason when the relay refused —
   // either way the one-time password below is what gets the person in.
@@ -237,7 +257,9 @@ function DemandesEquipes({
   onError: (e: unknown) => void;
   onDecided: (
     decided: { id: number; state: "accepted" | "refused" },
-    r: NewAccess | null,
+    // WITHOUT the card key: the counter belongs to whoever owns the list,
+    // and a child minting one would be a second source of the same number.
+    r: Omit<NewAccess, "id"> | null,
     said: string,
   ) => Promise<void>;
 }) {
@@ -477,6 +499,10 @@ export function GestionEquipe({
   // while the first password was still on screen wiped it. An append cannot
   // lose one, and a guard read at the top of a handler cannot say the same.
   const [created, setCreated] = useState<NewAccess[]>([]);
+  // The key of the next card. A REF and not state: it is read and bumped
+  // inside handlers, never rendered, and a state bump would be a second
+  // render for a number nobody looks at.
+  const nextCard = useRef(0);
   // The announcement is an EVENT, written only when a password is APPENDED.
   // Derived from the list instead, it moved every time a card was dismissed:
   // noting the newest made the region announce the creation of the access
@@ -499,6 +525,12 @@ export function GestionEquipe({
   // password, shown once and never stored, is gone from the screen that was
   // the only place it existed.
   const [openingAccess, accessOpened] = useSubmitGuard();
+  // …and one for drawing a password again. Its own guard, not the one above:
+  // they are different rows and different acts, and a shared flag would make
+  // opening an access refuse a reset that happened to overlap it. Two clicks
+  // on THIS one draw two passwords and the first is replaced by the second
+  // — with the first still on screen, which is a password that opens nothing.
+  const [drawing, drawn] = useSubmitGuard();
 
   const reload = useCallback(async () => {
     try {
@@ -525,8 +557,10 @@ export function GestionEquipe({
         team_id:
           coordination && draft.team_id ? Number(draft.team_id) : undefined,
       });
-      setCreated((shown) => [...shown, r]);
-      setAnnounced(creation(r));
+      nextCard.current += 1;
+      const card = { ...r, id: nextCard.current };
+      setCreated((shown) => [...shown, card]);
+      setAnnounced(creation(card));
       setDraft({ email: "", name: "", role: "volunteer", team_id: "" });
       await reload();
     } catch (err) {
@@ -570,12 +604,19 @@ export function GestionEquipe({
         </p>
       )}
       {created.map((c) => (
-        <div className="carte alerte" key={c.email}>
+        <div className="carte alerte" key={c.id}>
           <p>
             <strong>
-              Accès créé pour {c.name} ({c.email}).
+              {c.reset ? "Nouveau mot de passe pour" : "Accès créé pour"}{" "}
+              {c.name} ({c.email}).
             </strong>
           </p>
+          {c.reset && (
+            <p>
+              Les sessions ouvertes avec l'ancien mot de passe sont fermées : si
+              quelqu'un d'autre l'avait, il est dehors.
+            </p>
+          )}
           {c.invitation_sent && (
             <p>
               Une invitation vient de partir à cette adresse : le lien qu'elle
@@ -707,8 +748,10 @@ export function GestionEquipe({
             // appended, never assigned: a moderator accepting a second
             // request before noting the first password must not lose it
             if (access) {
-              setCreated((shown) => [...shown, access]);
-              setAnnounced(creation(access));
+              nextCard.current += 1;
+              const card = { ...access, id: nextCard.current };
+              setCreated((shown) => [...shown, card]);
+              setAnnounced(creation(card));
             }
             // through the SHELL's region, which pre-exists this screen: an
             // acceptance leaves a password card that says what happened, a
@@ -764,6 +807,38 @@ export function GestionEquipe({
                         {c.active ? "désactiver" : "réactiver"}
                         {/* nine identical buttons in a column: the name says
                             whose access this one touches */}
+                        <span className="sr-only"> {c.name}</span>
+                      </button>
+                      {" · "}
+                      {/* The door the sign-in screen has always promised —
+                          « le mot de passe n'est affiché qu'une fois à sa
+                          création : s'il est perdu, il faut en regénérer un »
+                          — and that no button offered. The server draws it,
+                          shows it once, and closes the sessions opened with
+                          the old one. */}
+                      <button
+                        type="button"
+                        className="lien"
+                        onClick={async () => {
+                          if (drawing()) return;
+                          try {
+                            const r = await API.resetPassword(c.email);
+                            nextCard.current += 1;
+                            const card = {
+                              ...r,
+                              id: nextCard.current,
+                              reset: true,
+                            };
+                            setCreated((shown) => [...shown, card]);
+                            setAnnounced(creation(card));
+                          } catch (e) {
+                            onError(e);
+                          } finally {
+                            drawn();
+                          }
+                        }}
+                      >
+                        nouveau mot de passe
                         <span className="sr-only"> {c.name}</span>
                       </button>
                       {/* a campaign carries as many coordinators as it

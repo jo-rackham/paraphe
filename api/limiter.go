@@ -68,8 +68,16 @@ var (
 	limitTeamRequestIP = limitClass{"team_request_ip", 10, time.Hour}
 	limitHostingIP     = limitClass{"hosting_ip", 3, time.Hour}
 	limitAnonIP        = limitClass{"anon_ip", 120, time.Minute}
-	limitWriteAccount  = limitClass{"write_account", 120, time.Minute}
-	limitExportAccount = limitClass{"export_account", 6, 10 * time.Minute}
+	// Changing one's own password VERIFIES the current one, so it is a
+	// guessing surface like signing in — reached, this time, by whoever
+	// already holds the session. That is not nothing: a borrowed session
+	// lasts twelve hours, and guessing the password is what would turn it
+	// into ownership of the account. Same shape as the sign-in ceiling for
+	// the same secret, and far above what a person retyping their own
+	// password needs.
+	limitPasswordAccount = limitClass{"password_account", 10, 15 * time.Minute}
+	limitWriteAccount    = limitClass{"write_account", 120, time.Minute}
+	limitExportAccount   = limitClass{"export_account", 6, 10 * time.Minute}
 )
 
 // counterStore counts events per opaque key. Two implementations: this

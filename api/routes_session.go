@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -331,6 +332,100 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
 		"departments": departments,
 		"may_manage":  c.MayManage(),
 	})
+}
+
+// POST /api/me/password — changing one's OWN password.
+//
+// Open to every role and every scope, the instance administration included:
+// whoever holds an account holds its password, and a credential nobody can
+// rotate is one that stays wherever it has already been read out loud.
+//
+// THE CURRENT PASSWORD IS REQUIRED, and that is not ceremony. A session
+// cookie is a bearer token with twelve hours on it; without this, whoever
+// picked one up off a shared computer would turn a borrowed afternoon into
+// permanent ownership of the account, and the owner would be the one locked
+// out. Proving the password is what tells the two apart.
+func (s *Server) routeChangePassword(w http.ResponseWriter, r *http.Request) {
+	var d struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if !readBody(w, r, &d) {
+		return
+	}
+	me := accountOf(r)
+	if utf8.RuneCountInString(d.New) < minPasswordRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nouveau mot de passe doit faire au moins %d caractères. "+
+				"Trois ou quatre mots sans rapport font un bon mot de passe, "+
+				"et se retiennent.", minPasswordRunes)
+		return
+	}
+	if d.New == d.Current {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nouveau mot de passe est identique à l'ancien.")
+		return
+	}
+
+	var stored string
+	if err := s.tx(r).QueryRow(r.Context(),
+		"SELECT password_hash FROM accounts WHERE org_id=$1 AND email=$2",
+		scopeOrg(r), me.Email).Scan(&stored); err != nil {
+		s.failure(w, err)
+		return
+	}
+	good, verifyErr := VerifyPassword(stored, d.Current)
+	if verifyErr != nil {
+		// an unreadable hash is an operations problem, not a typing error —
+		// the same treatment as on the sign-in path, and the caller is told
+		// only that it did not verify
+		slog.Error("unusable password hash",
+			"account", s.accountPseudonym(me.Email), "error", verifyErr)
+		good = false
+	}
+	if !good {
+		s.securityEvent(r, slog.LevelInfo, "password_change_refused",
+			"account", s.accountPseudonym(me.Email))
+		// 403 and NOT 401. A 401 from an authenticated route is what this
+		// interface reads as « your session is gone » — it fires SESSION_LOST
+		// and returns the volunteer to the sign-in form — so a mistyped
+		// current password would have thrown them out of a session that is
+		// perfectly alive, with their work behind it.
+		errorJSON(w, http.StatusForbidden, "Mot de passe actuel incorrect.")
+		return
+	}
+
+	hashed, err := HashPassword(d.New)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	// Truncated to the second, and drawn from the SAME clock the session
+	// tokens are minted by: see the comparison in auth.go. Written before
+	// the new cookie is set, so the cookie is never older than the change it
+	// carries out.
+	changedAt := s.now().Truncate(time.Second)
+	if _, err := s.tx(r).Exec(r.Context(),
+		"UPDATE accounts SET password_hash=$3, password_changed_at=$4 "+
+			"WHERE org_id=$1 AND email=$2",
+		scopeOrg(r), me.Email, hashed, changedAt); err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	// THIS session survives, and every other one falls. Re-minted after the
+	// commit: the token carries its own instant, and one issued before the
+	// row was written would be refused by the very rule this route arms.
+	if err := s.sessions.Set(w, me.Email, currentOrg(r), s.now()); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.securityEvent(r, slog.LevelInfo, "password_changed",
+		"account", s.accountPseudonym(me.Email))
+	replyJSON(w, http.StatusOK, map[string]any{"state": "password_changed"})
 }
 
 // DELETE /api/session — sign out.

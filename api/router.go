@@ -136,6 +136,16 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/me/personal_note", s.routePersonalNote)
 		})
+		// Changing one's own password, and OUTSIDE the group above because
+		// of the order: this route derives two hashes — one to verify the
+		// current password, one to write the new — so it queues on the same
+		// gate a sign-in does, and admitSignIn has to run BEFORE signedIn
+		// takes a pool connection. Inside the group, `r.Use` would put the
+		// connection first and the queue after it, which is the measured
+		// defect that gate exists for.
+		r.With(guard(admitSignIn), guard(s.signedIn),
+			guard(s.limitAccount(limitPasswordAccount)), guard(jsonOnly)).
+			Post("/me/password", s.routeChangePassword)
 
 		// Inside a campaign: everything a volunteer works with.
 		r.Group(func(r chi.Router) {
@@ -177,6 +187,13 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.coordinationOnly),
 				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/account/{email}/role", s.routeChangeRole)
+			// Drawing a new password for somebody who lost theirs. A WRITE
+			// ceiling and not the password one: nothing is verified here, a
+			// password is drawn — the same act as opening an access, which
+			// this route sits beside and shares its filter with.
+			r.With(guard(s.managers),
+				guard(s.limitAccount(limitWriteAccount))).
+				Post("/account/{email}/password", s.routeResetPassword)
 		})
 		r.With(guard(s.coordinationOnly),
 			guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).

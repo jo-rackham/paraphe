@@ -297,6 +297,82 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				}
 			}},
 		},
+		// The reset draws a NEW password for somebody else, through the very
+		// filter /active uses — so it owes the same four refusals. What is
+		// asserted after the 404 is the stored HASH: a route that answered
+		// 404 and rewrote the row anyway would have locked its target out of
+		// their own account, and « the account is still active » cannot see
+		// that.
+		"POST /api/team/account/{email}/password": {
+			{"a lead cannot reset an account outside their team", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				before := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorVol2)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorVol2+"/password", nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("resetting another team's account: %d, want 404 — a 403 "+
+						"would say the address exists", code)
+				}
+				if got := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorVol2); got != before {
+					t.Fatal("the other team's password was replaced anyway: its owner " +
+						"is locked out of an account nobody told them about")
+				}
+			}},
+			{"a lead cannot reset a privileged role", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				before := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorCoord)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorCoord+"/password", nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("a lead resetting coordination: %d, want 404", code)
+				}
+				if got := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorCoord); got != before {
+					t.Fatal("a lead drew a new password for coordination: that is " +
+						"the campaign, handed over on one request")
+				}
+			}},
+			// Same blind spot as one route up: coordination has no team, so
+			// the team predicate alone already refuses it and the role
+			// predicate could be deleted unseen. A lead's peer in their OWN
+			// team is the only shape where the role is what refuses.
+			{"a lead cannot reset their own team's other lead", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				before := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorLead1b)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorLead1b+"/password", nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("a lead resetting a fellow lead of the same team: %d, "+
+						"want 404 — a lead opens VOLUNTEER access, and nothing else",
+						code)
+				}
+				if got := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgA, idorLead1b); got != before {
+					t.Fatal("a lead took over a fellow lead's account: the role " +
+						"predicate is gone, and the team predicate cannot see it")
+				}
+			}},
+			{"coordination cannot reset another campaign's account", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorCoord)
+				before := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgB, idorVolB)
+				code, _ := c.call(http.MethodPost,
+					"/api/team/account/"+idorVolB+"/password", nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("resetting a neighbouring campaign's account: %d, "+
+						"want 404", code)
+				}
+				if got := scalar[string](t, s, "SELECT password_hash FROM accounts "+
+					"WHERE org_id=$1 AND email=$2", f.orgB, idorVolB); got != before {
+					t.Fatal("a coordinator drew a password for the neighbouring " +
+						"campaign's volunteer")
+				}
+			}},
+		},
 		"POST /api/team/requests/{id}": {
 			{"a neighbouring campaign cannot decide this one's request", func(t *testing.T) {
 				c := f.signedInClient(t, idorHostB, idorCoordB)

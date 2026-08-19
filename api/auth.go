@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -29,6 +30,11 @@ type Account struct {
 	CreatedAt    string  `json:"created_at"`
 	CreatedBy    string  `json:"created_by"`
 	TeamName     *string `json:"team_name"`
+	// When the password last changed, and `json:"-"` because it is nobody's
+	// business but this server's: it is compared against the session token's
+	// own instant, never displayed. NULL for an account that has never
+	// changed one, which is every account older than the column.
+	PasswordChangedAt *time.Time `json:"-"`
 }
 
 // Password hashes never leave the database: the selection is explicit,
@@ -96,13 +102,19 @@ func scoped(r *http.Request) *query {
 // namesake.
 func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 	var c Account
+	// password_changed_at is NOT in accountColumns, and that is deliberate:
+	// the two other readers of that list hand their rows to the browser as
+	// maps (queries.go, RowToMap), so a column added there travels to every
+	// manager's screen without anyone re-reading the query — which is the
+	// exact promise written above the list. Named here, at the one site that
+	// scans into a struct and needs it.
 	err := s.tx(r).QueryRow(r.Context(),
-		"SELECT "+accountColumns+
+		"SELECT "+accountColumns+", c.password_changed_at"+
 			" FROM accounts c LEFT JOIN teams g "+
 			"ON g.id = c.team_id AND g.org_id = c.org_id "+
 			"WHERE c.org_id=$1 AND c.email=$2 AND c.active", scopeOrg(r), email).
 		Scan(&c.Email, &c.Name, &c.Role, &c.TeamID, &c.Active, &c.PersonalNote,
-			&c.CreatedAt, &c.CreatedBy, &c.TeamName)
+			&c.CreatedAt, &c.CreatedBy, &c.TeamName, &c.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -117,7 +129,7 @@ func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 // makes the omission impossible rather than unlikely.
 func (s *Server) signedIn(next http.HandlerFunc) http.HandlerFunc {
 	return s.inScope(func(w http.ResponseWriter, r *http.Request) {
-		email, org, ok := s.sessions.Read(r, s.now())
+		email, org, issued, ok := s.sessions.Read(r, s.now())
 		if !ok {
 			s.sessions.Clear(w)
 			errorJSON(w, http.StatusUnauthorized, "Session absente ou expirée.")
@@ -143,6 +155,29 @@ func (s *Server) signedIn(next http.HandlerFunc) http.HandlerFunc {
 			s.sessions.Clear(w)
 			errorJSON(w, http.StatusUnauthorized,
 				"Ce compte n'est plus actif. Voyez votre référent.")
+			return
+		}
+		// A PASSWORD CHANGE SIGNS THE OTHER SESSIONS OUT, and this is the
+		// whole of the mechanism: a token minted before the change is not a
+		// token this account still recognises. The commonest reason to change
+		// a password is believing it has leaked, and without this the session
+		// of whoever took it outlives the change — a remedy discovered by
+		// paying for it.
+		//
+		// Free, because this handler already re-reads the account on every
+		// request: it is one more column in a SELECT that was happening
+		// anyway, compared in Go.
+		//
+		// The instant is stored truncated to the SECOND and the token's `iat`
+		// is Unix seconds, so the cookie minted by the change itself — same
+		// second, same clock — is not before it and survives. Both come from
+		// s.now(): PostgreSQL's clock is a different one, and a skew of a
+		// second between them would sign a volunteer out of the very session
+		// they just re-secured.
+		if c.PasswordChangedAt != nil && issued.Before(*c.PasswordChangedAt) {
+			s.sessions.Clear(w)
+			errorJSON(w, http.StatusUnauthorized,
+				"Le mot de passe de ce compte a changé. Reconnectez-vous.")
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), accountKey, c)))

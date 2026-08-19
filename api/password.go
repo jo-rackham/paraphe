@@ -358,6 +358,24 @@ var passwordWords = []string{
 // a lockout would give that away in one request.
 const passwordWordCount = 4
 
+// minPasswordRunes: the floor under a password somebody CHOOSES.
+//
+// Nothing needed one before: every password this application had was drawn
+// by ReadablePassword, at 39.8 bits. A person choosing their own is the
+// first place a two-letter one can arrive, and the ceilings that bound
+// guessing (10 per address per quarter of an hour) are a wall against a
+// remote search, not against a password an attacker guesses first try.
+//
+// Twelve RUNES, counted as runes because a passphrase in French spends
+// several bytes on a single letter and a byte count would refuse
+// « prés-très-mûr » while accepting « aaaaaaaaaaaa ».
+//
+// A floor and nothing else: no character classes, no forced digit. Those
+// rules push people to « Motdepasse1! », which is shorter in real entropy
+// than the four words this file draws — and the guidance that recommended
+// them has withdrawn them.
+const minPasswordRunes = 12
+
 // ReadablePassword: can be passed on by voice, no ambiguous characters.
 func ReadablePassword() (string, error) {
 	parts := make([]string, 0, passwordWordCount+1)

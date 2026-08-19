@@ -491,6 +491,32 @@ describe("the deployment files", () => {
     ).toContain('meta[name="paraphe-mode"]');
   });
 
+  // The floor under a chosen password is written twice — the server applies
+  // it, the form announces it and refuses before a round trip — and two
+  // numbers are two numbers. Announced higher than the server applies, the
+  // screen refuses what would have been accepted; announced lower, a
+  // volunteer types eleven characters, reads « au moins 12 » nowhere, and
+  // gets a refusal they cannot act on.
+  it("apply the password floor the form promises", () => {
+    const go = readFileSync(join(ROOT, "api/password.go"), "utf8");
+    const declared = /minPasswordRunes = (\d+)/.exec(go);
+    expect(
+      declared,
+      "minPasswordRunes is no longer where this test reads it",
+    ).toBeTruthy();
+    const shown = /export const MIN_PASSWORD = (\d+);/.exec(
+      readFileSync(join(ROOT, "web", "src", "common.tsx"), "utf8"),
+    );
+    expect(
+      shown,
+      "MIN_PASSWORD is no longer where this test reads it",
+    ).toBeTruthy();
+    expect(
+      Number(shown?.[1]),
+      "the interface announces a floor the API does not apply",
+    ).toBe(Number(declared?.[1]));
+  });
+
   // …and EVERY marker, not that one. There are two now — `paraphe-mode`,
   // which says an API answers here, and `paraphe-instance`, which says which
   // instance a `?org=` resolves against — stamped by two functions in one

@@ -34,6 +34,11 @@ var routeLimits = map[string]string{
 
 	"GET /api/me":                "none: authenticated read of one's own row",
 	"POST /api/me/personal_note": "write_account",
+	// Its own class, and narrow: this route VERIFIES the current password,
+	// so it is a guessing surface for the same secret /api/session is —
+	// reached by whoever already holds the session, which is exactly the
+	// case where guessing it buys the account for good.
+	"POST /api/me/password": "password_account",
 
 	"GET /api/dashboard":              "none: authenticated read",
 	"GET /api/facets":                 "none: authenticated read",
@@ -43,13 +48,17 @@ var routeLimits = map[string]string{
 	"POST /api/mayors/{insee}/status": "write_account",
 	"POST /api/batch":                 "write_account",
 
-	"GET /api/team":                                 "none: authenticated read",
-	"POST /api/team/group":                          "write_account",
-	"POST /api/team/request":                        "team_request_ip",
-	"POST /api/team/requests/{id}":                  "write_account",
-	"POST /api/team/account":                        "write_account",
-	"POST /api/team/account/{email}/active":         "write_account",
-	"POST /api/team/account/{email}/role":           "write_account",
+	"GET /api/team":                         "none: authenticated read",
+	"POST /api/team/group":                  "write_account",
+	"POST /api/team/request":                "team_request_ip",
+	"POST /api/team/requests/{id}":          "write_account",
+	"POST /api/team/account":                "write_account",
+	"POST /api/team/account/{email}/active": "write_account",
+	"POST /api/team/account/{email}/role":   "write_account",
+	// Drawing a new password for somebody who lost theirs: a WRITE, not a
+	// verification — nothing is guessed here, and it is the same act as
+	// opening an access, one line up.
+	"POST /api/team/account/{email}/password":       "write_account",
 	"POST /api/campaign":                            "write_account",
 	"POST /api/campaign/logo":                       "write_account",
 	"DELETE /api/campaign/logo":                     "write_account",
@@ -132,16 +141,17 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 	// a coordination inside its campaign. `{…}` placeholders take harmless
 	// values: a wired route refuses before its handler ever reads them.
 	reachable := map[string]string{
-		"POST /api/mayors/{insee}/status":       "/api/mayors/01001/status",
-		"POST /api/batch":                       "/api/batch",
-		"POST /api/team/group":                  "/api/team/group",
-		"POST /api/team/account":                "/api/team/account",
-		"POST /api/team/account/{email}/active": "/api/team/account/qui@exemple.fr/active",
-		"POST /api/team/account/{email}/role":   "/api/team/account/qui@exemple.fr/role",
-		"POST /api/team/requests/{id}":          "/api/team/requests/1",
-		"POST /api/campaign":                    "/api/campaign",
-		"POST /api/campaign/logo":               "/api/campaign/logo",
-		"DELETE /api/campaign/logo":             "/api/campaign/logo",
+		"POST /api/mayors/{insee}/status":         "/api/mayors/01001/status",
+		"POST /api/batch":                         "/api/batch",
+		"POST /api/team/group":                    "/api/team/group",
+		"POST /api/team/account":                  "/api/team/account",
+		"POST /api/team/account/{email}/active":   "/api/team/account/qui@exemple.fr/active",
+		"POST /api/team/account/{email}/role":     "/api/team/account/qui@exemple.fr/role",
+		"POST /api/team/account/{email}/password": "/api/team/account/qui@exemple.fr/password",
+		"POST /api/team/requests/{id}":            "/api/team/requests/1",
+		"POST /api/campaign":                      "/api/campaign",
+		"POST /api/campaign/logo":                 "/api/campaign/logo",
+		"DELETE /api/campaign/logo":               "/api/campaign/logo",
 	}
 	for declared, class := range routeLimits {
 		if class != "write_account" || declared == "POST /api/me/personal_note" {

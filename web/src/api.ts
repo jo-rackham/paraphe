@@ -257,6 +257,21 @@ export const savePersonalNote = (
     body: { personal_note: personalNote },
   });
 
+/**
+ * Changing one's own password. The CURRENT one travels with it: a session
+ * cookie is a bearer token, and without that proof whoever picked one up off
+ * a shared computer would own the account for good.
+ *
+ * The server answers 403 — never 401 — when the current password is wrong,
+ * so a typo does not read as an expired session and throw the volunteer back
+ * to the sign-in form (see BEFORE_ANY_SESSION above).
+ */
+export const changePassword = (
+  current: string,
+  next: string,
+): Promise<{ state: string }> =>
+  call("me/password", { method: "POST", body: { current, new: next } });
+
 export const dashboard = (): Promise<Dashboard> => call("dashboard");
 export const facets = (): Promise<Facets> => call("facets");
 
@@ -350,6 +365,22 @@ export const toggleAccount = (
   call(`team/account/${encodeURIComponent(email)}/active`, {
     method: "POST",
     body: {},
+  });
+
+/**
+ * Draws a NEW one-time password for somebody who lost theirs. Managers only,
+ * and never for oneself: the server sends that caller to « Mon profil »,
+ * where they choose one instead of being shown one.
+ *
+ * The password comes back once and is stored nowhere in the clear — the same
+ * shape as opening an access, and the reason both are held in a LIST on
+ * screen rather than a single slot.
+ */
+export const resetPassword = (
+  email: string,
+): Promise<{ email: string; name: string; password: string }> =>
+  call(`team/account/${encodeURIComponent(email)}/password`, {
+    method: "POST",
   });
 
 /** Coordination only: moves an account to another campaign role. Promoting

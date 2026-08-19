@@ -389,6 +389,7 @@ export default function Team({ config }: { config: ServerConfig }) {
           me={me}
           cfg={cfg}
           onError={report}
+          onMessage={setMessage}
           onSaved={(personalNote: string) => {
             setMe((m) =>
               m

@@ -29,7 +29,7 @@ func session(t *testing.T, s *Sessions, email string, when time.Time) *http.Requ
 func TestSessionRoundTrip(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
-	read, org, ok := s.Read(session(t, s, "marie@exemple.fr", t0), t0)
+	read, org, _, ok := s.Read(session(t, s, "marie@exemple.fr", t0), t0)
 	if !ok || read != "marie@exemple.fr" || org != 1 {
 		t.Fatalf("session not read back: %q org=%d %v", read, org, ok)
 	}
@@ -39,10 +39,10 @@ func TestSessionExpires(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
 	r := session(t, s, "marie@exemple.fr", t0)
-	if _, _, ok := s.Read(r, t0.Add(SessionDuration-time.Minute)); !ok {
+	if _, _, _, ok := s.Read(r, t0.Add(SessionDuration-time.Minute)); !ok {
 		t.Error("session refused before its term")
 	}
-	if _, _, ok := s.Read(r, t0.Add(SessionDuration)); ok {
+	if _, _, _, ok := s.Read(r, t0.Add(SessionDuration)); ok {
 		t.Error("session accepted after its term")
 	}
 }
@@ -72,7 +72,7 @@ func TestSessionRefusesWrongSignature(t *testing.T) {
 	} {
 		r := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 		r.AddCookie(&http.Cookie{Name: SessionCookieName, Value: value})
-		if _, _, ok := s.Read(r, t0); ok {
+		if _, _, _, ok := s.Read(r, t0); ok {
 			t.Errorf("%s: token accepted", name)
 		}
 	}
@@ -109,7 +109,7 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 
 	// a control: the same builder, with the header and claims we do emit,
 	// must be ACCEPTED — otherwise every case below passes for free
-	if _, _, accepted := s.verify(
+	if _, _, _, accepted := s.verify(
 		jwt(t, `{"alg":"HS512","typ":"JWT"}`, ok(""), []byte(key)), t0,
 	); !accepted {
 		t.Fatal("the control token is refused: every case below would pass " +
@@ -196,7 +196,7 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 		"claims are not an object": jwt(t,
 			`{"alg":"HS512","typ":"JWT"}`, `"marie@exemple.fr"`, []byte(key)),
 	} {
-		if _, _, accepted := s.verify(token, t0); accepted {
+		if _, _, _, accepted := s.verify(token, t0); accepted {
 			t.Errorf("%s: token accepted", name)
 		}
 	}
@@ -216,7 +216,7 @@ func TestSessionRefusesAnOversizedToken(t *testing.T) {
 		t.Errorf("a real token is %d bytes, close to the %d-byte bound: the "+
 			"bound is no longer generous", len(token), maxToken)
 	}
-	if _, _, ok := s.verify(token+strings.Repeat("A", maxToken), t0); ok {
+	if _, _, _, ok := s.verify(token+strings.Repeat("A", maxToken), t0); ok {
 		t.Error("a megabyte of padding was hashed and read")
 	}
 }
@@ -230,14 +230,14 @@ func TestSessionToleratesASecondOfSkewAndNotAnHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := s.verify(token, t0); !ok {
+	if _, _, _, ok := s.verify(token, t0); !ok {
 		t.Error("a token minted 30 s ahead by another pod was refused")
 	}
 	token, err = s.mint("marie@exemple.fr", 1, t0.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := s.verify(token, t0); ok {
+	if _, _, _, ok := s.verify(token, t0); ok {
 		t.Error("a token minted two minutes ahead was accepted")
 	}
 }

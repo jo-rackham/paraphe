@@ -593,6 +593,73 @@ departments. Campaign counters stay visible to all, without names.
 `PARAPHE_ADMIN_EMAIL` / `_PASSWORD` bootstrap coordination: with no
 coordination account the app refuses to open rather than let anyone in.
 
+**The management screen is NAMED FOR THE ROLE that opens it** — « Ma
+campagne » for a coordination, which has no team and holds the campaign, its
+texts, its accesses and every team; « Mon équipe » for a référent, who leads
+one. `gestionLabel` is that decision, in one place, because the name is
+written in four (the tab, the document title, the heading, the banner that
+points at it). The PATH does not move: one screen with two addresses is a
+« précédent » that appears to do nothing, and a link between a coordinator
+and a référent must open the same screen for both.
+
+**A PASSWORD IS ITS OWNER'S TO CHANGE, AND CHANGING IT SIGNS THE OTHER
+SESSIONS OUT.** The second half is why the first is worth having: the
+commonest reason to change a password is believing it has leaked, and
+without it the session of whoever took it outlives the change — a remedy
+discovered by paying for it.
+
+- **The CURRENT password is required.** A session cookie is a bearer token
+  with twelve hours on it; without that proof, whoever picked one up off a
+  shared computer would turn a borrowed afternoon into ownership of the
+  account, with its owner locked out.
+- **A wrong current password answers 403, never 401.** This interface reads
+  a 401 from an authenticated route as « your session is gone » — it fires
+  `SESSION_LOST` and returns the volunteer to the sign-in form — so a typo
+  would have thrown them out of a live session, work and all.
+- **The mechanism is `accounts.password_changed_at` against the token's own
+  `iat`**, compared in `signedIn`. It costs nothing: that guard already
+  re-reads the account on every request, which is what makes deactivation
+  immediate, so this is one more column in a SELECT that was happening
+  anyway. The column is NOT in `accountColumns` — the two other readers of
+  that list hand their rows to the browser as maps, and a column added there
+  travels to every manager's screen without anyone re-reading the query.
+- **Truncated to the SECOND, from the SAME clock the tokens are minted by.**
+  A token carries Unix seconds, so a change stored with microseconds would
+  refuse the cookie the change itself just minted; and PostgreSQL's clock is
+  a different one, where a second of skew would sign a volunteer out of the
+  session they had just re-secured. The cost is a one-second grace: a session
+  opened inside that second survives, which is nothing an attacker can aim
+  at. The row is written BEFORE the new cookie, so the cookie is never older
+  than the change it carries out.
+- **There is no push channel**, so a revoked session falls at its NEXT
+  REQUEST. A tab left untouched keeps showing a screen it can no longer write
+  from — and says so the moment it tries, in the server's own words rather
+  than the generic expiry, because that session did not run out, it was
+  ended.
+- **A floor of 12 runes, and nothing else** — no character classes, no forced
+  digit: those push people to « Motdepasse1! », which is weaker than the four
+  words `ReadablePassword` draws. Runes and not bytes, or a French passphrase
+  is refused for being short in a unit nobody typed in. The number is written
+  twice (the server applies it, the form announces it) and a canary holds
+  them together.
+- **A manager DRAWS one for somebody who lost theirs**
+  (`POST /api/team/account/{email}/password`), which the sign-in screen had
+  promised all along — « s'il est perdu, il faut en regénérer un » — with no
+  route behind it: opening the access again answers 409, and an instance with
+  no relay had no other door. It goes through the filter
+  `routeToggleAccount` already draws, and for the same reason: a lead reaches
+  the volunteers of THEIR team and nobody else, or a lead mints a password
+  for a coordinator and takes the campaign. Never for oneself — that would
+  show a drawn password instead of taking a chosen one, and end the session
+  doing it.
+  It is the FOURTH flow minting a one-time password on that screen, and the
+  card key is now a COUNTER there too: one person can be drawn twice — draw,
+  fail to note it, draw again — and keyed by the address the second card
+  replaced the first, taking a password that exists nowhere else off the only
+  screen it was on. Asserted through React's own complaint, because keyed by
+  the address both cards still render and still dismiss correctly: every
+  assertion about passwords on screen was green under that mutation.
+
 **NO CARD IS ANY TEAM'S TO HOLD, AND THE CARD CROSSES WHERE THE PERSON DOES
 NOT.** The two halves of one decision, and the second is what makes the first
 safe.

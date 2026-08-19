@@ -921,6 +921,18 @@ export const gestionLabel = (me: Me | null | undefined): string =>
   me?.account.role === "coordination" ? "Ma campagne" : "Mon équipe";
 
 /**
+ * The floor under a password somebody CHOOSES, in runes.
+ *
+ * The server is what enforces it (api/password.go, minPasswordRunes); this
+ * copy exists so the form can say the number and refuse before a round trip.
+ * The two are held together by a canary — outils/deploiement.test.ts — for
+ * the reason every cross-language constant here has one: a floor the screen
+ * announces and the server does not apply, or the other way round, is a
+ * refusal nobody can explain.
+ */
+export const MIN_PASSWORD = 12;
+
+/**
  * A URL fit to be an href, or undefined. source_url and browser_version_url
  * come from the instance's own configuration (PARAPHE_*), never from a
  * request — but `javascript:` in an href runs on click, so an operator's typo

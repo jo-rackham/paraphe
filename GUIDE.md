@@ -123,8 +123,13 @@ redondance en connaissance de cause — un maire contacté deux fois par la
 même campagne, c'est une maladresse, pas une faute.
 
 1. Connectez-vous (votre email + le mot de passe donné par votre
-   référent), écrivez votre **touche
-   personnelle** (onglet « Mon profil ») : une phrase sur pourquoi *vous*
+   référent). Dans « Mon profil », **choisissez votre mot de passe** : celui
+   qu'on vous a communiqué est passé par une conversation, un SMS ou un
+   email, et le changer le retire de là. Changer de mot de passe déconnecte
+   vos autres sessions — c'est ce qui sert si vous pensez que quelqu'un
+   d'autre l'a eu. Perdu ? Votre référent vous en tire un nouveau.
+   Écrivez ensuite votre **touche
+   personnelle** (même onglet) : une phrase sur pourquoi *vous*
    vous engagez. Elle s'insère automatiquement dans vos emails, signés de
    votre prénom.
 2. Sur le tableau de bord, **« Me réserver un lot »** : 10 maires vous sont

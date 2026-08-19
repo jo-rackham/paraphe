@@ -283,6 +283,20 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 			personal_note TEXT DEFAULT '',
 			created_at TEXT, created_by TEXT,
 			PRIMARY KEY (org_id, email))`,
+		// When the password last changed, and it is what makes a change
+		// SIGN THE OTHER SESSIONS OUT: a token issued before this instant is
+		// refused (auth.go). The commonest reason to change a password is
+		// believing it has leaked, and without this the session of whoever
+		// took it outlives the change.
+		//
+		// TIMESTAMPTZ like login_tokens.expires_at, and for the same reason:
+		// it is COMPARED, never displayed, and the TEXT the display columns
+		// use compares wrong at a boundary.
+		//
+		// NULL is "never changed since this column existed" — every account
+		// older than it — and a null must not invalidate anything: a session
+		// predating the feature is not a session to kill.
+		`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`,
 		// Sign-in links. Only the token's SHA-256 is here: what arrives in an
 		// inbox exists nowhere on this side, so a dump of this table opens no
 		// account (link.go).

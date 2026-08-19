@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -338,6 +339,87 @@ func (s *Server) routeToggleAccount(w http.ResponseWriter, r *http.Request) {
 		"account", s.accountPseudonym(target),
 		"by", s.accountPseudonym(me.Email), "active", active)
 	replyJSON(w, http.StatusOK, map[string]any{"email": target, "active": active})
+}
+
+// POST /api/team/account/{email}/password — draws a new one-time password
+// for somebody who has lost theirs.
+//
+// The sign-in screen has promised this all along — « le mot de passe n'est
+// affiché qu'une fois à sa création : s'il est perdu, il faut en regénérer
+// un » — and no route did it: opening an access again answers 409, and on an
+// instance with no relay there was no other door. A campaign whose volunteer
+// lost their password had to have the account deactivated and re-created
+// under another address.
+//
+// WHO may do it is the filter routeToggleAccount already draws, and it is
+// the same filter for the same reason: a lead reaches the volunteers of
+// THEIR team and nobody else. Without it a lead would mint a password for a
+// coordinator and take the campaign — and the 404/403 distinction would tell
+// them which addresses exist in the other teams.
+func (s *Server) routeResetPassword(w http.ResponseWriter, r *http.Request) {
+	me := accountOf(r)
+	// UNESCAPED, like its sibling: chi matches on the raw path, so an address
+	// arrives as `someone%40example.fr` and matches no account.
+	target := normalizeEmail(pathParam(r, "email"))
+	if target == me.Email {
+		// Not a refusal of the ACT — everyone may change their own password —
+		// but of this door: it would show a drawn password on screen instead
+		// of taking one they chose, and sign this very session out.
+		errorJSON(w, http.StatusBadRequest,
+			"Pour votre propre mot de passe, passez par « Mon profil ».")
+		return
+	}
+
+	password, err := ReadablePassword()
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	hashed, err := HashPassword(password)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	// The same instant the session guard compares against, from the same
+	// clock: a reset is a password change like any other, so the sessions
+	// opened under the old one fall. That is the point rather than a side
+	// effect — a password is regenerated precisely when nobody knows who
+	// still holds the previous one.
+	changedAt := s.now().Truncate(time.Second)
+
+	req := scoped(r)
+	filter := "org_id=$1 AND email=" + req.p(target)
+	if !me.Coordination() {
+		filter += " AND team_id=" + req.p(me.MyTeam()) +
+			" AND role=" + req.p(RoleVolunteer)
+	}
+	var name string
+	err = s.tx(r).QueryRow(r.Context(),
+		"UPDATE accounts SET password_hash="+req.p(hashed)+
+			", password_changed_at="+req.p(changedAt)+
+			" WHERE "+filter+" RETURNING name", req.args...).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		errorJSON(w, http.StatusNotFound,
+			"Aucun compte %s que vous puissiez gérer.", target)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	s.securityEvent(r, slog.LevelInfo, "password_reset",
+		"account", s.accountPseudonym(target),
+		"by", s.accountPseudonym(me.Email))
+	// Shown once and stored nowhere in the clear, exactly like the password
+	// an account is opened with. No invitation is sent: this is the door for
+	// an instance whose relay is down or absent, and the lead reads it out.
+	replyJSON(w, http.StatusOK, map[string]any{
+		"email": target, "name": name, "password": password,
+	})
 }
 
 const lastCoordinatorMessage = "Impossible : ce compte est le dernier accès " +

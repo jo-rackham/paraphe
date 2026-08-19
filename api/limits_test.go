@@ -786,6 +786,23 @@ func textLength(expr ast.Expr) bool {
 	return ok && (fn.Sel.Name == "RuneCountInString" || fn.Sel.Name == "RuneCount")
 }
 
+// mirrored: the same comparison read from the other side. `a < b` and
+// `b > a` say one thing, and a canary that reads the operator without the
+// operands reads half of it.
+func mirrored(op token.Token) token.Token {
+	switch op {
+	case token.LSS:
+		return token.GTR
+	case token.LEQ:
+		return token.GEQ
+	case token.GTR:
+		return token.LSS
+	case token.GEQ:
+		return token.LEQ
+	}
+	return op // == and != are their own mirror
+}
+
 // byteLength: `len(x)`, which counts BYTES.
 func byteLength(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
@@ -819,8 +836,27 @@ func TestTextCeilingsAreNamedAndAccountedFor(t *testing.T) {
 			// either side may hold the measurement
 			bound := cmp.Y
 			measured := cmp.X
+			op := cmp.Op
 			if !textLength(cmp.X) && !byteLength(cmp.X) {
 				bound, measured = cmp.X, cmp.Y
+				// …and the comparison is now read from the other end:
+				// `max < len(x)` bounds x from ABOVE exactly as
+				// `len(x) > max` does, so the operator turns with the sides.
+				op = mirrored(op)
+			}
+			// A FLOOR IS NOT A CEILING, and this canary is about ceilings:
+			// its sum answers « would a request at every limit still fit in
+			// maxBodySize ». `RuneCount(new) < minPasswordRunes` bounds a
+			// password from BELOW — it lets nothing through that a body
+			// limit would have to hold — and demanding it join the sum of
+			// maxima would put a minimum into an addition of maxima and
+			// make the arithmetic mean nothing.
+			//
+			// Read from the SHAPE, after the sides are settled, and not from
+			// the name: this file's own opening says a naming convention is
+			// what a ceiling called something else walks past.
+			if op == token.LSS || op == token.LEQ {
+				return true
 			}
 			if byteLength(measured) {
 				// a ceiling counted in runes, applied to bytes: it refuses
@@ -852,6 +888,67 @@ func TestTextCeilingsAreNamedAndAccountedFor(t *testing.T) {
 			}
 			return true
 		})
+	}
+}
+
+// …and the exemption above is one line from blinding the canary, so it is
+// walked on the SHAPES rather than trusted. A ceiling is a ceiling written
+// either way round, a floor is a floor written either way round, and the
+// rule must tell them apart by the direction the comparison actually reads
+// — not by which operand the author happened to put first.
+func TestAFloorIsExemptAndACeilingIsNotWhicheverWayItIsWritten(t *testing.T) {
+	fset := token.NewFileSet()
+	// `unknownCeiling` is in no accountedCeilings list, so a shape the rule
+	// judges must name it and a shape it exempts must not.
+	const src = `package main
+import "unicode/utf8"
+func probe(s string) bool {
+	if utf8.RuneCountInString(s) > unknownCeiling { return false }   // ceiling
+	if unknownCeiling < utf8.RuneCountInString(s) { return false }   // ceiling, mirrored
+	if utf8.RuneCountInString(s) < unknownFloor { return false }     // floor
+	if unknownFloor > utf8.RuneCountInString(s) { return false }     // floor, mirrored
+	return true
+}`
+	file, err := parser.ParseFile(fset, "probe.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var judged []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		cmp, ok := n.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		switch cmp.Op {
+		case token.GTR, token.GEQ, token.LSS, token.LEQ, token.EQL, token.NEQ:
+		default:
+			return true
+		}
+		bound, measured, op := cmp.Y, cmp.X, cmp.Op
+		if !textLength(cmp.X) && !byteLength(cmp.X) {
+			bound, measured, op = cmp.X, cmp.Y, mirrored(cmp.Op)
+		}
+		if !textLength(measured) {
+			return true
+		}
+		if op == token.LSS || op == token.LEQ {
+			return true
+		}
+		if id, ok := bound.(*ast.Ident); ok {
+			judged = append(judged, id.Name)
+		}
+		return true
+	})
+	want := []string{"unknownCeiling", "unknownCeiling"}
+	if len(judged) != len(want) {
+		t.Fatalf("the rule judged %v, want the two ceilings and neither floor: "+
+			"an exemption that swallows a ceiling is a canary that certifies "+
+			"what it no longer reads", judged)
+	}
+	for i, name := range judged {
+		if name != want[i] {
+			t.Errorf("judged %q at %d, want %q", name, i, want[i])
+		}
 	}
 }
 
