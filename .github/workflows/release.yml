@@ -22,11 +22,89 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # publishing without checking is exactly how an image that does not
-  # start would reach production
+  # Publishing without checking is exactly how an image that does not start
+  # would reach production. What changed is WHICH check: this job used to
+  # call ci.yml and run the whole suite a second time.
+  #
+  # `task release` pushes the commit and the tag TOGETHER, so the push
+  # started a CI run and the tag started this one — the same seven jobs,
+  # twice, on the same commit, at the same moment, competing for runners on
+  # an account that has a handful. The release copy lost twice in a row:
+  # v0.8.0 died on the lint's timeout at 10m15s, v0.8.1 on `playwright
+  # install --with-deps` hanging past 25 minutes, while each one's twin went
+  # green in about four. Two tags exist that published nothing.
+  #
+  # So the release WAITS for the run that already exists rather than opening
+  # a second one. It is also a stronger statement than the old shape made:
+  # what gates the publication is now a green CI on this exact commit, the
+  # one whose result the repository keeps, rather than a private copy that
+  # nobody else ever sees.
   verifier:
-    name: ✅ the whole CI
-    uses: ./.github/workflows/ci.yml
+    name: ✅ the CI that ran on this commit
+    runs-on: ubuntu-latest
+    # Well past the CI's own ceilings (25 minutes for the longest job): this
+    # job must outlive what it waits for, or it becomes the new race.
+    timeout-minutes: 45
+    permissions:
+      # read the runs of this repository, and nothing else. No checkout: the
+      # question is answered entirely by the API.
+      actions: read
+    steps:
+      - name: Attendre la CI de ce commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Newest first, which is the API's default ordering. A re-run does
+          # not create a run: it moves this one back to in_progress, so the
+          # loop below sees a re-run as "not settled yet" and waits for it.
+          etat() {
+            gh api \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=100" \
+              --jq '.workflow_runs[] | "\(.status) \(.conclusion) \(.html_url)"'
+          }
+          # The two runs are triggered by one push, so this one can be a few
+          # seconds ahead of the run it is looking for. Absence is only an
+          # answer after that.
+          patience=300
+          debut=$SECONDS
+          while :; do
+            runs=$(etat)
+            if [ -z "$runs" ]; then
+              if [ $((SECONDS - debut)) -lt "$patience" ]; then
+                echo "aucune exécution de la CI pour $SHA — attente…"
+                sleep 15
+                continue
+              fi
+              echo "::error::aucune exécution de la CI pour le commit $SHA."
+              echo "::error::Rien n'a vérifié ce code : publier maintenant"
+              echo "::error::mettrait en production un artefact que rien n'a lu."
+              echo "::error::Le tag doit porter sur un commit poussé sur main."
+              exit 1
+            fi
+            if printf '%s\n' "$runs" \
+              | grep -qE '^(queued|in_progress|waiting|requested|pending) '; then
+              echo "la CI de ce commit tourne encore — attente…"
+              sleep 20
+              continue
+            fi
+            break
+          done
+          # Settled. The MOST RECENT run decides: a re-run that went red
+          # after a green one is the answer that counts, and reading "any
+          # green in the list" would publish on a result somebody has since
+          # replaced.
+          derniere=$(etat | head -n 1)
+          conclusion=$(printf '%s' "$derniere" | cut -d' ' -f2)
+          url=$(printf '%s' "$derniere" | cut -d' ' -f3)
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::la CI de ce commit s'est terminée en « $conclusion »."
+            echo "::error::$url"
+            echo "::error::Relancer la CI, puis relancer cette publication."
+            exit 1
+          fi
+          echo "CI verte sur ce commit : $url"
 
   publier:
     name: 📦 publish the image and the chart

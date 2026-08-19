@@ -1,12 +1,15 @@
 name: CI
 
+# A push to main runs this ONCE, and a release reads that run's result
+# rather than opening a second one (release.yml). The `workflow_call`
+# trigger that used to sit here is gone with its only caller: kept, it would
+# be a door for the duplication to come back through, and a release racing
+# its own CI cost two published versions.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # called by release.yml: nothing gets published without passing through here
-  workflow_call:
 
 permissions:
   contents: read
