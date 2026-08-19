@@ -21,7 +21,14 @@ jobs:
   lint:
     name: 🧹 lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20, like its neighbours, and not the 10 it used to carry. This job
+    # pulls a Docker image and typechecks the whole Go package from a cold
+    # cache, which is 4 minutes on a good runner and 10 on a tired one — so
+    # the ceiling was ABOVE the median and BELOW the tail. It cut the v0.8.0
+    # release at 10m15s: every other job green, the lint killed mid-run, and
+    # therefore no image and no chart published, on a tag that already
+    # existed. A timeout is there to stop a hung job, not to race a slow one.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
