@@ -9,8 +9,8 @@ appel (colonne à ajouter : statut_contact / date / notes).
 ## 1. Barrage secrétariat (souvent : la secrétaire de mairie)
 
 « Bonjour, {Prénom Nom}, j'appelle de la part de {candidat 2027}, au sujet de
-l'élection présidentielle. Serait-il possible de parler à {civilite} le Maire,
-ou de convenir d'un créneau où je peux le/la joindre ? »
+l'élection présidentielle. Serait-il possible de parler à {salutation_courte},
+ou de convenir d'un créneau où je peux {le_la} joindre ? »
 
 - Si absent·e : noter le créneau proposé. Ne pas dérouler l'argumentaire à la
   secrétaire, mais la traiter avec les mêmes égards que le maire — c'est
@@ -18,7 +18,7 @@ ou de convenir d'un créneau où je peux le/la joindre ? »
 
 ## 2. Accroche maire (30 secondes, la reconnaissance d'abord)
 
-« Bonjour {civilite} {nom}, merci de me prendre. Je vous appelle pour deux
+« Bonjour, merci de me prendre. Je vous appelle pour deux
 raisons. La première : en {annee_recente}, vous avez présenté
 {candidat_recent} — et au nom de tous ceux qui tiennent au pluralisme, je
 voulais vous remercier de ce geste, qui devient rare. »

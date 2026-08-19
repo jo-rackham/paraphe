@@ -10,8 +10,8 @@
 
 « Bonjour, [votre prénom et nom], j'appelle de la part de {candidat}, au
 sujet de l'élection présidentielle. Serait-il possible de parler à
-{civilite_courte} le Maire, ou de convenir d'un créneau où je peux
-le/la joindre ? »
+{salutation_courte}, ou de convenir d'un créneau où je peux
+{le_la} joindre ? »
 
 Si absent·e : noter le créneau proposé. Ne pas dérouler l'argumentaire à la
 secrétaire, mais la traiter avec les mêmes égards que le maire.

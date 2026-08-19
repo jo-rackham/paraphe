@@ -18,8 +18,11 @@ Si le candidat ou la candidate veut écrire de sa main à quelques maires
 choisis, c'est une excellente chose : cette lettre-là s'écrit hors de l'outil,
 et ne se génère pas en série.
 
-Adressage : `{civilite} le Maire — {prenom} {nom}, Mairie de {commune},
-{adresse_postale}, {code_postal} {ville}`.
+Adressage, sur quatre lignes : `{salutation} — {prenom} {nom}` / `Mairie
+{commune_de}` / `{adresse_postale}` / `{code_postal} {ville}`. Le titre est le
+même que celui de la lettre à l'intérieur : une élue nommée « Mme le Maire »
+sur l'enveloppe et « Madame la Maire » dans le courrier, c'est une seule
+personne appelée de deux façons sur un seul contact.
 
 ---
 

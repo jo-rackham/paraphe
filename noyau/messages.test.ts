@@ -255,6 +255,91 @@ describe("the communal precedent", () => {
     expect(context(m)).toContain("Nathalie Arthaud en 2017");
     expect(fields(m, CFG).contexte_tel).toContain("Nathalie Arthaud en 2017");
   });
+
+  // THE SAME HEDGE THE LETTER MAKES. `context()` has branched on
+  // `predecessor_mayor` since it was written, and the spoken line had not: the
+  // volunteer asserted aloud, to the elected official of that very commune, a
+  // fact about its political past that the data does not establish and that
+  // they can contradict on the spot. The endorser is often not the previous
+  // MAYOR — a deputy mayor who signed may still be in office, and a 2017
+  // endorsement is two municipal terms back.
+  it.each([
+    ["oui", "sous une précédente municipalité", "par le passé"],
+    ["non", "par le passé", "sous une précédente municipalité"],
+    ["", "par le passé", "sous une précédente municipalité"],
+  ])(
+    "says %o of the predecessor's office, exactly as far as the data goes",
+    (flag, said, unsaid) => {
+      const spoken = fields(
+        {
+          ...communeCase,
+          predecessor_mayor: flag,
+          endorsement_history: "2017: ARTHAUD Nathalie (B)",
+        },
+        CFG,
+      ).contexte_tel;
+      expect(spoken).toContain(said);
+      expect(spoken).not.toContain(unsaid);
+    },
+  );
+});
+
+// ONE ELECTED OFFICIAL, ONE TITLE. The same woman was addressed three ways on
+// a single contact: « Mme le Maire » through the envelope window, « Madame la
+// Maire » at the head of the letter and the email, and « Madame le Maire » in
+// the words the volunteer speaks aloud. Whichever form she prefers, a tool
+// that cannot hold to one has chosen none — and the volunteer, who wrote none
+// of it, is the one who looks careless.
+describe("the mayor's title", () => {
+  const engine = createEngine(REAL_TEMPLATES);
+
+  // every surface of one contact: the two that are read, the one that is
+  // spoken, and the one visible through the envelope window
+  const surfaces = (m: Mayor): [string, string][] => [
+    ["email", engine.email(m, CFG).body],
+    ["courrier", engine.letter(m, CFG)],
+    ["téléphone", engine.phoneScript(m, CFG)],
+    ["enveloppe", recipientAddress(m)],
+  ];
+
+  const CASES: { title: string; kept: string; competing: string[] }[] = [
+    {
+      title: "Mme",
+      kept: "Madame la Maire",
+      competing: ["Madame le Maire", "Mme le Maire"],
+    },
+    { title: "M.", kept: "Monsieur le Maire", competing: ["M. le Maire"] },
+  ];
+
+  it.each(CASES)("reads $kept on every channel of one contact", (c) => {
+    // both ranks: all six templates, not the three one rank exercises
+    for (const value of ["has_endorsed", "no_signal"]) {
+      const m: Mayor = { ...ENDORSER, title: c.title, rank: value };
+      for (const [where, text] of surfaces(m)) {
+        expect(text, `${where} / ${value}`).toContain(c.kept);
+        for (const wrong of c.competing) {
+          expect(text, `${where} / ${value}`).not.toContain(wrong);
+        }
+      }
+    }
+  });
+
+  // The phone script is SPOKEN. « je peux le/la joindre » is a slash the
+  // volunteer has to resolve out loud while the secretary waits, and the sex
+  // code that decides every other agreement on the page decides this one.
+  it.each([
+    ["Mme", "la joindre"],
+    ["M.", "le joindre"],
+  ])("resolves the pronoun the volunteer says aloud (%s)", (title, spoken) => {
+    for (const value of ["has_endorsed", "no_signal"]) {
+      const script = engine.phoneScript(
+        { ...ENDORSER, title, rank: value },
+        CFG,
+      );
+      expect(script, value).toContain(spoken);
+      expect(script, value).not.toContain("le/la");
+    }
+  });
 });
 
 // The same cases the Go guard answers (api/config_test.go). One file, two
@@ -301,8 +386,26 @@ describe("the commune in the closing line", () => {
     ["Le Havre", "du Havre"],
     ["Honfleur", "de Honfleur"],
     ["Œting", "d'Œting"],
+    // THE POSTAL INVERSION. Official lists move the article to the end;
+    // read left to right the name began with no article at all, and the
+    // envelope came out « Mairie de Chalesmes (Les) ».
+    ["Chalesmes (Les)", "des Chalesmes"],
+    ["Rochelle (La)", "de la Rochelle"],
+    ["Havre (Le)", "du Havre"],
+    ["Haÿ-les-Roses (L')", "de L'Haÿ-les-Roses"],
   ])('%s reads "au service %s"', (commune, expected) => {
     expect(elidedCommune(commune)).toBe(expected);
+  });
+
+  // The two spellings address ONE town hall, so they must come out the same
+  // — including the capital the article keeps in the official name.
+  it.each([
+    ["Le Havre", "Havre (Le)"],
+    ["La Rochelle", "Rochelle (La)"],
+    ["Les Andelys", "Andelys (Les)"],
+    ["L'Haÿ-les-Roses", "Haÿ-les-Roses (L')"],
+  ])("reads %s and %s as the same commune", (plain, inverted) => {
+    expect(elidedCommune(inverted)).toBe(elidedCommune(plain));
   });
 
   it("reaches the four templates that close on it", () => {

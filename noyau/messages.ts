@@ -197,6 +197,24 @@ export function isWoman(mayor: Mayor): boolean {
 }
 
 /**
+ * HOW A MAYOR IS NAMED, decided once.
+ *
+ * The same elected official used to be addressed three ways on one contact:
+ * « Mme le Maire » through the envelope window, « Madame la Maire » at the
+ * head of the letter and the email, and « Madame le Maire » in the words the
+ * volunteer speaks on the telephone. Whichever form she prefers, a tool that
+ * cannot hold to one has chosen none — and the volunteer is the one who looks
+ * careless.
+ *
+ * The feminine article is what the letter has always used and what a large
+ * share of women mayors ask for; the Académie française dropped its objection
+ * in 2019. The two others followed it rather than the reverse.
+ */
+export function mayorTitle(mayor: Mayor): string {
+  return isWoman(mayor) ? "Madame la Maire" : "Monsieur le Maire";
+}
+
+/**
  * Rank-specific opening sentence. It only states the verifiable: what the
  * commune did, or what the official signed — never an intention.
  */
@@ -299,18 +317,40 @@ export function fields(
         contexte: context(mayor),
         // same guard as context(): without it, the phone script dictated
         // "Sa commune l'a déjà fait sous une précédente municipalité : ."
+        // THE SAME HEDGE THE LETTER MAKES, and for the same reason: the
+        // predecessor is often not the previous MAYOR — a deputy mayor is
+        // still in office, and a 2017 endorsement is two municipal terms
+        // back. Stated flat, the volunteer repeats aloud, to the elected
+        // official of that very commune, a claim about its political past
+        // that the data does not establish and that they can contradict on
+        // the spot. `context()` has branched on `predecessor_mayor` since it
+        // was written; this line had not.
         contexte_tel:
           rank(mayor) === "commune_has_endorsed" && phoneHistory
-            ? ` Sa commune l'a déjà fait sous une précédente municipalité : ${phoneHistory}.`
+            ? ` Sa commune l'a déjà fait ${
+                clean(mayor.predecessor_mayor) === "oui"
+                  ? "sous une précédente municipalité"
+                  : "par le passé"
+              } : ${phoneHistory}.`
             : "",
       };
   return {
     ...byRank,
-    salutation: woman ? "Madame la Maire" : "Monsieur le Maire",
+    salutation: mayorTitle(mayor),
+    // The SAME words, short: what the phone script speaks and what the
+    // envelope carries. Three spellings of one woman's title used to reach
+    // her on one contact — « Mme le Maire » on the envelope, « Madame la
+    // Maire » in the letter, « Madame le Maire » on the telephone. Whichever
+    // she prefers, a tool that cannot keep to one is a tool that chose none.
+    salutation_courte: mayorTitle(mayor),
     civilite: woman ? "Mme" : "M.",
     civilite_courte: woman ? "Madame" : "Monsieur",
     seul_e: woman ? "seule" : "seul",
     sollicite_e: woman ? "sollicitée" : "sollicité",
+    // The phone script is SPOKEN, and « je peux le/la joindre » is a slash a
+    // volunteer has to resolve out loud while the secretary waits. The sex
+    // code that decides every other agreement on this page decides this one.
+    le_la: woman ? "la" : "le",
     // THE TWO PHONE SENTENCES, and they are empty unless the campaign said
     // it telephones. Written here rather than in the templates for the
     // reason `contexte` above is: a sentence that must sometimes not exist
@@ -384,6 +424,21 @@ export function letterHeader(
  */
 export function elidedCommune(commune: string): string {
   if (!commune) return "";
+  // THE POSTAL INVERSION FIRST. Official lists write « Chalesmes (Les) »,
+  // « Rochelle (La) »: the article is the same one the rules below elide, it
+  // has only been moved to the end. Read left to right, the name began with
+  // no article at all and came out « Mairie de Chalesmes (Les) ».
+  const inverted = /^(.*?),?\s*\((le|la|les|l['\u2019])\)$/i.exec(commune);
+  if (inverted) {
+    // the article AS WRITTEN, so the two spellings of one commune come out
+    // identical: \u00ab L'Ha\u00ff-les-Roses \u00bb and \u00ab Ha\u00ff-les-Roses (L') \u00bb both address
+    // the same town hall, and the second is not the place to lose a capital
+    const [, bare, article] = inverted;
+    const glued = /^l['\u2019]$/i.test(article);
+    return elidedCommune(
+      glued ? `${article}${bare.trim()}` : `${article} ${bare.trim()}`,
+    );
+  }
   const lower = commune.toLowerCase();
   if (lower.startsWith("le ")) return `du ${commune.slice(3)}`;
   if (lower.startsWith("les ")) return `des ${commune.slice(4)}`;
@@ -413,7 +468,10 @@ export function postalCity(mayor: Mayor): string {
 
 export function recipientAddress(mayor: Mayor): string {
   const lines = [
-    `${isWoman(mayor) ? "Mme" : "M."} le Maire — ${clean(mayor.first_name)} ${clean(mayor.last_name)}`,
+    // the SAME title as the letter it encloses and the script that follows
+    // it: « Mme le Maire » here against « Madame la Maire » inside was one
+    // person named two ways on one contact
+    `${mayorTitle(mayor)} — ${clean(mayor.first_name)} ${clean(mayor.last_name)}`,
     // the first line visible through the envelope window: "Mairie de Le
     // Havre" on 110 of the 1 958 letters
     `Mairie ${elidedCommune(clean(mayor.commune))}`,
