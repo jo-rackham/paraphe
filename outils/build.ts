@@ -29,6 +29,7 @@ import {
   communeLabel,
   norm,
   stripControls,
+  tight,
 } from "../noyau/texte.ts";
 import { ROOT } from "./config.ts";
 import {
@@ -272,12 +273,36 @@ export function main(): void {
     let row = deptCommunes.get(communeN);
     let approx = false;
     if (row === undefined && deptCommunes.size) {
-      // high cutoff: at 0.87, "Goncourt" catches "Voncourt" and
-      // "Esnes-en-Argonne" catches "Gesnes-en-Argonne"
-      const close = closestMatch(communeN, deptCommunes.keys(), 0.93);
-      if (close !== null) {
-        row = deptCommunes.get(close);
-        approx = true;
+      // THE SAME NAME WITHOUT ITS SEPARATORS, and it is an EXACT tier and not a
+      // similarity: « Cramchaban » at the Conseil constitutionnel is
+      // « Cram-Chaban » in the register, and `norm` cannot say so because it
+      // turns a hyphen into a space.
+      //
+      // It matters far past the spelling. Reached by the fuzzy fallback
+      // instead, the match is `approx`, and `approx` DISABLES the counter
+      // proof below — so a commune whose mayor has since changed could not be
+      // concluded « successeur en place » and fell to file 03 « à vérifier »
+      // instead of file 02. Laurent RENAUD, who presented Jean Lassalle in
+      // 2017 and 2022, is no longer mayor of Cram-Chaban — Martine DURVAUX
+      // is — and that is exactly the case the crossing is supposed to state.
+      //
+      // Safe to prefer over the fuzzy tier because it is not a similarity:
+      // measured on the register, no two distinct communes of one department
+      // share a tight form, and an ambiguous one falls through rather than
+      // guessing.
+      const sameTight = [...deptCommunes.keys()].filter(
+        (name) => tight(name) === tight(communeN),
+      );
+      if (sameTight.length === 1) {
+        row = deptCommunes.get(sameTight[0]);
+      } else {
+        // high cutoff: at 0.87, "Goncourt" catches "Voncourt" and
+        // "Esnes-en-Argonne" catches "Gesnes-en-Argonne"
+        const close = closestMatch(communeN, deptCommunes.keys(), 0.93);
+        if (close !== null) {
+          row = deptCommunes.get(close);
+          approx = true;
+        }
       }
     }
 
@@ -323,7 +348,19 @@ export function main(): void {
         signedInsee !== hits[0].insee;
       if (hits.length === 1 && !otherCommune) {
         rneRow = hits[0];
-        conf = "retrouvé par nom (commune renommée/fusionnée)";
+        // THE LABEL STATES WHAT WAS OBSERVED, not what this branch usually
+        // means. « Commune renommée ou fusionnée » is the reason the person
+        // was found elsewhere ONLY when the signed commune is absent from the
+        // register; reached with the commune present — which happens when the
+        // spelling was approximate and the identity there did not match — it
+        // would name a merger the data contradicts. Measured on the real
+        // sources, all 21 rows are the first case, so this changes no output
+        // today; it is written this way so the day it does, the file says so
+        // instead of asserting a merger nobody can find.
+        conf =
+          row === undefined
+            ? "retrouvé par nom (commune renommée/fusionnée)"
+            : "retrouvé par nom (même commune, identité rapprochée)";
         count("retrouvé par nom");
       } else if (counterProof) {
         count("commune trouvée, maire différent");

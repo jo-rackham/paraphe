@@ -394,13 +394,32 @@ export const resetPassword = (
 
 /** Coordination only: moves an account to another campaign role. Promoting
  * to coordination unbinds the team server-side. */
+// `teamId` is what makes « référent » reachable at all: the server has
+// always accepted it and refused a lead with no team, and the screen had no
+// way to send one — so a campaign whose référent left could not promote
+// anybody in that team, only open a new account.
+// Correcting a team: its name and its perimeter, both frozen at creation
+// until now. The perimeter is the campaign's to draw — a team that widened
+// its own would draw batches from wherever it liked — so this is
+// coordination's route and the server refuses a lead on it.
+export const updateTeam = (
+  id: number,
+  name: string,
+  departments: string[],
+): Promise<{ id: number; name: string; departments: string }> =>
+  call(`team/group/${id}`, {
+    method: "POST",
+    body: { name, departments },
+  });
+
 export const changeRole = (
   email: string,
   role: string,
+  teamId?: number | null,
 ): Promise<{ email: string; role: string }> =>
   call(`team/account/${encodeURIComponent(email)}/role`, {
     method: "POST",
-    body: { role },
+    body: { role, team_id: teamId },
   });
 
 // -- Asking a campaign to open a local team ---------------------------------

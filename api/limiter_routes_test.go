@@ -50,6 +50,7 @@ var routeLimits = map[string]string{
 
 	"GET /api/team":                         "none: authenticated read",
 	"POST /api/team/group":                  "write_account",
+	"POST /api/team/group/{id}":             "write_account",
 	"POST /api/team/request":                "team_request_ip",
 	"POST /api/team/requests/{id}":          "write_account",
 	"POST /api/team/account":                "write_account",
@@ -149,6 +150,7 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 		"POST /api/mayors/{insee}/status":         "/api/mayors/01001/status",
 		"POST /api/batch":                         "/api/batch",
 		"POST /api/team/group":                    "/api/team/group",
+		"POST /api/team/group/{id}":               "/api/team/group/1",
 		"POST /api/team/account":                  "/api/team/account",
 		"POST /api/team/account/{email}/active":   "/api/team/account/qui@exemple.fr/active",
 		"POST /api/team/account/{email}/role":     "/api/team/account/qui@exemple.fr/role",

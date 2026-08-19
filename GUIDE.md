@@ -47,6 +47,13 @@ Ce que chacun voit :
   d'où viennent les lots qu'on vous distribue — pas de ce que vous avez le
   droit de lire ni d'enregistrer.
 
+La coordination corrige le nom et le périmètre d'une équipe depuis « Ma
+campagne » : ni l'un ni l'autre n'est figé à la création. Le périmètre reste
+sa décision — une équipe qui élargirait le sien piocherait où elle veut. Elle
+nomme aussi les rôles, référent compris : une équipe dont le référent s'en va
+n'a pas besoin d'un nouveau compte, quelqu'un de l'équipe est nommé à sa
+place.
+
 Un bénévole qui s'en va : le référent désactive son compte, l'effet est
 immédiat. Les fiches qu'il avait prises **sans encore rien y faire**
 retournent aussitôt dans le vivier commun — sinon elles resteraient

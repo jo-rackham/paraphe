@@ -17,6 +17,25 @@ export function norm(s: string | null | undefined): string {
   return t.replace(/\bSTE\b/g, "SAINTE").replace(/\bST\b/g, "SAINT");
 }
 
+/**
+ * The same name with its word boundaries gone: « Cram-Chaban » and
+ * « Cramchaban » are one commune, and `norm` cannot say so because it turns a
+ * hyphen into a SPACE.
+ *
+ * Derived FROM `norm` rather than beside it, so it inherits every rule that
+ * one has — the accents, the ligatures, and the ST → SAINT expansion, which
+ * only fires on word boundaries and would be lost if the separators went
+ * first (« ST-DENIS » would tighten to « STDENIS » and never become
+ * « SAINTDENIS »).
+ *
+ * It is a LAST exact tier, never a similarity: two names that differ by
+ * anything other than their separators still differ here. That is what makes
+ * it safe to prefer over the fuzzy fallback — measured on the real register,
+ * no two distinct communes of one department share a tight form.
+ */
+export const tight = (s: string | null | undefined): string =>
+  norm(s).replaceAll(" ", "");
+
 export const collapse = (s: string | null | undefined): string =>
   (s ?? "").replace(/\s+/g, " ").trim();
 

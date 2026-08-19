@@ -10,6 +10,7 @@ import {
   ratio,
   sexFromTitle,
   stripControls,
+  tight,
   titleCase,
 } from "./texte.ts";
 
@@ -111,5 +112,42 @@ describe("stripControls()", () => {
 
   it("collapses multiple spaces, non-breaking included", () => {
     expect(stripControls("4  route\u00a0 d'Aigre")).toBe("4 route d'Aigre");
+  });
+});
+
+// « Cram-Chaban » and « Cramchaban » are one commune, and `norm` cannot say
+// so: it turns a hyphen into a SPACE. That mattered far past the spelling —
+// reached by the fuzzy tier instead, the match is `approx`, and `approx`
+// disables the counter proof that concludes « successeur en place ».
+describe("the tight form of a name", () => {
+  it.each([
+    ["Cram-Chaban", "Cramchaban"],
+    ["L'Isle-en-Rigault", "Lisle-en-Rigault"],
+    ["Puka Puka", "Pukapuka"],
+    ["Saint-Denis", "St Denis"],
+    ["L'Haÿ-les-Roses", "LHay les Roses"],
+  ])("reads %s and %s as the same commune", (a, b) => {
+    expect(tight(a)).toBe(tight(b));
+  });
+
+  // It is an EXACT tier and not a similarity: anything other than a
+  // separator still separates. Otherwise it would be the fuzzy match it
+  // exists to avoid — and at 0.87 « Goncourt » already catches « Voncourt ».
+  it.each([
+    ["Goncourt", "Voncourt"],
+    ["Esnes-en-Argonne", "Gesnes-en-Argonne"],
+    ["Neuville", "Neuvillette"],
+  ])("keeps %s and %s apart", (a, b) => {
+    expect(tight(a)).not.toBe(tight(b));
+  });
+
+  // Derived FROM `norm`, so it inherits the ST → SAINT expansion — which
+  // only fires on word boundaries, and would be lost if the separators went
+  // first: « ST-DENIS » would tighten to « STDENIS » and never reach
+  // « SAINTDENIS ».
+  it("keeps the expansions norm makes on word boundaries", () => {
+    expect(tight("St-Denis")).toBe("SAINTDENIS");
+    expect(tight("Ste-Marie")).toBe("SAINTEMARIE");
+    expect(tight("Œting")).toBe("OETING");
   });
 });

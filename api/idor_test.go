@@ -373,6 +373,43 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				}
 			}},
 		},
+		"POST /api/team/group/{id}": {
+			{"a neighbouring campaign cannot rename this one's team", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostB, idorCoordB)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/team/group/%d", f.team1),
+					map[string]any{"name": "Renommée par le voisin"})
+				if code != http.StatusNotFound {
+					t.Fatalf("renaming the neighbour's team: %d, want 404 — the "+
+						"row is bounded by the campaign, so it does not exist here",
+						code)
+				}
+				// asserted on the CODE first and the row second: a handler that
+				// answers 400 writes nothing either, and « the neighbour is
+				// untouched » would then hold for a reason unrelated to any wall
+				if got := scalar[string](t, s,
+					"SELECT name FROM teams WHERE org_id=$1 AND id=$2",
+					f.orgA, f.team1); got != "Équipe 01" {
+					t.Fatalf("the team was renamed by another campaign: %q", got)
+				}
+			}},
+			{"a team lead cannot redraw their own team's perimeter", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorLead1)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/team/group/%d", f.team1),
+					map[string]any{"name": "Équipe 01", "departments": []string{"02"}})
+				if code != http.StatusForbidden {
+					t.Fatalf("a lead redrawing their own perimeter: %d, want 403 — "+
+						"the perimeter is what the campaign hands them, and a team "+
+						"that widens its own draws from wherever it likes", code)
+				}
+				if got := scalar[string](t, s,
+					"SELECT COALESCE(departments,'') FROM teams WHERE org_id=$1 AND id=$2",
+					f.orgA, f.team1); got != "01" {
+					t.Fatalf("the perimeter moved: %q", got)
+				}
+			}},
+		},
 		"POST /api/team/requests/{id}": {
 			{"a neighbouring campaign cannot decide this one's request", func(t *testing.T) {
 				c := f.signedInClient(t, idorHostB, idorCoordB)

@@ -178,6 +178,11 @@ func (s *Server) router() chi.Router {
 			r.With(guard(s.coordinationOnly),
 				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/group", s.routeCreateTeam)
+			// …and correcting one. Name and perimeter were frozen at
+			// creation, and neither is a decision that stays right.
+			r.With(guard(s.coordinationOnly),
+				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/group/{id}", s.routeUpdateTeam)
 			r.With(guard(s.managers),
 				guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/account", s.routeCreateAccount)

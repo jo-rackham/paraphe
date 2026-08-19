@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -137,6 +138,97 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyJSON(w, http.StatusCreated, map[string]any{
+		"id": id, "name": name, "departments": departments})
+}
+
+// POST /api/team/group/{id} — coordination corrects a team's name or its
+// perimeter.
+//
+// Both were frozen at creation, and neither is a decision that stays right: a
+// team accepted under the name its requester typed, a perimeter drawn before
+// a neighbouring department joined, a typo read by every volunteer of the
+// campaign on their own screen. The only way round was to open a second team
+// and move its people by hand — which loses the name, and leaves the first
+// one in every list.
+//
+// SAME RULES AS CREATION, and they are the rules for a reason: a name no
+// human can read reaches every screen of the campaign, and a perimeter of
+// labels no mayor bears is a team that draws zero cards for ever with nothing
+// downstream saying why. Written through the same helpers so the two doors
+// cannot drift apart — this is the third door onto a team's perimeter, and
+// the comment above records what happened when the second one skipped it.
+//
+// DELETION IS NOT HERE, deliberately. A team is named by the accounts that
+// belong to it, by the assignments it reserved and by every status its
+// members wrote — « enregistré par l'équipe Nord », which is the one
+// attribution a status carries across a campaign. Dropping the row would
+// leave those pointing at nothing, and the lever a campaign already has is
+// the right one: deactivate the accesses, which is immediate and gives the
+// untouched cards back to the pool.
+func (s *Server) routeUpdateTeam(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(pathParam(r, "id"))
+	if err != nil || id <= 0 {
+		// the same answer a team of another campaign gets: an identifier that
+		// is not a number names no team here either
+		errorJSON(w, http.StatusNotFound, "Cette équipe n'existe pas.")
+		return
+	}
+	var d teamRequest
+	if !readBody(w, r, &d) {
+		return
+	}
+	name := strings.TrimSpace(d.Name)
+	if !visible(name) {
+		errorJSON(w, http.StatusBadRequest, "Le nom de l'équipe est requis.")
+		return
+	}
+	if !legible(name) {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de l'équipe ne doit contenir ni retour à la ligne ni "+
+				"caractère invisible.")
+		return
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Le nom de l'équipe ne doit pas dépasser 200 caractères.")
+		return
+	}
+	departments, unknown, err := s.knownDepartments(r, d.Departments)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if unknown != "" {
+		errorJSON(w, http.StatusBadRequest,
+			"« %s » ne correspond à aucun département de la liste.", unknown)
+		return
+	}
+	req := scoped(r)
+	tag, err := s.tx(r).Exec(r.Context(),
+		"UPDATE teams SET name="+req.p(name)+", departments="+
+			req.p(departments)+" WHERE org_id=$1 AND id="+req.p(id),
+		req.args...)
+	if isUniqueViolation(err) {
+		errorJSON(w, http.StatusConflict,
+			"Une équipe nommée « %s » existe déjà.", name)
+		return
+	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	// A team of another campaign, or one that no longer exists: the same
+	// answer, because telling them apart would say whether the identifier
+	// names a team somewhere else.
+	if tag.RowsAffected() == 0 {
+		errorJSON(w, http.StatusNotFound, "Cette équipe n'existe pas.")
+		return
+	}
+	if err := s.commit(r); err != nil {
+		s.failure(w, err)
+		return
+	}
+	replyJSON(w, http.StatusOK, map[string]any{
 		"id": id, "name": name, "departments": departments})
 }
 

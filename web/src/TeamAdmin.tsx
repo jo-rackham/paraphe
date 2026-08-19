@@ -550,6 +550,14 @@ export function GestionEquipe({
     name: "",
     departments: [],
   });
+  // Which team's row is open for correction, and the draft in it. Held here
+  // and not in the row: the row is re-rendered by every reload, and a draft
+  // living there would be discarded by the refresh that follows a save.
+  const [editing, setEditing] = useState<number | null>(null);
+  const [edit, setEdit] = useState<{ name: string; departments: string[] }>({
+    name: "",
+    departments: [],
+  });
   // A REF, and it guards the route that OPENS AN ACCESS. Two clicks in the
   // same tick run two handlers built by the same render: two accounts, two
   // invitations, and `setCreated` keeps the last — so the first volunteer's
@@ -915,31 +923,63 @@ export function GestionEquipe({
                           trusts: promotion is coordination's, and stepping
                           someone down needs another coordinator to remain —
                           the server refuses the last one (409) */}
+                      {/* THE THREE ROLES, not a toggle between two. The
+                          button here swung coordination to volunteer and back
+                          and could never produce a lead, so a team whose lead
+                          left could not have another named — though the
+                          server has always accepted one, with the team it
+                          requires. Opening a second account for somebody who
+                          already had one was the only way round.
+
+                          A select and not three buttons: the roles are
+                          exclusive, the control says which one holds today,
+                          and a screen reader reads it as one named choice
+                          rather than enumerating verbs. */}
                       {coordination && (
                         <>
                           {" · "}
-                          <button
-                            type="button"
-                            className="lien"
-                            onClick={async () => {
-                              try {
-                                await API.changeRole(
-                                  c.email,
-                                  c.role === "coordination"
-                                    ? "volunteer"
-                                    : "coordination",
-                                );
-                                await reload();
-                              } catch (e) {
-                                onError(e);
-                              }
-                            }}
-                          >
-                            {c.role === "coordination"
-                              ? "rendre bénévole"
-                              : "promouvoir coordination"}
-                            <span className="sr-only"> {c.name}</span>
-                          </button>
+                          <label>
+                            <span className="sr-only">Rôle de {c.name}</span>
+                            <select
+                              value={c.role}
+                              onChange={async (e) => {
+                                const role = e.target.value;
+                                // A lead leads a TEAM, and the server refuses
+                                // one without: theirs if they have it, else
+                                // the first the campaign has. Named here
+                                // rather than left to the refusal, which
+                                // would read as « rôle inconnu » to whoever
+                                // just picked it from a list.
+                                const team =
+                                  role === "lead"
+                                    ? (c.team_id ?? data.teams[0]?.id)
+                                    : undefined;
+                                if (role === "lead" && team === undefined) {
+                                  onMessage({
+                                    tone: "erreur",
+                                    text:
+                                      "Un référent dirige une équipe : créez " +
+                                      "d'abord une équipe locale.",
+                                  });
+                                  return;
+                                }
+                                try {
+                                  await API.changeRole(c.email, role, team);
+                                  await reload();
+                                } catch (err) {
+                                  onError(err);
+                                }
+                              }}
+                            >
+                              {Object.entries(ROLES)
+                                .filter(([key]) => key !== "administration")
+                                .map(([key, label]) => (
+                                  <option key={key} value={key}>
+                                    {label}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
                         </>
                       )}
                     </>
@@ -1021,17 +1061,131 @@ export function GestionEquipe({
                   <th scope="col">Départements</th>
                   <th scope="col">Membres</th>
                   <th scope="col">Fiches</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {data.teams.map((g) => (
                   <tr key={g.id}>
-                    <td>{g.name}</td>
-                    <td className="gris">
-                      {g.departments || "toute la France"}
-                    </td>
-                    <td>{g.members}</td>
-                    <td>{g.reserved}</td>
+                    {/* NAME AND PERIMETER WERE FROZEN AT CREATION, and
+                        neither is a decision that stays right: a team
+                        accepted under the name its requester typed, a
+                        perimeter drawn before a neighbouring department
+                        joined, a typo every volunteer of the campaign reads.
+                        The way round was a second team and a hand migration,
+                        which loses the name and leaves the first in the
+                        list. */}
+                    {editing === g.id ? (
+                      <>
+                        <td>
+                          <label>
+                            <span className="sr-only">
+                              Nom de l'équipe {g.name}
+                            </span>
+                            <input
+                              type="text"
+                              value={edit.name}
+                              onChange={(e) =>
+                                setEdit({ ...edit, name: e.target.value })
+                              }
+                            />
+                          </label>
+                        </td>
+                        <td>
+                          <label>
+                            <span className="sr-only">
+                              Départements de {g.name}
+                            </span>
+                            <select
+                              multiple
+                              size={4}
+                              value={edit.departments}
+                              onChange={(e) =>
+                                setEdit({
+                                  ...edit,
+                                  departments: [
+                                    ...e.target.selectedOptions,
+                                  ].map((o) => o.value),
+                                })
+                              }
+                            >
+                              {data.departments.map((d) => (
+                                <option key={d} value={d}>
+                                  {d}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </td>
+                        <td>{g.members}</td>
+                        <td>{g.reserved}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="lien"
+                            onClick={async () => {
+                              try {
+                                await API.updateTeam(
+                                  g.id,
+                                  edit.name,
+                                  edit.departments,
+                                );
+                                setEditing(null);
+                                await reload();
+                              } catch (err) {
+                                onError(err);
+                              }
+                            }}
+                          >
+                            enregistrer
+                            <span className="sr-only"> {g.name}</span>
+                          </button>
+                          {" · "}
+                          <button
+                            type="button"
+                            className="lien"
+                            onClick={() => {
+                              // the button unmounts with the row's edit
+                              // controls: hand focus back before it goes
+                              focusContenu();
+                              setEditing(null);
+                            }}
+                          >
+                            annuler
+                            <span className="sr-only"> {g.name}</span>
+                          </button>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{g.name}</td>
+                        <td className="gris">
+                          {g.departments || "toute la France"}
+                        </td>
+                        <td>{g.members}</td>
+                        <td>{g.reserved}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="lien"
+                            onClick={() => {
+                              setEdit({
+                                name: g.name,
+                                departments: g.departments
+                                  ? g.departments.split(";")
+                                  : [],
+                              });
+                              setEditing(g.id);
+                            }}
+                          >
+                            modifier
+                            <span className="sr-only"> {g.name}</span>
+                          </button>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
