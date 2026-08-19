@@ -77,6 +77,34 @@ export function parseRecords(text: string, separator = ";"): Row[] {
   });
 }
 
+/**
+ * NO APOSTROPHE IS PREFIXED HERE, and that is a decision rather than an
+ * oversight — it is the first thing anyone reaching for « CSV injection »
+ * will want to add.
+ *
+ * Ten cells of the generated files start with « + »: the Polynesian and New
+ * Caledonian town halls, whose directory numbers read « +689 40 92 92 19 ».
+ * Excel parses a leading `+` as a formula and shows `#NAME?`, so two mayors of
+ * file 01 and eight of file 04 display wrong in a spreadsheet.
+ *
+ * The standard remedy makes it WORSE here. These files are not a report, they
+ * are an interchange format with three machine readers — the Go import that
+ * fills `mayors` at startup, the account-less version that loads them off
+ * `web/public/donnees/`, and the mass mailing. An apostrophe written here
+ * reaches all three: the database, and every card a volunteer opens, would
+ * carry « '+689 40 92 92 19 ». A visible `#NAME?` in one program is a cheaper
+ * failure than a wrong telephone number shown as if it were right — and the
+ * one job file 01 exists for, the mail merge, reads the CSV and is unaffected.
+ *
+ * Quoting is not an answer either: Excel evaluates a quoted field the same
+ * way, and this end cannot verify that claim by running Excel, which is
+ * reason enough not to ship a fix resting on it.
+ *
+ * What would change the decision: a value starting with `=` or `@` appearing
+ * in the sources. Nothing does today (measured over both files) — those come
+ * from a public government directory, and a hostile one there would be worth
+ * refusing at the door rather than escaping at every writer.
+ */
 function escapeField(value: unknown, separator: string): string {
   const s = value === null || value === undefined ? "" : String(value);
   // Python's QUOTE_MINIMAL: separator, quote or line ending

@@ -72,40 +72,21 @@ whenBuilt("the mass-mailing file", () => {
   });
 
   // The "found by name" fallback only holds when the signed commune said
-  // nothing. When it is in the RNE with another mayor, a departmental
-  // namesake wins: 12 mayors thanked for an endorsement that is not
-  // theirs.
-  it('only invokes "renamed/merged commune" when it truly is', () => {
-    const rne = parseRecords(
-      readFileSync(join(ROOT, "data", "raw", "rne_maires.csv"), "utf8"),
-    );
-    const byDept = new Map<string, Map<string, string>>();
-    for (const r of rne) {
-      const values = Object.values(r);
-      const dept = norm(values[1] || values[3]);
-      let communes = byDept.get(dept);
-      if (!communes) {
-        communes = new Map();
-        byDept.set(dept, communes);
-      }
-      communes.set(norm(values[5]), values[4]);
-    }
-    const suspicious = targetRows()
-      .filter((r) => r.matching_confidence.startsWith("retrouvé par nom"))
-      .filter((r) => {
-        const insee = byDept.get(norm(r.department))?.get(norm(r.commune));
-        // the letter's commune exists in the RNE but under ANOTHER INSEE
-        // code: it is therefore neither a rename nor a merger
-        return insee !== undefined && insee !== r.insee_code;
-      });
-    expect(suspicious.map((r) => `${r.insee_code} ${r.last_name}`)).toEqual([]);
-  });
-
-  // A commune absent from the RNE is not a merged commune: 912 communes
-  // have a town hall and no mayor row. Invoking the fallback there thanked
-  // Régine THOMAS, mayor of Robécourt, for an endorsement signed 130 km
-  // away in Le Puid — a commune that never merged and still owns INSEE
-  // 88362.
+  // nothing: when it is in the RNE under another mayor, a departmental
+  // namesake wins and 12 mayors are thanked for an endorsement that is not
+  // theirs. A commune absent from the RNE is not thereby a merged commune
+  // either — 912 communes have a town hall and no mayor row. Invoking the
+  // fallback there thanked Régine THOMAS, mayor of Robécourt, for an
+  // endorsement signed 130 km away in Le Puid, a commune that never merged
+  // and still owns INSEE 88362.
+  //
+  // THE SIGNED COMMUNE IS THE WHOLE POINT, and it is why there is one test
+  // here and not two. Asking the RNE which INSEE belongs to the commune file
+  // 01 NAMES is a question whose answer is already in the row: that column is
+  // the RNE's own name for that INSEE, so the lookup returns the row it
+  // started from. Measured on the real files — 17 rows reach that filter, 17
+  // look themselves up, and none can come back different. A test shaped that
+  // way is green whatever the crossing does.
   it("does not invoke a merger when the signed commune still exists", () => {
     // The SIGNED commune is the whole point, and file 01 does not carry
     // it — it names the commune the mayor serves today. It has to come
