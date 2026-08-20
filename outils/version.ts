@@ -9,7 +9,7 @@
 // Rewritten line by line on purpose: parsing and re-serialising Chart.yaml
 // would drop every comment in it.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ROOT } from "./config.ts";
@@ -51,7 +51,15 @@ export function writeVersion(version: string): string[] {
     const src = read(path);
     const out = apply(src);
     if (out === src) return;
-    writeFileSync(join(ROOT, path), out, "utf8");
+    // Write-then-rename, because package.json has READERS at any moment:
+    // every `node` process resolves module formats through it, including the
+    // ones the test suite spawns while the version tests rewrite 9.9.9 in a
+    // parallel worker. A plain write let such a reader see a torn file —
+    // « Invalid package config », in CI, in whichever test spawned node at
+    // the wrong instant. A rename on the same filesystem is atomic: readers
+    // get the old file or the new one, never half.
+    writeFileSync(join(ROOT, `${path}.tmp`), out, "utf8");
+    renameSync(join(ROOT, `${path}.tmp`), join(ROOT, path));
     changed.push(path);
   };
   for (const path of [ROOT_PACKAGE, WEB_PACKAGE]) {
