@@ -163,6 +163,13 @@ function timestamp(): string {
  * `onabort`, not `onerror`, and a promise waiting on the other two never
  * settles). The requests are issued from `onsuccess`, synchronously, or the
  * transaction commits out from under the second one.
+ *
+ * `decide` THROWING is a different thing and is not a refusal: IndexedDB
+ * aborts the transaction and drops the message, so the caller gets an
+ * `AbortError` and the screen shows that word. It takes a stored record this
+ * application cannot write — `notes` that is not an array — and such a record
+ * breaks the card's own render before reaching here, so nothing guards
+ * against it. `validTracking` is what refuses one at the door, on import.
  */
 function reviseTracking(
   db: IDBDatabase,

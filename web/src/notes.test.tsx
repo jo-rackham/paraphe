@@ -510,6 +510,45 @@ describe("removing a line", () => {
     expect(select().value).toBe("email_sent");
   });
 
+  // A REFUSAL IS NOT A ROLL-BACK. The pick is dropped BEFORE the round trip
+  // so that no frame shows the withdrawn status — but a removal that is
+  // refused moves the card nowhere, and the pick was destroyed for nothing:
+  // the select silently back to what the card already carried, and the next
+  // « Enregistrer » filing THAT. Reachable on a 404 (somebody removed the
+  // line first), a 409, a network failure, and in browser mode on the very
+  // refusal that keeps two tabs from overwriting each other.
+  it("gives the pick back when the removal is refused", async () => {
+    const filed: string[] = [];
+    await render({
+      noteRights: () => ({ edit: false, delete: true }),
+      onDeleteNote: async () => {
+        throw new Error("Aucune note à supprimer ici.");
+      },
+      onStatus: async (s) => {
+        filed.push(s);
+      },
+    });
+    const select = () => container.querySelector("select")!;
+    await act(async () => {
+      const s = select();
+      s.value = "email_sent";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+    await flush();
+
+    expect(text()).toContain("Aucune note à supprimer ici.");
+    expect(
+      select().value,
+      "the card stood still and the choice was taken anyway",
+    ).toBe("email_sent");
+    await click("Enregistrer");
+    await flush();
+    expect(filed).toEqual(["email_sent"]);
+  });
+
   it("shows a refusal and keeps the line", async () => {
     await wired(async () => {
       throw new Error("Aucune note à supprimer ici.");

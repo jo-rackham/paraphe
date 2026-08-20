@@ -304,18 +304,35 @@ describe("revising a note", () => {
   });
 
   // The same window, one act over: a removal racing a fresh outcome being
-  // recorded. `saveTracking` reads and writes in two transactions too, so the
-  // note it prepends and the note the removal takes away are decided on the
-  // same array — and whichever writes last decides alone.
+  // recorded. `saveTracking` read and wrote in two transactions too, so the
+  // note it prepends and the note the removal takes away were decided on the
+  // same array — and whichever wrote last decided alone.
+  //
+  // ASSERTED ON THE GUARANTEE, NOT ON WHO WINS. Which of the two reaches the
+  // store first is scheduling, not design: written « the removal landed », the
+  // test bakes in one interleaving and goes red the day another one happens —
+  // a real browser, another version of the fake. What is owed is that
+  // recording an outcome always lands, that a removal either lands or is
+  // REFUSED IN FRENCH, and that the two answers agree with what is stored.
   it("lets no concurrent write lose a note", async () => {
     const e = await three();
-    await Promise.allSettled([
+    const [removal, record] = await Promise.allSettled([
       DB.deleteNote("01022", 0, e.notes[0]),
       DB.saveTracking("01022", "promised", "pendant ce temps"),
     ]);
     const notes = (await DB.loadTracking())["01022"].notes.map((n) => n.note);
+
+    expect(record.status, "recording an outcome refuses nothing").toBe(
+      "fulfilled",
+    );
     expect(notes, "the fresh outcome was lost").toContain("pendant ce temps");
-    expect(notes, "the removal was undone").not.toContain("refus");
+    if (removal.status === "rejected") {
+      expect(String(removal.reason)).toMatch(/a changé depuis son affichage/);
+    }
+    expect(
+      notes.includes("refus"),
+      "the line is gone and the removal was told it failed, or the other way round",
+    ).toBe(removal.status === "rejected");
   });
 
   it("refuses a position that is not there at all", async () => {

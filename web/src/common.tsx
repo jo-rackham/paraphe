@@ -1506,7 +1506,16 @@ export function Fiche({
     // reverting, so the next « Enregistrer » filed the status the card
     // already carried. Correcting words moves the card nowhere.
     //
-    // BEFORE the round trip, so there is no frame in between showing it.
+    // BEFORE the round trip, so there is no frame in between showing it —
+    // AND GIVEN BACK IF THE ROUND TRIP REFUSES, because a refusal is not a
+    // roll-back. Dropped on the way out and never restored, a removal the
+    // server turned down — a 404 because somebody removed the line first, a
+    // 409, a connection that dropped, and in browser mode the very refusal
+    // that keeps two tabs from overwriting each other — took the volunteer's
+    // choice with it, silently, on a card that had not moved at all.
+    // Restored through the SETTER, so a choice made while the request was in
+    // flight wins over the one being handed back.
+    const dropped = rollsBack ? picked : null;
     if (rollsBack) setPicked(null);
     setNotesBusy(true);
     const restore = holdFocusThrough();
@@ -1515,6 +1524,7 @@ export function Fiche({
       setActiveNote(null);
       setSaved(done);
     } catch (e) {
+      setPicked((since) => since ?? dropped);
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
       noteSubmitted();

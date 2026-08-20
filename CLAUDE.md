@@ -1477,6 +1477,15 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   then fixed a typo in an older line lost the choice to the fix — silently,
   the select simply reverting, so the next « Enregistrer » filed the status
   the card already carried.
+  **AND GIVEN BACK IF THE ROUND TRIP REFUSES: a refusal is not a roll-back.**
+  Dropped on the way out and never restored, a removal the server turned down
+  — a 404 because somebody removed the line first, a 409, a connection that
+  dropped, and in browser mode the very refusal that keeps two tabs from
+  overwriting each other — took the choice with it on a card that had not
+  moved at all. Everything else in this interface clears a field AFTER the
+  await and only on success, which is why this is the only site that owes the
+  restoring; and it restores through the SETTER, so a choice made while the
+  request was in flight wins over the one being handed back.
   **And the pick is keyed on the PERSON as well as on the status.** Team mode
   clears its card before fetching the next, so the card unmounts between two
   mayors; BROWSER mode derives the card synchronously from the list it already
