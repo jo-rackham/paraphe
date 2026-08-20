@@ -30,7 +30,16 @@ import {
 } from "../noyau/messages.ts";
 import { loadConfig, loadTemplates, ROOT } from "./config.ts";
 
-const OUT = join(ROOT, "out", "messages");
+// The input list and the output directory follow the same contract as the
+// API's PARAPHE_CSV: an environment override, a sensible default. It is what
+// lets the functional test run the real script against a synthetic list in a
+// temporary directory, without touching out/.
+const OUT =
+  (process.env.PARAPHE_MESSAGES_DIR ?? "").trim() ||
+  join(ROOT, "out", "messages");
+const TARGETS =
+  (process.env.PARAPHE_TARGETS_CSV ?? "").trim() ||
+  join(ROOT, "out", "01_maires_cibles_prioritaires.csv");
 
 const PAGE = (
   sender: string,
@@ -104,10 +113,33 @@ export function main(): void {
   mkdirSync(OUT, { recursive: true });
   const { campaign: c, phoneOutreach } = loadConfig();
   const engine = createEngine(loadTemplates());
-  const file = join(ROOT, "out", "01_maires_cibles_prioritaires.csv");
-  const text = readFileSync(file, "utf8");
+  const text = readFileSync(TARGETS, "utf8");
   const mayors = parseRecords(text) as Mayor[];
   const sourceCols = parseRows(text)[0];
+  // THE MAILING WRITES TO FILE 01 AND NOTHING ELSE — ~1,960 endorsers, never
+  // the 34,826 of the full base, and never files 02/03, whose people are the
+  // ones « vous avez parrainé » would LIE to. With the path overridable, that
+  // invariant has to live in the FILE's shape, not in the path. File 01 is
+  // the only build output carrying BOTH `small_candidate_endorsements`
+  // (which file 04 lacks) and `commune_2026` (which files 02 and 03 lack —
+  // build.ts strips it with the rest of notInScope); `rank` is refused on
+  // top, being file 04's own signature.
+  if (
+    !sourceCols.includes("small_candidate_endorsements") ||
+    !sourceCols.includes("commune_2026") ||
+    sourceCols.includes("rank")
+  ) {
+    throw new Error(
+      `${TARGETS} n'a pas la forme du fichier 01 (parrains uniquement) : ` +
+        "le publipostage n'écrit qu'aux maires qui ont déjà parrainé et " +
+        "sont toujours en poste. Vérifiez PARAPHE_TARGETS_CSV — la base " +
+        "complète, les anciens parrains (02), les non-appariés (03) et " +
+        "tout autre fichier sont refusés.",
+    );
+  }
+  // Said out loud BEFORE anything is generated: what is about to be posted,
+  // and from which file — the operator's one chance to notice a stale list.
+  console.log(`source : ${TARGETS} (${mayors.length} maires)`);
   // THE RETURN ADDRESS IS THE SENDER'S, and the sender is whoever posts the
   // letter. Built from `candidat`, the envelope said the candidate while the
   // body said « je vous écris au nom de » that same candidate and signed with
