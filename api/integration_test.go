@@ -2387,6 +2387,16 @@ func TestATeamIdBeyondInt4IsRefused(t *testing.T) {
 				id, code, body)
 		}
 	}
+	// The same column reached through a ROUTE PARAMETER: correcting a team.
+	// An identifier past int4 names no team, and the answer is the not-found
+	// every other nonexistent team gets — never the encode failure.
+	code, body := c.call(http.MethodPost,
+		fmt.Sprintf("/api/team/group/%d", int64(math.MaxInt32)+1),
+		map[string]any{"name": "Équipe", "departments": []string{}})
+	if code != http.StatusNotFound {
+		t.Errorf("update of team %d: %d %v — expected the plain 404",
+			int64(math.MaxInt32)+1, code, body)
+	}
 }
 
 // The one endpoint another origin may read. It exists so a volunteer of a

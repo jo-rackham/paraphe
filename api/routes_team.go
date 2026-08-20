@@ -137,8 +137,13 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// the `;`-joined shape, as the row holds it and as every other reader of
+	// a team gets it (/api/team, updateTeam) — one route answering a slice
+	// where the others answer text is a drift nobody sees until a client
+	// reads it
 	replyJSON(w, http.StatusCreated, map[string]any{
-		"id": id, "name": name, "departments": departments})
+		"id": id, "name": name,
+		"departments": strings.Join(departments, ";")})
 }
 
 // POST /api/team/group/{id} — coordination corrects a team's name or its
@@ -167,7 +172,10 @@ func (s *Server) routeCreateTeam(w http.ResponseWriter, r *http.Request) {
 // untouched cards back to the pool.
 func (s *Server) routeUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(pathParam(r, "id"))
-	if err != nil || id <= 0 {
+	// Bounded to int4 like the team_id fields one route over: teams.id is
+	// INTEGER, and beyond its range pgx cannot even encode the argument —
+	// « erreur interne » for an identifier that simply names no team.
+	if err != nil || id <= 0 || id > math.MaxInt32 {
 		// the same answer a team of another campaign gets: an identifier that
 		// is not a number names no team here either
 		errorJSON(w, http.StatusNotFound, "Cette équipe n'existe pas.")
@@ -203,11 +211,15 @@ func (s *Server) routeUpdateTeam(w http.ResponseWriter, r *http.Request) {
 			"« %s » ne correspond à aucun département de la liste.", unknown)
 		return
 	}
-	req := scoped(r)
+	// A literal statement with positional arguments, the shape every other
+	// walled UPDATE here takes. The departments are joined exactly as
+	// insertTeam writes them — the column is `;`-separated text, and a raw
+	// []string is a value pgx cannot encode into it. Concatenated through
+	// p() instead, the join's `;` reads as a statement boundary to the
+	// isolation canary and the WHERE stops bounding the UPDATE it belongs to.
 	tag, err := s.tx(r).Exec(r.Context(),
-		"UPDATE teams SET name="+req.p(name)+", departments="+
-			req.p(departments)+" WHERE org_id=$1 AND id="+req.p(id),
-		req.args...)
+		"UPDATE teams SET name=$3, departments=$4 WHERE org_id=$1 AND id=$2",
+		scopeOrg(r), id, name, strings.Join(departments, ";"))
 	if isUniqueViolation(err) {
 		errorJSON(w, http.StatusConflict,
 			"Une équipe nommée « %s » existe déjà.", name)
@@ -228,8 +240,10 @@ func (s *Server) routeUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	// the shape the row now holds, and the one the client's type reads
 	replyJSON(w, http.StatusOK, map[string]any{
-		"id": id, "name": name, "departments": departments})
+		"id": id, "name": name,
+		"departments": strings.Join(departments, ";")})
 }
 
 type accountRequest struct {
