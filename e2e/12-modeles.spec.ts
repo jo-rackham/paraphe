@@ -107,8 +107,13 @@ test.describe
       );
       await save(page);
       // named, and naming the audience: told only that the placeholder is
-      // unknown, whoever pasted it looks for a typo in a word spelt correctly
-      await expect(page.getByText(/annee_recente/)).toBeVisible();
+      // unknown, whoever pasted it looks for a typo in a word spelt correctly.
+      // The ALERT, not the page: the refused draft still sits in the
+      // textarea, and CI's engine matches a textarea by its value — the
+      // page-wide locator resolved to both and failed on the ambiguity.
+      await expect(
+        page.getByRole("alert").filter({ hasText: "annee_recente" }),
+      ).toBeVisible();
 
       // and NOTHING was stored — read back from a fresh load, not inferred
       // from the refusal
