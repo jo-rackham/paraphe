@@ -7,6 +7,7 @@ import pg from "pg";
 import {
   API_ORIGIN,
   API_PORT,
+  appDatabaseUrl,
   BASE_DOMAIN,
   COORDINATION,
   DB_NAME,
@@ -75,14 +76,6 @@ async function prepareDatabase() {
   } finally {
     await created.end();
   }
-}
-
-function appDsn() {
-  const url = new URL(adminDsn);
-  url.username = DB_ROLE;
-  url.password = DB_PASSWORD;
-  url.pathname = `/${DB_NAME}`;
-  return url.toString();
 }
 
 /**
@@ -198,7 +191,7 @@ export default async function globalSetup() {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
-      PARAPHE_DATABASE_URL: appDsn(),
+      PARAPHE_DATABASE_URL: appDatabaseUrl(),
       PARAPHE_CSV: join(dataDir, "04_base_complete.csv"),
       PARAPHE_WEB_DIR: join(ROOT, "web", "dist"),
       PARAPHE_BROWSER_WEB_DIR: join(ROOT, "web", "dist-navigateur"),
@@ -211,6 +204,15 @@ export default async function globalSetup() {
       PARAPHE_INSTANCE_ADMIN_EMAIL: INSTANCE_ADMIN.email,
       PARAPHE_INSTANCE_ADMIN_PASSWORD: INSTANCE_ADMIN.password,
       PARAPHE_SECRET_KEY: "e2e-session-key-0123456789abcdef0123456789abcdef",
+      // The harness stands where production's ingress does: a trusted hop
+      // whose X-Forwarded-For is believed. It is what lets a spec file bring
+      // its own SOURCE (a TEST-NET address in extraHTTPHeaders) — the
+      // per-source sign-in ceiling is counted and never refunded, the suite
+      // shares one loopback, and its sixty-odd journeys already spend that
+      // budget whole. A file that signs in without declaring a source spends
+      // from the shared one, and the file that crosses the ceiling is not
+      // the file that gets the 429.
+      PARAPHE_TRUSTED_PROXIES: "127.0.0.1/32,::1/128",
       // Passed through only when the run was given a store. Half of these
       // would fail the API's start, which is the point of that refusal —
       // so it is all five or none, exactly as an operator faces it.

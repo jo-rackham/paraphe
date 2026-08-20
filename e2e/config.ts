@@ -50,6 +50,20 @@ export const DB_ROLE = "paraphe_e2e_app";
 export const DB_PASSWORD = "paraphe_e2e";
 
 /**
+ * The application's own DSN, as the API under test receives it. Exported for
+ * the one journey that needs the database directly: suspending a campaign,
+ * a state no route sets — an operator types it, so the spec types it too.
+ */
+export function appDatabaseUrl(): string {
+  const admin = (process.env.PARAPHE_TEST_DATABASE_URL ?? "").trim();
+  const url = new URL(admin);
+  url.username = DB_ROLE;
+  url.password = DB_PASSWORD;
+  url.pathname = `/${DB_NAME}`;
+  return url.toString();
+}
+
+/**
  * The object store holding the campaign logos, when one was given —
  * `task garage` prints exactly these, prefixed PARAPHE_TEST_MEDIA_*.
  *

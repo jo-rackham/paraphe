@@ -138,4 +138,44 @@ test.describe
       await page.getByRole("button", { name: "déconnexion" }).click();
       await signIn(page, ORIGIN, OWNER.email, drawn);
     });
+
+    // A typo in the CURRENT password answers 403 and never 401: this
+    // interface reads a 401 from an authenticated route as « your session is
+    // gone » and throws the volunteer back to the sign-in form — out of a
+    // live session, work and all, for one mistyped field. The old password
+    // still opening afterwards is proved in Go, where it costs no page load.
+    test.describe(() => {
+      // its own source: the journeys above live on the suite's shared one,
+      // which is spent to the edge — see global-setup, PARAPHE_TRUSTED_PROXIES
+      test.use({ extraHTTPHeaders: { "X-Forwarded-For": "192.0.2.11" } });
+
+      test("a wrong current password refuses without ending the session", async ({
+        page,
+      }) => {
+        await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+        await openTab(page, "Mon profil");
+        const form = page.locator("form", {
+          hasText: "Changer mon mot de passe",
+        });
+        await form.getByLabel("Mot de passe actuel").fill("pas-le-bon-du-tout");
+        await form
+          .getByLabel("Nouveau mot de passe", { exact: true })
+          .fill(CHOSEN);
+        await form.getByLabel("Répétez le nouveau mot de passe").fill(CHOSEN);
+        await form
+          .getByRole("button", { name: "Changer mon mot de passe" })
+          .click();
+
+        // the refusal, in the form's own slot beside the field it answers —
+        // and the session LIVES: still signed in, a fresh request still served
+        await expect(
+          form.getByText("Mot de passe actuel incorrect."),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "déconnexion" }),
+        ).toBeVisible();
+        await openTab(page, "Les maires");
+        await expect(page.locator("table button.lien").first()).toBeVisible();
+      });
+    });
   });

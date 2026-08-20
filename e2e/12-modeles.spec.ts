@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 
 import { COORDINATION, campaignOrigin, FIRST_CAMPAIGN } from "./config.ts";
-import { openManagement, openTab, signIn } from "./helpers.ts";
+import { openFirstCard, openManagement, signIn } from "./helpers.ts";
 
 // A campaign rewrites the texts it sends, and the card a volunteer opens is
 // where that has to show. The unit tests prove the layering and the Go tests
@@ -30,20 +30,14 @@ const save = async (page: Page) => {
 /**
  * The printed letter of the first card on the dashboard.
  *
- * The batch is taken here if this account holds none, so the file does not
- * depend on which earlier journey happened to reserve one. It DOES still
- * depend on the campaign being configured, which `02-campaign` does — the
- * same order `06-messages` relies on, and the reason both read a card rather
- * than an error message.
+ * The batch is taken by `openFirstCard` if this account holds none, so the
+ * file does not depend on which earlier journey happened to reserve one. It
+ * DOES still depend on the campaign being configured, which `02-campaign`
+ * does — the same order `06-messages` relies on, and the reason both read a
+ * card rather than an error message.
  */
 const letterOfACard = async (page: Page): Promise<string> => {
-  await openTab(page, "Mon tableau");
-  const cards = page.locator("table button.lien");
-  if ((await cards.count()) === 0) {
-    await page.getByRole("button", { name: "Prendre un lot" }).click();
-    await expect(cards.first()).toBeVisible();
-  }
-  await cards.first().click();
+  await openFirstCard(page);
   await page.getByText("📮 Courrier").click();
   return page.locator("pre.lettre").innerText();
 };

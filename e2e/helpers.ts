@@ -22,6 +22,29 @@ export async function openTab(page: Page, name: string) {
 }
 
 /**
+ * Opens the first card of « Mon tableau », taking a batch first if this
+ * account holds none.
+ *
+ * The COUNT waits for the dashboard's DATA — the « Prendre un lot » button
+ * mounts with it. Counted during « Chargement… », an account that already
+ * held cards read as holding none and every caller took ANOTHER batch:
+ * measured at sixty cards on one account, which drained the department pools
+ * every later journey drew its batches from.
+ */
+export async function openFirstCard(page: Page) {
+  await openTab(page, "Mon tableau");
+  await expect(
+    page.getByRole("button", { name: "Prendre un lot" }),
+  ).toBeVisible();
+  const cards = page.locator("table button.lien");
+  if ((await cards.count()) === 0) {
+    await page.getByRole("button", { name: "Prendre un lot" }).click();
+  }
+  await expect(cards.first()).toBeVisible();
+  await cards.first().click();
+}
+
+/**
  * The management screen, whose tab is NAMED FOR THE ROLE that opens it:
  * « Ma campagne » for a coordination, which has no team and holds the
  * campaign, « Mon équipe » for a référent, who leads one.
@@ -89,9 +112,20 @@ export function linkIn(mail: Received): string {
  * what a recipient's browser is, and what makes the visit a real document
  * load. Reusing the page would be a FRAGMENT navigation from the URL the
  * first visit scrubbed: same document, no reload, nothing re-read.
+ *
+ * `headers` is the caller's SOURCE. A context opened by hand inherits
+ * nothing from `test.use({ extraHTTPHeaders })`, so a spec file that lives
+ * on its own X-Forwarded-For address (see global-setup) must pass it here —
+ * left out, the redemption spends from the shared budget in silence.
  */
-export async function visit(browser: Browser, link: string) {
-  const context = await browser.newContext();
+export async function visit(
+  browser: Browser,
+  link: string,
+  headers?: Record<string, string>,
+) {
+  const context = await browser.newContext(
+    headers ? { extraHTTPHeaders: headers } : {},
+  );
   const page = await context.newPage();
   await page.goto(link);
   return { page, context };

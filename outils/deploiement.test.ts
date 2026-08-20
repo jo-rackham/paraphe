@@ -277,6 +277,71 @@ describe("the deployment files", () => {
     ).toEqual([]);
   });
 
+  // The sign-in ceiling the whole e2e suite shares. POST /api/session and
+  // /api/session/link/redeem are counted per SOURCE and never refunded
+  // (api/limiter.go, limitSignInIP: 60 per 10 minutes), the suite is one
+  // loopback address, and the files written before the rule spend that
+  // budget nearly whole — 12-modeles started failing on a sign-in that a
+  // NEW file had added, two screens away from the addition.
+  //
+  // Two halves. A file numbered 13 or higher brings its own source
+  // (X-Forwarded-For, believed because global-setup declares the harness a
+  // trusted proxy the way production declares its ingress) or opens no
+  // session at all. The files before the rule are pinned at their measured
+  // spend, so a sign-in added there goes red HERE with the remedy named,
+  // instead of a 429 in whichever later spec crosses the ceiling.
+  //
+  // Assumed limit, stated: the count is of CALL SITES of the helpers and of
+  // request-level session posts — a sign-in typed inline into the form (the
+  // apex journeys do it) is not seen. The ratchet catches the common way a
+  // sign-in gets added, not every way.
+  it("keep the e2e suite's shared sign-in budget where it stands", () => {
+    const opensASession = [
+      /\bsignIn\(/g, // helpers.signIn — POST /api/session
+      /\bvisit\(/g, // helpers.visit — redeems a link, same ceiling
+      /\.post\([^)]*\/api\/session["'`]/g, // request-level sign-in
+      /\.post\([^)]*\/api\/session\/link\/redeem["'`]/g,
+    ];
+    let shared = 0;
+    for (const name of readdirSync(join(ROOT, "e2e"))) {
+      if (!name.endsWith(".spec.ts")) continue;
+      const text = readFileSync(join(ROOT, "e2e", name), "utf8");
+      const events = opensASession.reduce(
+        (n, p) => n + [...text.matchAll(p)].length,
+        0,
+      );
+      const number = Number(/^(\d+)/.exec(name)?.[1] ?? "0");
+      if (number >= 13) {
+        // The WIRING, not the words — judged on the CODE, comments stripped:
+        // a TODO naming the header beside a test.use that wires some OTHER
+        // header spends the shared budget all the same, and the 429 lands
+        // in a NEIGHBOURING file. Assumed limit: a header string wired
+        // nowhere (a SOURCE const never passed) still reads as wired —
+        // requiring adjacency would refuse the extracted-const pattern the
+        // real files use.
+        const code = text.replace(/\/\/.*$/gm, "");
+        const wired =
+          /test\.use\(\s*\{[^}]*extraHTTPHeaders/.test(code) &&
+          code.includes("X-Forwarded-For");
+        expect(
+          wired || events === 0,
+          `${name} opens sessions from the SHARED source: give the file its ` +
+            "own X-Forwarded-For source via test.use({ extraHTTPHeaders }) " +
+            "(see e2e/global-setup.ts, PARAPHE_TRUSTED_PROXIES)",
+        ).toBe(true);
+        continue;
+      }
+      shared += events;
+    }
+    expect(
+      shared,
+      "a session-opening call was added to the pre-rule files (01-12), " +
+        "whose shared source is already near the 60-per-10-minutes ceiling: " +
+        "put the journey in a file that declares its own X-Forwarded-For " +
+        "source instead (see e2e/global-setup.ts)",
+    ).toBeLessThanOrEqual(56);
+  });
+
   it("lint with the configuration the repository declares", () => {
     const ci = readFileSync(
       join(ROOT, ".github", "workflows", "ci.yml"),
