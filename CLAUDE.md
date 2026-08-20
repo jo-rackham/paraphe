@@ -1495,6 +1495,21 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   is, a pick made on one stood on the next and « Enregistrer » filed it
   against the wrong person. It is the trap the rewritten email already paid
   for, one field over: keying on the render alone missed the identity.
+  **EVERYTHING THAT BELONGS TO A CARD LEAVES WITH IT**, and the `shown` block
+  is where the list of what that is lives — whoever adds a piece of per-card
+  state adds it there. Keying the PICK on the person and stopping was the
+  same defect asked one question short: the note EDITOR stayed open over the
+  next mayor's history with the first one's text still in the box, so
+  « Enregistrer la note » rewrote the line at the same POSITION on the card
+  now on screen, with words written about somebody else; a « Supprimer cette
+  note ? » left standing removed that line outright. Measured, both. What the
+  screen SAID goes too — « Enregistré. » over a mayor nobody has written to,
+  or a red alert about a refusal on somebody else, is read as this card's.
+  On WHO alone, not on the render: an editor must not close because the
+  campaign changed its logo. What stays is what belongs to a REQUEST IN
+  FLIGHT — the busy flags and the re-entry guards — and an unsaved
+  correction is abandoned by leaving the card, which is what « Annuler »
+  does.
   **A save is finished when the note field clears, not when the history
   shows the line**: the line is drawn from state written INSIDE the awaited
   call, while the handler goes on to clear the field and say « Enregistré. ».

@@ -303,10 +303,31 @@ describe("revising a note", () => {
     );
   });
 
+  // TWO OUTCOMES RECORDED AT ONCE, and this is the case that holds
+  // `saveTracking` itself. It read and wrote in two transactions like the
+  // other two, so two tabs on one card — a shared computer, a volunteer with
+  // two windows — both read the same array, both prepended, and the second
+  // write took the first note away. Nothing said so.
+  //
+  // A removal racing a recording cannot see that: the two open their
+  // transactions in the order the calls were made, so the recording never has
+  // a stale array to lose. Split `saveTracking` alone and that test stays
+  // green — measured, five runs out of five. Only two RECORDINGS put the
+  // function against itself.
+  it("lets no concurrent recording take another's note away", async () => {
+    const before = (await three()).notes.length;
+    await Promise.allSettled([
+      DB.saveTracking("01022", "promised", "premier appel"),
+      DB.saveTracking("01022", "promised", "second appel"),
+    ]);
+    const notes = (await DB.loadTracking())["01022"].notes.map((n) => n.note);
+    expect(notes, "one of the two outcomes is gone").toHaveLength(before + 2);
+    expect(notes).toContain("premier appel");
+    expect(notes).toContain("second appel");
+  });
+
   // The same window, one act over: a removal racing a fresh outcome being
-  // recorded. `saveTracking` read and wrote in two transactions too, so the
-  // note it prepends and the note the removal takes away were decided on the
-  // same array — and whichever wrote last decided alone.
+  // recorded.
   //
   // ASSERTED ON THE GUARANTEE, NOT ON WHO WINS. Which of the two reaches the
   // store first is scheduling, not design: written « the removal landed », the

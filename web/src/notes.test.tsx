@@ -578,7 +578,15 @@ describe("a pick belongs to the mayor it was made on", () => {
     first_name: "Claude",
   };
 
-  function DeuxFiches({ filed }: { filed: string[] }) {
+  function DeuxFiches({
+    filed,
+    notes = [],
+    wiring = {},
+  }: {
+    filed: string[];
+    notes?: Note[];
+    wiring?: Wiring;
+  }) {
     const [mayor, setMayor] = useState(MAYOR);
     return (
       <>
@@ -588,7 +596,10 @@ describe("a pick belongs to the mayor it was made on", () => {
         <Fiche
           mayor={mayor}
           cfg={EMPTY_CFG}
-          notes={[]}
+          notes={notes}
+          noteRights={wiring.noteRights}
+          onEditNote={wiring.onEditNote}
+          onDeleteNote={wiring.onDeleteNote}
           onBack={() => {}}
           onStatus={(s) => {
             filed.push(`${mayor.insee_code}:${s}`);
@@ -620,6 +631,87 @@ describe("a pick belongs to the mayor it was made on", () => {
     await click("Enregistrer");
     await flush();
     expect(filed).toEqual(["01002:to_contact"]);
+  });
+
+  // AND SO DOES THE EDITOR OPEN ON ONE OF ITS LINES. The pick was keyed on
+  // the person and the editor was not, so the box stayed open across the
+  // swap with the FIRST mayor's text in it — and « Enregistrer la note »
+  // then rewrote the note at the same position on the SECOND mayor's card
+  // with words written about somebody else. Nothing on screen said so.
+  it("closes an editor left open when the card changes", async () => {
+    const sent: string[][] = [];
+    await act(() => {
+      root.render(
+        <DeuxFiches
+          filed={[]}
+          notes={[{ ...MINE, mine: true }]}
+          wiring={{
+            noteRights: () => ({ edit: true, delete: false }),
+            onEditNote: async (_n, i, text) => {
+              sent.push([String(i), text]);
+            },
+          }}
+        />,
+      );
+    });
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    await type(noteEditor()!, "écrit à propos du premier maire");
+
+    await click("fiche suivante");
+    expect(
+      noteEditor(),
+      "the editor stayed open over the next mayor's history",
+    ).toBeUndefined();
+    expect(sent).toEqual([]);
+  });
+
+  // The same for the question that stands between a click and the act: left
+  // standing, « Confirmer » removes the line at that position on the card
+  // that is now on screen.
+  it("puts away a confirmation left standing when the card changes", async () => {
+    const removed: number[] = [];
+    await act(() => {
+      root.render(
+        <DeuxFiches
+          filed={[]}
+          notes={[{ ...MINE, mine: true }]}
+          wiring={{
+            noteRights: () => ({ edit: false, delete: true }),
+            onDeleteNote: async (_n, i) => {
+              removed.push(i);
+            },
+          }}
+        />,
+      );
+    });
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    expect(text()).toContain("Supprimer cette note ?");
+
+    await click("fiche suivante");
+    expect(
+      text(),
+      "the question followed the volunteer to another mayor",
+    ).not.toContain("Supprimer cette note ?");
+    expect(removed).toEqual([]);
+  });
+
+  // And what the screen SAYS about the last act belongs to the card it was
+  // said about: « Enregistré. » over a mayor nobody has written to, or a red
+  // alert about a refusal on somebody else, is a sentence read as this
+  // card's.
+  it("does not carry what it said about one card onto the next", async () => {
+    const filed: string[] = [];
+    await act(() => {
+      root.render(<DeuxFiches filed={filed} />);
+    });
+    await click("Enregistrer");
+    await flush();
+    expect(text()).toContain("Enregistré.");
+
+    await click("fiche suivante");
+    expect(text(), "the confirmation followed the volunteer").not.toContain(
+      "Enregistré.",
+    );
   });
 });
 

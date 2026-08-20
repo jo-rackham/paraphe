@@ -85,11 +85,16 @@ func TestCorrectingANoteMovesItsTextAndNoOtherColumn(t *testing.T) {
 	id := noteIDOf(t, rep, "aple demain")
 	before := scalar[string](t, s, "SELECT ts FROM notes WHERE id=$1", id)
 
+	// the window the correction happens in, to the minute the column is
+	// written at: what makes the mark's VALUE checkable rather than only its
+	// presence
+	opened := shortTimestamp()
 	code, rep := c.call(http.MethodPost, notePath("60000", id),
 		map[string]string{"note": "rappeler demain"})
 	if code != http.StatusOK {
 		t.Fatalf("the author correcting their own note: %d %v", code, rep)
 	}
+	closed := shortTimestamp()
 	if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
 		id); got != "rappeler demain" {
 		t.Fatalf("the correction did not land: %q", got)
@@ -109,9 +114,16 @@ func TestCorrectingANoteMovesItsTextAndNoOtherColumn(t *testing.T) {
 	}
 	// A shared register rewritten with nothing saying so is what « one team
 	// watched signé become refusé and could ask whom » already cost once.
-	if n := scalar[int](t, s, "SELECT COUNT(*) FROM notes WHERE id=$1 "+
-		"AND edited_at IS NOT NULL", id); n != 1 {
-		t.Error("the corrected note carries no mark saying it was corrected")
+	//
+	// And the mark's VALUE, not only its presence: « modifiée le … » is a
+	// date the campaign reads. Asserted on presence alone, a constant in
+	// place of the clock passed the whole suite — a note corrected today
+	// announcing 2020 to everyone who opens the card.
+	mark := scalar[string](t, s, "SELECT COALESCE(edited_at,'') FROM notes "+
+		"WHERE id=$1", id)
+	if mark < opened || mark > closed {
+		t.Errorf("the note says it was corrected at %q, and the correction "+
+			"happened between %q and %q", mark, opened, closed)
 	}
 
 	// …and the answer describes what is recorded, rather than what the screen

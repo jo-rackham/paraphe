@@ -1414,6 +1414,32 @@ export function Fiche({
     // a rewrite that cannot be kept is a loss: say so rather than swap
     // the text under the volunteer without a word
     setRegenerated(discarded());
+    // EVERYTHING THAT BELONGS TO A CARD LEAVES WITH IT — and this block is
+    // where the list of what that is lives, so whoever adds a piece of
+    // per-card state adds it HERE.
+    //
+    // The card can change under a MOUNTED component: team mode clears its
+    // card before fetching the next, so this unmounts between two mayors,
+    // but browser mode derives the card synchronously from the list it
+    // already holds. An editor open on one mayor's line stayed open over the
+    // next mayor's history, with the first one's text still in the box, and
+    // « Enregistrer la note » then rewrote the note at the SAME POSITION on
+    // the card now on screen — words written about somebody else, silently.
+    // A « Supprimer cette note ? » left standing removed that line outright.
+    // Measured, both. The pick was keyed on the person a round earlier and
+    // these were not, which is the same defect asked one question short.
+    //
+    // On WHO alone, not on the render: an editor must not close because the
+    // campaign changed its logo.
+    if (shown.current.who !== who) {
+      setActiveNote(null);
+      setNoteDraft("");
+      // and what the screen SAID about the last act: « Enregistré. » over a
+      // mayor nobody has written to, or a red alert about a refusal on
+      // somebody else, is read as this card's.
+      setStatusError(null);
+      setSaved("");
+    }
     shown.current = { basis, who };
     const e = freshEmail();
     setSubject(e.subject);
