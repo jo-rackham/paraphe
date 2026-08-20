@@ -671,6 +671,34 @@ func (s *Server) routeDeleteNote(w http.ResponseWriter, r *http.Request) {
 // work that they cannot see.
 func (s *Server) restoreHead(w http.ResponseWriter, r *http.Request,
 	insee string) bool {
+	// THE CARD IS LOCKED BEFORE ITS HEAD IS READ, and this line is the whole
+	// difference between a recompute and a silent overwrite.
+	//
+	// Reading the head and rewriting `assignments` is a read-then-write on a
+	// register the whole campaign reads — the same shape as the ceiling this
+	// project applies BY THE INSERT and never by a count read before it.
+	// Unlocked, a status somebody recorded in between is answered 200 and then
+	// overwritten by a head read before it existed: measured through the real
+	// server, five rounds in fifteen left `assignments` announcing « email
+	// envoyé » with the newest note reading « refus ». Two removals racing
+	// each other do it too, without any status write at all.
+	//
+	// `routeStatus` takes this same row lock in its `ON CONFLICT DO UPDATE`,
+	// so the two serialise whichever arrives first: locked here, its upsert
+	// waits and then re-reads its own `seen` clause — a 409 rather than a lie;
+	// locked there, this SELECT waits and the head read that follows is a new
+	// statement, hence a snapshot that includes the note it just wrote.
+	//
+	// A card with notes always has an assignments row — `routeStatus` upserts
+	// one in the transaction that inserts the note, and nothing deletes one —
+	// so there is always a row here to lock when there is anything to protect.
+	lock := scoped(r)
+	if _, err := s.tx(r).Exec(r.Context(),
+		"SELECT 1 FROM assignments WHERE org_id=$1 AND insee_code="+
+			lock.p(insee)+" FOR UPDATE", lock.args...); err != nil {
+		s.failure(w, err)
+		return false
+	}
 	head := scoped(r)
 	var status, ts *string
 	var team *int

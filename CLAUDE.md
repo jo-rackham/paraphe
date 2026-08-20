@@ -1438,6 +1438,19 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   team, and filtered, a volunteer's deletion would roll the card back past a
   colleague's work they cannot see. Unconditional, hence a no-op when a line
   from the middle goes.
+  **AND READING THE HEAD AND REWRITING THE CARD IS ONE CRITICAL SECTION**, so
+  `restoreHead` takes the card's row `FOR UPDATE` BEFORE it reads. It is the
+  same shape as the ceiling this project applies BY THE INSERT and never by a
+  count read before it, and the same lesson one register over. Unlocked, a
+  status recorded in between is answered 200 and then overwritten by a head
+  read before it existed: measured through the real server, five rounds in
+  fifteen left the card announcing « email envoyé » with the newest note
+  reading « refus ». Two removals racing each other do it with no status write
+  at all. `routeStatus` takes that same row lock in its `ON CONFLICT DO
+  UPDATE`, so the two serialise whichever arrives first — locked here, its
+  upsert waits and re-reads its own `seen` clause, which is a 409 rather than
+  a lie. It is the ONLY read-then-write on `assignments`: the other three
+  writers decide inside the statement that writes.
   **And the SELECT follows the card, by DERIVATION.** `Fiche` used to hold
   its status in state, seeded at mount, and nothing moved it from outside;
   a select still showing the withdrawn status wrote it straight back on the
@@ -1459,7 +1472,20 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   day the card RETURNS to that status — which is exactly what removing the
   head note does. Nothing else moves a card backwards, so nothing else needs
   to drop it; dropped before the round trip, so no frame shows the withdrawn
-  status.
+  status. NOT on a correction, which moves the card nowhere: written into the
+  act the two share it fired on both, and a volunteer who chose an outcome and
+  then fixed a typo in an older line lost the choice to the fix — silently,
+  the select simply reverting, so the next « Enregistrer » filed the status
+  the card already carried.
+  **And the pick is keyed on the PERSON as well as on the status.** Team mode
+  clears its card before fetching the next, so the card unmounts between two
+  mayors; BROWSER mode derives the card synchronously from the list it already
+  holds, so one card's address to another — a bookmark, a link between two
+  volunteers, « précédent » between two cards — swaps the mayor with
+  everything still mounted. Both being « à contacter », as most of the list
+  is, a pick made on one stood on the next and « Enregistrer » filed it
+  against the wrong person. It is the trap the rewritten email already paid
+  for, one field over: keying on the render alone missed the identity.
   **A save is finished when the note field clears, not when the history
   shows the line**: the line is drawn from state written INSIDE the awaited
   call, while the handler goes on to clear the field and say « Enregistré. ».
@@ -1483,6 +1509,23 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   showing — the `seen` of the team version, on this side of the wire. It gains
   no identifier: a note already written would have none, and the two paths
   would have to be told apart for ever.
+  **THAT CHECK AND THE WRITE IT GUARDS ARE ONE IndexedDB TRANSACTION**
+  (`reviseTracking`), or the check is worth nothing. Read in a readonly
+  transaction and written in a second one — which is how `saveTracking` had
+  always done it — two callers see the same array, both write, both are told
+  it worked, and one of the two pieces of work is gone. Two tabs on one card
+  is all it takes, and this store is the only thing browser mode owns: no
+  server holds a second copy. IndexedDB queues readwrite transactions over a
+  store, so inside one the read sees every write committed before it. A
+  refusal returns null rather than aborting: an abort fires `onabort`, not
+  `onerror`, and a promise waiting on the other two never settles.
+  **`timestamp()` HAS MINUTE GRANULARITY, so a test that does not FREEZE TIME
+  cannot tell one date from another.** A whole file runs inside one minute,
+  and every assertion comparing a note's `ts` with a fresh `timestamp()`
+  compares a string with itself: `editNote` made to rewrite the card's date
+  and `deleteNote` made to date the card NOW both left all nineteen tests
+  green. `db.test.ts` fakes Date alone — fake-indexeddb runs on real timers —
+  and gives each note its own minute.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit

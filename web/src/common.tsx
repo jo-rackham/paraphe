@@ -1292,12 +1292,27 @@ export function Fiche({
   // passive effects run after paint, so the screen showed the pick, the
   // volunteer typed on, and the clobber arrived later. Derivation has no
   // moment to land at.
-  const [picked, setPicked] = useState<{ under: string; value: string } | null>(
-    null,
-  );
+  // AND ON THE PERSON, because a card can change under a mounted component.
+  // Team mode clears its card before fetching the next, so this one unmounts
+  // between two mayors; BROWSER mode derives the card synchronously from the
+  // list it already holds, so going from one card's address to another —
+  // a bookmark, a link between two volunteers, « précédent » between two
+  // cards — swaps the mayor with everything still mounted. A pick made on
+  // one mayor then stood on the next, both being « à contacter » as most of
+  // the list is, and « Enregistrer » filed it against the wrong person. It is
+  // the trap this card already paid for with the rewritten email, one field
+  // over: keying on the render alone missed the identity.
+  const [picked, setPicked] = useState<{
+    who: string;
+    under: string;
+    value: string;
+  } | null>(null);
   const carried = initialStatus ?? "to_contact";
-  const status = picked?.under === carried ? picked.value : carried;
-  const setStatus = (value: string) => setPicked({ under: carried, value });
+  const mine = cardWho(mayor);
+  const status =
+    picked?.who === mine && picked.under === carried ? picked.value : carried;
+  const setStatus = (value: string) =>
+    setPicked({ who: mine, under: carried, value });
   const [statusError, setStatusError] = useState<string | null>(null);
   // `saving` is the STATE the button reads (aria-disabled, label); `submitting`
   // is the re-entry guard the handler reads. They are two different things, and
@@ -1465,11 +1480,15 @@ export function Fiche({
    * request against a row that no longer exists, answered 404 to somebody
    * whose deletion worked.
    */
-  const onNote = async (act: () => Promise<void>, done: string) => {
+  const onNote = async (
+    act: () => Promise<void>,
+    done: string,
+    { rollsBack = false } = {},
+  ) => {
     if (noteSubmitting()) return;
     setStatusError(null);
     setSaved("");
-    // THE PICK IS DROPPED, and this is the only place it is.
+    // THE PICK IS DROPPED WHERE THE CARD MOVES BACKWARDS, and only there.
     //
     // Removing a note rolls the card back to what the history then says, and
     // that is the one thing this act has to make visible. A pick left
@@ -1481,10 +1500,14 @@ export function Fiche({
     // shows a choice nobody has made since. Measured: the roll-back in the
     // database, the withdrawn status on screen.
     //
-    // BEFORE the round trip, so there is no frame in between showing it. And
-    // the pick is dropped nowhere else: nothing but this moves a card
-    // BACKWARDS, which is what it takes to resurrect one.
-    setPicked(null);
+    // NOT on a correction. Written into the act these two share, it fired on
+    // both, and a volunteer who chose an outcome and then noticed a typo in
+    // an older line lost the choice to the fix — silently, the select simply
+    // reverting, so the next « Enregistrer » filed the status the card
+    // already carried. Correcting words moves the card nowhere.
+    //
+    // BEFORE the round trip, so there is no frame in between showing it.
+    if (rollsBack) setPicked(null);
     setNotesBusy(true);
     const restore = holdFocusThrough();
     try {
@@ -1758,6 +1781,8 @@ export function Fiche({
                             onNote(
                               () => onDeleteNote?.(n, i) ?? Promise.resolve(),
                               "Note supprimée.",
+                              // the one act that moves the card BACKWARDS
+                              { rollsBack: true },
                             )
                           }
                         >

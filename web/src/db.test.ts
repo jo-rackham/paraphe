@@ -2,9 +2,10 @@
 // it can lose. These tests pin the two ways it lost it — a non-atomic
 // import, and a merge that crushed what it promised to keep.
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Backup } from "./db.ts";
 import * as DB from "./db.ts";
+import type { Tracking } from "./types.ts";
 
 const wipe = async () => {
   await DB.eraseAll();
@@ -169,11 +170,41 @@ describe("local tracking", () => {
 
 // Correcting and removing, with no server and no row identifier: a note is
 // named by its POSITION plus the content the screen was showing.
+//
+// TIME IS FROZEN AND MOVED BY HAND, and that is not decoration. `timestamp()`
+// has MINUTE granularity by intent — it is read in a call log, « rappeler
+// avant 11 h » — so a whole test file runs inside one of them, and every
+// assertion comparing a note's `ts` with a fresh `timestamp()` compares a
+// string with itself. Measured: `editNote` made to rewrite the card's date,
+// and `deleteNote` made to date the card NOW instead of by the line that now
+// decides — two mutations against this file's own doctrine, and all 19 tests
+// stayed green. Only Date is faked: fake-indexeddb runs on real timers.
 describe("revising a note", () => {
+  const AT = (minute: number) => new Date(2026, 7, 20, 10, minute, 0);
+  /** What `timestamp()` writes at that minute. */
+  const STAMP = (minute: number) =>
+    `2026-08-20 à 10:${String(minute).padStart(2, "0")}`;
+  // the minute every revision happens at: LATER than all three notes, so a
+  // date taken « now » cannot be mistaken for a date taken from a note
+  const NOW = 9;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Three notes, each of its OWN minute, then the clock moved to NOW. */
   const three = async () => {
+    vi.setSystemTime(AT(0));
     await DB.saveTracking("01022", "email_sent", "courriel");
+    vi.setSystemTime(AT(1));
     await DB.saveTracking("01022", "to_call_back", "appel");
-    return DB.saveTracking("01022", "refused", "refus");
+    vi.setSystemTime(AT(2));
+    const e = await DB.saveTracking("01022", "refused", "refus");
+    vi.setSystemTime(AT(NOW));
+    return e;
   };
 
   it("corrects the words and touches no other column", async () => {
@@ -182,17 +213,19 @@ describe("revising a note", () => {
     const after = await DB.editNote("01022", 0, head, "refus poli");
     expect(after.notes[0].note).toBe("refus poli");
     expect(after.notes[0].status).toBe(head.status);
-    expect(after.notes[0].ts).toBe(head.ts);
-    expect(after.notes[0].edited_at).toBeTruthy();
+    expect(after.notes[0].ts).toBe(STAMP(2));
+    // the mark is taken NOW, and it is the only date the correction writes
+    expect(after.notes[0].edited_at).toBe(STAMP(NOW));
     // the card's own status and date are not a spelling either
     expect(after.status).toBe(e.status);
-    expect(after.updated_at).toBe(e.updated_at);
+    expect(after.updated_at).toBe(STAMP(2));
   });
 
   it("marks only the line that was corrected", async () => {
     const e = await three();
     const after = await DB.editNote("01022", 1, e.notes[1], "appel corrigé");
     expect(after.notes.filter((n) => n.edited_at)).toHaveLength(1);
+    expect(after.notes[1].edited_at).toBe(STAMP(NOW));
   });
 
   // THE HISTORY IS THE REGISTER AND `status` IS ITS HEAD, the server's rule
@@ -203,7 +236,8 @@ describe("revising a note", () => {
     const after = await DB.deleteNote("01022", 0, e.notes[0]);
     expect(after.notes.map((n) => n.note)).toEqual(["appel", "courriel"]);
     expect(after.status).toBe("to_call_back");
-    expect(after.updated_at).toBe(e.notes[1].ts);
+    // dated by the LINE THAT NOW DECIDES, not by the moment of the removal
+    expect(after.updated_at).toBe(STAMP(1));
   });
 
   it("leaves the card alone when the line was not the head", async () => {
@@ -211,15 +245,20 @@ describe("revising a note", () => {
     const after = await DB.deleteNote("01022", 1, e.notes[1]);
     expect(after.notes.map((n) => n.note)).toEqual(["refus", "courriel"]);
     expect(after.status).toBe("refused");
+    expect(after.updated_at).toBe(STAMP(2));
   });
 
   // An empty history is a card nobody has contacted. Left at « refusé », it
   // is a status nobody ever wrote and the mayor is off everyone's list.
   it("gives back a card nobody has contacted when the last line goes", async () => {
+    vi.setSystemTime(AT(0));
     const e = await DB.saveTracking("01022", "refused", "seul");
+    vi.setSystemTime(AT(NOW));
     const after = await DB.deleteNote("01022", 0, e.notes[0]);
     expect(after.notes).toEqual([]);
     expect(after.status).toBe("to_contact");
+    // no line left to date it: the card moved NOW, and says so
+    expect(after.updated_at).toBe(STAMP(NOW));
   });
 
   // The `seen` of the team version, written on this side of the wire: the
@@ -237,6 +276,46 @@ describe("revising a note", () => {
       /a changé depuis son affichage/,
     );
     expect((await DB.loadTracking())["01022"].notes).toHaveLength(4);
+  });
+
+  // THE CHECK AND THE WRITE ARE ONE TRANSACTION, or the check protects
+  // nothing. Read in a readonly transaction and written in a second one, both
+  // callers read the same array, both wrote, both answered « Note
+  // modifiée. » — and one correction was gone. « Deux onglets sur la même
+  // fiche » is exactly the case the comparison exists for, and it is the one
+  // it let through. IndexedDB queues readwrite transactions over a store, so
+  // in ONE transaction the second read sees the first write and refuses.
+  it("lets no concurrent correction overwrite another", async () => {
+    const e = await three();
+    const head = e.notes[0];
+    const both = await Promise.allSettled([
+      DB.editNote("01022", 0, head, "premier"),
+      DB.editNote("01022", 0, head, "second"),
+    ]);
+    const landed = both.filter((r) => r.status === "fulfilled");
+    expect(landed, "both corrections were accepted").toHaveLength(1);
+    // and the one told it worked is the one that is there
+    const told = (landed[0] as PromiseFulfilledResult<Tracking>).value.notes[0]
+      .note;
+    const stored = (await DB.loadTracking())["01022"].notes[0].note;
+    expect(stored, "the correction that was accepted is not the one kept").toBe(
+      told,
+    );
+  });
+
+  // The same window, one act over: a removal racing a fresh outcome being
+  // recorded. `saveTracking` reads and writes in two transactions too, so the
+  // note it prepends and the note the removal takes away are decided on the
+  // same array — and whichever writes last decides alone.
+  it("lets no concurrent write lose a note", async () => {
+    const e = await three();
+    await Promise.allSettled([
+      DB.deleteNote("01022", 0, e.notes[0]),
+      DB.saveTracking("01022", "promised", "pendant ce temps"),
+    ]);
+    const notes = (await DB.loadTracking())["01022"].notes.map((n) => n.note);
+    expect(notes, "the fresh outcome was lost").toContain("pendant ce temps");
+    expect(notes, "the removal was undone").not.toContain("refus");
   });
 
   it("refuses a position that is not there at all", async () => {

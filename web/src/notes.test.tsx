@@ -76,6 +76,7 @@ interface Wiring {
   noteRights?: (n: Note) => { edit: boolean; delete: boolean };
   onEditNote?: (n: Note, index: number, text: string) => Promise<void>;
   onDeleteNote?: (n: Note, index: number) => Promise<void>;
+  onStatus?: (status: string, note: string) => void | Promise<void>;
 }
 
 const render = (wiring: Wiring) =>
@@ -89,7 +90,7 @@ const render = (wiring: Wiring) =>
         onEditNote={wiring.onEditNote}
         onDeleteNote={wiring.onDeleteNote}
         onBack={() => {}}
-        onStatus={() => {}}
+        onStatus={wiring.onStatus ?? (() => {})}
       />,
     );
   });
@@ -243,6 +244,39 @@ describe("correcting a line", () => {
     expect(sent).toEqual(["rappeler demain"]);
     expect(noteEditor()).toBeUndefined();
     expect(text()).toContain("Note modifiée.");
+  });
+
+  // CORRECTING WORDS MOVES THE CARD NOWHERE, so it takes nothing from the
+  // volunteer. Written into the act a correction and a removal share, the
+  // pick was dropped by both: choose an outcome, notice a typo in an older
+  // line, fix it — and the choice is gone, silently, the select simply back
+  // to what the card carries. The next « Enregistrer » then files THAT.
+  it("keeps a pending pick when only the words of a line are corrected", async () => {
+    const filed: string[] = [];
+    await render({
+      noteRights: () => ({ edit: true, delete: false }),
+      onEditNote: async () => {},
+      onStatus: async (s) => {
+        filed.push(s);
+      },
+    });
+    const select = () => container.querySelector("select")!;
+    await act(async () => {
+      const s = select();
+      s.value = "to_call_back";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(select().value).toBe("to_call_back");
+
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    await type(noteEditor()!, "rappeler demain");
+    await click("Enregistrer la note");
+    await flush();
+
+    expect(select().value).toBe("to_call_back");
+    await click("Enregistrer");
+    await flush();
+    expect(filed).toEqual(["to_call_back"]);
   });
 
   // A refusal is the volunteer's only word about a correction that did not
@@ -485,6 +519,68 @@ describe("removing a line", () => {
     await flush();
     expect(text()).toContain("Aucune note à supprimer ici.");
     expect(text()).toContain("aple demain");
+  });
+});
+
+// A PICK BELONGS TO A PERSON, and a card can change under a mounted
+// component. Team mode clears its card before fetching the next, so this one
+// unmounts between two mayors; BROWSER mode derives the card synchronously
+// from the list it already holds, so one card's address to another — a
+// bookmark, a link between two volunteers, « précédent » between two cards —
+// swaps the mayor with everything still mounted. Both being « à contacter »,
+// as most of the list is, the pick stood on the next mayor and « Enregistrer »
+// filed it against the wrong person.
+describe("a pick belongs to the mayor it was made on", () => {
+  const OTHER: Mayor = {
+    ...MAYOR,
+    insee_code: "01002",
+    commune: "Belley",
+    last_name: "MARTIN",
+    first_name: "Claude",
+  };
+
+  function DeuxFiches({ filed }: { filed: string[] }) {
+    const [mayor, setMayor] = useState(MAYOR);
+    return (
+      <>
+        <button type="button" onClick={() => setMayor(OTHER)}>
+          fiche suivante
+        </button>
+        <Fiche
+          mayor={mayor}
+          cfg={EMPTY_CFG}
+          notes={[]}
+          onBack={() => {}}
+          onStatus={(s) => {
+            filed.push(`${mayor.insee_code}:${s}`);
+          }}
+        />
+      </>
+    );
+  }
+
+  it("does not carry a pick from one card to the next", async () => {
+    const filed: string[] = [];
+    await act(() => {
+      root.render(<DeuxFiches filed={filed} />);
+    });
+    const select = () => container.querySelector("select")!;
+    await act(async () => {
+      const s = select();
+      s.value = "email_sent";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(select().value).toBe("email_sent");
+
+    await click("fiche suivante");
+    expect(
+      select().value,
+      "the next mayor's card shows a status nobody chose for them",
+    ).toBe("to_contact");
+
+    await click("Enregistrer");
+    await flush();
+    expect(filed).toEqual(["01002:to_contact"]);
   });
 });
 

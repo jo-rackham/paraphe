@@ -147,23 +147,57 @@ function timestamp(): string {
   );
 }
 
+/**
+ * Read, decide and write a mayor's record in ONE readwrite transaction.
+ *
+ * Every write here is a read-modify-write of the same array, and read in one
+ * transaction and written in another, the read is worth nothing: two callers
+ * see the same array, both write, both are told it worked, and one of the two
+ * pieces of work is gone. Two tabs on one card is all it takes, and this store
+ * is the ONLY thing browser mode owns — there is no server holding a second
+ * copy. IndexedDB queues readwrite transactions over a store, so inside one
+ * the read sees every write committed before it.
+ *
+ * `decide` returns the record to store, or null to store nothing — which is
+ * how a refusal is expressed without aborting a transaction (an abort fires
+ * `onabort`, not `onerror`, and a promise waiting on the other two never
+ * settles). The requests are issued from `onsuccess`, synchronously, or the
+ * transaction commits out from under the second one.
+ */
+function reviseTracking(
+  db: IDBDatabase,
+  insee: string,
+  decide: (current: Tracking | undefined) => Tracking | null,
+): Promise<Tracking | null> {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction("tracking", "readwrite");
+    const s = t.objectStore("tracking");
+    const got = s.get(insee);
+    let entry: Tracking | null = null;
+    got.onsuccess = () => {
+      entry = decide(got.result as Tracking | undefined);
+      if (entry) s.put(entry);
+    };
+    t.oncomplete = () => resolve(entry);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+}
+
 export async function saveTracking(
   insee: string,
   status: string,
   note: string,
 ): Promise<Tracking> {
   const db = await open();
-  const current = await tx<Tracking>(db, "tracking", "readonly", (s) =>
-    s.get(insee),
-  );
-  const entry: Tracking = {
+  const entry = await reviseTracking(db, insee, (current) => ({
     insee_code: insee,
     status,
     updated_at: timestamp(),
     notes: [{ ts: timestamp(), status, note }, ...(current?.notes ?? [])],
-  };
-  await tx(db, "tracking", "readwrite", (s) => s.put(entry));
-  return entry;
+  }));
+  // `decide` never returns null here: recording an outcome refuses nothing.
+  return entry as Tracking;
 }
 
 /**
@@ -193,30 +227,42 @@ type LocalNote = Tracking["notes"][number];
  */
 type NoteSeen = Pick<LocalNote, "ts" | "status" | "note">;
 
-/** The record, with position `index` confirmed to still hold `expected`. */
-async function heldNotes(
+/**
+ * Revises one line of a record, inside the ONE transaction that read it: the
+ * check below is an optimistic-concurrency check, and checked in a different
+ * transaction from the write it guards it guards nothing.
+ *
+ * `revise` is handed the record and the confirmed array, and returns what to
+ * store. A position that no longer holds `expected` stores nothing and the
+ * refusal is raised out here, where a promise can carry it.
+ */
+async function reviseNote(
   insee: string,
   index: number,
   expected: NoteSeen,
-): Promise<[IDBDatabase, Tracking, LocalNote[]]> {
+  revise: (current: Tracking, notes: LocalNote[]) => Tracking,
+): Promise<Tracking> {
   const db = await open();
-  const current = await tx<Tracking>(db, "tracking", "readonly", (s) =>
-    s.get(insee),
-  );
-  const notes = current?.notes ?? [];
-  const at = notes[index];
-  if (
-    !current ||
-    !at ||
-    at.ts !== expected.ts ||
-    at.status !== expected.status ||
-    at.note !== expected.note
-  ) {
+  const entry = await reviseTracking(db, insee, (current) => {
+    const notes = current?.notes ?? [];
+    const at = notes[index];
+    if (
+      !current ||
+      !at ||
+      at.ts !== expected.ts ||
+      at.status !== expected.status ||
+      at.note !== expected.note
+    ) {
+      return null;
+    }
+    return revise(current, notes);
+  });
+  if (!entry) {
     throw new Error(
       "Cette note a changé depuis son affichage — rouvrez la fiche.",
     );
   }
-  return [db, current, notes];
+  return entry;
 }
 
 /**
@@ -224,22 +270,18 @@ async function heldNotes(
  * status the note recorded and when the contact happened are not a spelling,
  * so the card's own status and date are left exactly where they were.
  */
-export async function editNote(
+export const editNote = (
   insee: string,
   index: number,
   expected: NoteSeen,
   text: string,
-): Promise<Tracking> {
-  const [db, current, notes] = await heldNotes(insee, index, expected);
-  const entry: Tracking = {
+): Promise<Tracking> =>
+  reviseNote(insee, index, expected, (current, notes) => ({
     ...current,
     notes: notes.map((n, i) =>
       i === index ? { ...n, note: text, edited_at: timestamp() } : n,
     ),
-  };
-  await tx(db, "tracking", "readwrite", (s) => s.put(entry));
-  return entry;
-}
+  }));
 
 /**
  * Removing one, and putting the card back to what the history then says.
@@ -249,24 +291,22 @@ export async function editNote(
  * keep announcing « signé » with nothing on record saying so, and emptying
  * the history left a status nobody ever wrote.
  */
-export async function deleteNote(
+export const deleteNote = (
   insee: string,
   index: number,
   expected: NoteSeen,
-): Promise<Tracking> {
-  const [db, current, held] = await heldNotes(insee, index, expected);
-  const notes = held.filter((_, i) => i !== index);
-  const entry: Tracking = {
-    ...current,
-    status: notes[0]?.status ?? "to_contact",
-    // the line that now decides dates the card; with none left, the card
-    // moved NOW
-    updated_at: notes[0]?.ts ?? timestamp(),
-    notes,
-  };
-  await tx(db, "tracking", "readwrite", (s) => s.put(entry));
-  return entry;
-}
+): Promise<Tracking> =>
+  reviseNote(insee, index, expected, (current, held) => {
+    const notes = held.filter((_, i) => i !== index);
+    return {
+      ...current,
+      status: notes[0]?.status ?? "to_contact",
+      // the line that now decides dates the card; with none left, the card
+      // moved NOW
+      updated_at: notes[0]?.ts ?? timestamp(),
+      notes,
+    };
+  });
 
 export async function readSetting<T>(key: string, fallback: T): Promise<T> {
   const db = await open();

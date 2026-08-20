@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -329,6 +330,105 @@ func TestTheHeadTheCardGoesBackToMayBelongToAnotherTeam(t *testing.T) {
 	if got := scalar[int](t, s, "SELECT updated_by_team FROM assignments "+
 		"WHERE insee_code='60000'"); got != north {
 		t.Errorf("the card attributes Nord's call to team %d", got)
+	}
+}
+
+// READING THE HEAD AND REWRITING THE CARD IS ONE CRITICAL SECTION.
+//
+// The recompute is a read-then-write on a register the whole campaign reads —
+// the same shape as a ceiling read before an insert instead of applied by it.
+// Unlocked, a status somebody records in between is answered 200 and then
+// overwritten by a head read before it existed, and `assignments` ends up
+// announcing a status no note supports: a mayor everybody skips, or two
+// volunteers calling the same person.
+//
+// Driven through the real server, concurrently, and asserted on the INVARIANT
+// rather than on a timing: whatever the two requests answer, the card and its
+// newest note must agree. Fifteen rounds, because it is a race — five of them
+// corrupted before the row lock went in, none since.
+func TestARemovalRacingAStatusWriteLeavesTheCardAndItsHistoryAgreeing(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 1, "60")
+	pwA := createAccount(t, s, "a@exemple.fr", RoleVolunteer, nil)
+	pwB := createAccount(t, s, "b@exemple.fr", RoleVolunteer, nil)
+	ca, cb := newClient(t, srv), newClient(t, srv)
+	ca.signIn("a@exemple.fr", pwA)
+	cb.signIn("b@exemple.fr", pwB)
+
+	const insee = "60000"
+	for round := range 15 {
+		// a card with two lines: an older one, and the head about to go
+		write(t, ca, insee, "email_sent", "vieux", "")
+		rep := write(t, ca, insee, "signed", "tête", "email_sent")
+		head := noteIDOf(t, rep, "tête")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			ca.call(http.MethodDelete, notePath(insee, head), nil)
+		}()
+		go func() {
+			defer wg.Done()
+			cb.call(http.MethodPost, "/api/mayors/"+insee+"/status",
+				map[string]string{"status": "refused", "note": "en même temps",
+					"seen": "signed"})
+		}()
+		wg.Wait()
+
+		stored := scalar[string](t, s, "SELECT status FROM assignments "+
+			"WHERE insee_code=$1", insee)
+		newest := scalar[string](t, s, "SELECT status FROM notes "+
+			"WHERE insee_code=$1 ORDER BY id DESC LIMIT 1", insee)
+		if stored != newest {
+			t.Fatalf("round %d: the card announces %q and its newest note "+
+				"reads %q — the register describes a note nobody wrote",
+				round, stored, newest)
+		}
+		execAsMaintenance(t, s, "DELETE FROM notes WHERE insee_code=$1", insee)
+		execAsMaintenance(t, s, "DELETE FROM assignments WHERE insee_code=$1", insee)
+	}
+}
+
+// The same defect with no status write at all: a coordination working through
+// a card's history removes two lines at once, both recomputes read the head
+// before either wrote, and the card ends up on the status of a note that is
+// no longer there.
+func TestTwoRemovalsAtOnceLeaveTheCardOnANoteThatIsStillThere(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 1, "60")
+	pw := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+	c := newClient(t, srv)
+	c.signIn("coord@exemple.fr", pw)
+
+	const insee = "60000"
+	for round := range 15 {
+		write(t, c, insee, "email_sent", "un", "")
+		write(t, c, insee, "to_call_back", "deux", "email_sent")
+		rep := write(t, c, insee, "signed", "trois", "to_call_back")
+		second := noteIDOf(t, rep, "deux")
+		third := noteIDOf(t, rep, "trois")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		for _, id := range []int64{third, second} {
+			go func() {
+				defer wg.Done()
+				c.call(http.MethodDelete, notePath(insee, id), nil)
+			}()
+		}
+		wg.Wait()
+
+		stored := scalar[string](t, s, "SELECT status FROM assignments "+
+			"WHERE insee_code=$1", insee)
+		newest := scalar[string](t, s, "SELECT COALESCE((SELECT status FROM notes "+
+			"WHERE insee_code=$1 ORDER BY id DESC LIMIT 1), 'to_contact')", insee)
+		if stored != newest {
+			t.Fatalf("round %d: the card announces %q and its history says %q",
+				round, stored, newest)
+		}
+		execAsMaintenance(t, s, "DELETE FROM notes WHERE insee_code=$1", insee)
+		execAsMaintenance(t, s, "DELETE FROM assignments WHERE insee_code=$1", insee)
 	}
 }
 
