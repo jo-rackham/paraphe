@@ -46,6 +46,38 @@ const CHANNELS: { file: string; label: string; audience: string }[] = [
   },
 ];
 
+// -- The email subject, a field of its own -----------------------------------
+//
+// STORED, the subject is the template's first line — « OBJET: … » — because
+// that is the one-file format the engine, the mass mailing and every stored
+// overlay already share. TYPED, it is its own field: asking people to open
+// their text with an exact uppercase keyword was a trap, and the refusal it
+// tripped named a format nobody chose. The screen decomposes the stored text
+// and recomposes it canonically; a file somebody is not editing keeps its
+// bytes, so nothing reads as modified that was not.
+
+const isEmail = (file: string) => file.startsWith("email");
+
+function decompose(text: string): { subject: string; body: string } {
+  const brk = text.indexOf("\n");
+  const first = brk === -1 ? text : text.slice(0, brk);
+  if (!first.startsWith("OBJET:")) {
+    // a stored text without the line (older overlay, hand-written): shown
+    // whole in the body, subject empty — saving it back will say what is
+    // missing, in the card's own slot
+    return { subject: "", body: text };
+  }
+  return {
+    subject: first.slice("OBJET:".length).trim(),
+    body: brk === -1 ? "" : text.slice(brk + 1).replace(/^\n/, ""),
+  };
+}
+
+function compose(subject: string, body: string): string {
+  if (subject.trim() === "" && body.trim() === "") return "";
+  return `OBJET: ${subject}\n\n${body.replace(/^\n+/, "")}`;
+}
+
 export function ModelesMessages({
   /** "campaign" = a coordination's, "team" = one team's over its campaign's. */
   niveau,
@@ -75,6 +107,12 @@ export function ModelesMessages({
   const [choisi, setChoisi] = useState(CHANNELS[0].file);
   const [brouillon, setBrouillon] = useState<Templates>(propres);
   const [envoi, setEnvoi] = useState(false);
+  // The refusal, IN THIS CARD, beside the button that was pressed. The
+  // page-level banner lives at the top of a long screen: it speaks to a
+  // screen reader and misses the eye of whoever is scrolled down here — a
+  // save refused with the reason shown nowhere visible reads as a save that
+  // silently did nothing, and was reported as exactly that.
+  const [refus, setRefus] = useState("");
   const [busy, done] = useSubmitGuard();
 
   const source = niveau === "team" ? "de la campagne" : "fourni";
@@ -83,6 +121,11 @@ export function ModelesMessages({
   const modifié = CHANNELS.some(
     (c) => (brouillon[c.file] ?? "") !== (propres[c.file] ?? ""),
   );
+
+  // the two projections of an email template, and the inherited pair the
+  // empty fields fall back to
+  const courant = decompose(propre);
+  const héritéEmail = decompose(hérité);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,6 +136,7 @@ export function ModelesMessages({
       // removed, and the box has to show the inherited one in its place
       const stored = await onSave(brouillon);
       setBrouillon(stored);
+      setRefus("");
       onEnregistre(stored);
       const n = Object.keys(stored).length;
       onMessage({
@@ -108,7 +152,9 @@ export function ModelesMessages({
       // the ENGINE's own sentence, whoever raised it — the server reproduces
       // it in team mode, the engine itself answers in the account-less one —
       // and it names the file and the placeholder, which is what the person
-      // looking at this box needs
+      // looking at this box needs. Said HERE, in the card's own slot, and
+      // through the page's region as well.
+      setRefus(err instanceof Error ? err.message : String(err));
       onError(err);
     } finally {
       done();
@@ -149,6 +195,25 @@ export function ModelesMessages({
           ))}
         </select>
       </p>
+      {isEmail(choisi) && (
+        <p>
+          <label htmlFor="modele-objet">
+            Objet de l'email {propre ? "" : `(vide : suit le texte ${source})`}
+          </label>
+          <input
+            id="modele-objet"
+            type="text"
+            placeholder={héritéEmail.subject}
+            value={courant.subject}
+            onChange={(e) =>
+              setBrouillon({
+                ...brouillon,
+                [choisi]: compose(e.target.value, courant.body),
+              })
+            }
+          />
+        </p>
+      )}
       <p>
         <label htmlFor="modele-texte">
           Texte {propre ? "personnalisé" : `(vide : suit le texte ${source})`}
@@ -160,10 +225,15 @@ export function ModelesMessages({
           aria-describedby="modele-champs"
           // the INHERITED text as placeholder and never as value: filled in,
           // it would be a copy frozen the day it was opened
-          placeholder={hérité}
-          value={propre}
+          placeholder={isEmail(choisi) ? héritéEmail.body : hérité}
+          value={isEmail(choisi) ? courant.body : propre}
           onChange={(e) =>
-            setBrouillon({ ...brouillon, [choisi]: e.target.value })
+            setBrouillon({
+              ...brouillon,
+              [choisi]: isEmail(choisi)
+                ? compose(courant.subject, e.target.value)
+                : e.target.value,
+            })
           }
         />
       </p>
@@ -177,6 +247,11 @@ export function ModelesMessages({
           ? "Ce modèle s'adresse à un maire dont aucun parrainage n'est " +
             "connu : il ne peut rien lui prêter."
           : "Ce modèle remercie un parrainage réel."}
+      </p>
+      {/* the region PRE-EXISTS its first message and holds no control:
+          mounted with its text, some assistive technology never reads it */}
+      <p className={refus ? "alerte erreur" : "sr-only"}>
+        <span role="alert">{refus}</span>
       </p>
       <p>
         {/* NAMED FOR WHAT IT SAVES. « Ma campagne » in the account-less

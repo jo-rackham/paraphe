@@ -108,11 +108,12 @@ test.describe
       await save(page);
       // named, and naming the audience: told only that the placeholder is
       // unknown, whoever pasted it looks for a typo in a word spelt correctly.
-      // The ALERT, not the page: the refused draft still sits in the
-      // textarea, and CI's engine matches a textarea by its value — the
-      // page-wide locator resolved to both and failed on the ambiguity.
+      // IN THE CARD'S OWN SLOT, beside the button that was pressed: the page
+      // banner lives at the top of a long screen and misses the eye of
+      // whoever is scrolled down here — a refusal shown nowhere visible was
+      // reported as « nothing happens ».
       await expect(
-        page.getByRole("alert").filter({ hasText: "annee_recente" }),
+        editor(page).locator('[role="alert"]', { hasText: "annee_recente" }),
       ).toBeVisible();
 
       // and NOTHING was stored — read back from a fresh load, not inferred

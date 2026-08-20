@@ -116,11 +116,104 @@ it("shows the inherited text without ever putting it in the box", async () => {
   expect(box().value).toBe("");
   expect(box().placeholder).toBe("Texte de la campagne.");
 
-  // and where the level above has written nothing, the image's own text
+  // and where the level above has written nothing, the image's own text —
+  // for an email, split the way the fields are: the subject line in the
+  // subject's placeholder, the body in the box's
   await editor("campaign", {});
   await choose("email.txt");
   expect(box().value).toBe("");
-  expect(box().placeholder).toBe(M.SHIPPED_TEMPLATES["email.txt"]);
+  const shipped = M.SHIPPED_TEMPLATES["email.txt"];
+  const firstLine = shipped.slice(0, shipped.indexOf("\n"));
+  expect(subject().placeholder).toBe(firstLine.slice("OBJET:".length).trim());
+  // the two placeholders recompose the shipped file byte for byte: what the
+  // fields show apart is exactly what one box used to show whole
+  expect(`OBJET: ${subject().placeholder}\n\n${box().placeholder}`).toBe(
+    shipped,
+  );
+});
+
+// -- The email subject, a field of its own ----------------------------------
+//
+// Stored, the subject stays the template's first line — the one-file format
+// the engine and the mass mailing share. Typed, it is its own field: asking
+// people to open their text with an exact uppercase « OBJET: » was a trap,
+// and the refusal it tripped named a format nobody chose.
+
+const subject = () =>
+  container.querySelector("#modele-objet") as HTMLInputElement;
+
+const type = async (el: HTMLInputElement | HTMLTextAreaElement, v: string) => {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      el instanceof HTMLInputElement
+        ? HTMLInputElement.prototype
+        : HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(el, v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+};
+
+it("composes the stored OBJET line from the two fields", async () => {
+  vi.mocked(API.updateCampaignTemplates).mockResolvedValue({ templates: {} });
+  await editor("campaign", {});
+  await choose("email.txt");
+  await type(subject(), "Un rendez-vous en 2027");
+  await type(box(), "Bonjour {salutation}.\n");
+  await press("Enregistrer");
+  const sent = vi.mocked(API.updateCampaignTemplates).mock.calls[0][0];
+  expect(sent["email.txt"]).toBe(
+    "OBJET: Un rendez-vous en 2027\n\nBonjour {salutation}.\n",
+  );
+});
+
+it("decomposes a stored email into the two fields, and keeps its bytes untouched", async () => {
+  // single newline after the subject, as an older overlay may hold: shown
+  // decomposed, and NOT recomposed behind its owner's back — an untouched
+  // file must not read as modified
+  await editor("campaign", { "email.txt": "OBJET: Ancien objet\ncorps\n" });
+  await choose("email.txt");
+  expect(subject().value).toBe("Ancien objet");
+  expect(box().value).toBe("corps\n");
+  expect(container.textContent).not.toContain("modifications non enregistrées");
+});
+
+it("emptying both fields sends the empty value that means « inherit »", async () => {
+  // the shape a cleared box has always sent: an empty value, which BOTH ends
+  // read as the override removed — the server stores nothing and answers
+  // without the key
+  vi.mocked(API.updateCampaignTemplates).mockResolvedValue({ templates: {} });
+  await editor("campaign", { "email.txt": "OBJET: X\n\ncorps\n" });
+  await choose("email.txt");
+  await type(subject(), "");
+  await type(box(), "");
+  await press("Enregistrer");
+  const sent = vi.mocked(API.updateCampaignTemplates).mock.calls[0][0];
+  expect(sent["email.txt"]).toBe("");
+});
+
+// The refusal, IN THE CARD. The page-level banner lives at the top of a long
+// screen: it speaks to a screen reader and misses the eye of whoever is
+// scrolled down to the editor — a refused save whose reason shows nowhere
+// visible was reported as « nothing happens ».
+it("shows a refused save in the card's own slot", async () => {
+  await editor(
+    "campaign",
+    {},
+    {},
+    () => {},
+    async () => {
+      throw new Error(
+        "le modèle « email.txt » doit commencer par une ligne « OBJET: … »",
+      );
+    },
+  );
+  await choose("courrier.txt");
+  await type(box(), "Un texte.");
+  await press("Enregistrer");
+  const alert = container.querySelector('form [role="alert"]');
+  expect(alert?.textContent).toContain("doit commencer par une ligne");
 });
 
 it("saves nothing for a level that has touched nothing", async () => {

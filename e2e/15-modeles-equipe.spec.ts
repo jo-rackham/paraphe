@@ -21,12 +21,14 @@ const VOLUNTEER = {
   email: "quinze-benevole@premiere.test",
   name: "Vince Bénévole",
 };
-const TEAM_EMAIL =
-  "OBJET: Le mot de l'équipe Quinze\n" +
-  "\n" +
+// the subject is its own FIELD on screen; stored, it stays the template's
+// first line — the one-file format the engine and the mailing share
+const TEAM_SUBJECT = "Le mot de l'équipe Quinze";
+const TEAM_BODY =
   "Texte de l'équipe Quinze, pour {salutation} de {commune_de}.\n" +
   "\n" +
   "{signataire}, {signataire_qualite}\n";
+const TEAM_EMAIL = `OBJET: ${TEAM_SUBJECT}\n\n${TEAM_BODY}`;
 const CAMPAIGN_LETTER =
   "Lettre corrigée par la campagne, pour {salutation}.\n" +
   "\n" +
@@ -89,14 +91,22 @@ test.describe
       await openManagement(page);
       await choose(page, "email.txt");
       // EMPTY, the inherited text as a PLACEHOLDER — filled in, it would be
-      // a frozen copy — and the label says whose text an empty box follows
+      // a frozen copy — split the way the fields are: the subject in its
+      // own input, the body in the box
       await expect(box(page)).toHaveValue("");
       await expect(
-        editor(page).getByText("(vide : suit le texte de la campagne)"),
+        editor(page).getByText("(vide : suit le texte de la campagne)").first(),
       ).toBeVisible();
-      expect(await box(page).getAttribute("placeholder")).toContain("OBJET:");
+      const objet = editor(page).getByLabel("Objet de l'email");
+      expect(await objet.getAttribute("placeholder")).toContain(
+        "{annee_recente}",
+      );
+      expect(await box(page).getAttribute("placeholder")).toContain(
+        "{salutation}",
+      );
 
-      await box(page).fill(TEAM_EMAIL);
+      await objet.fill(TEAM_SUBJECT);
+      await box(page).fill(TEAM_BODY);
       await save(page);
       await expect(
         page.getByText(/Modèles enregistrés \(1 texte/),
@@ -162,7 +172,11 @@ test.describe
       await signIn(page, ORIGIN, LEAD.email, leadPassword);
       await openManagement(page);
       await choose(page, "email.txt");
-      await expect(box(page)).toHaveValue(TEAM_EMAIL);
+      // the stored file, shown decomposed: subject in its field, body in the box
+      await expect(editor(page).getByLabel("Objet de l'email")).toHaveValue(
+        TEAM_SUBJECT,
+      );
+      await expect(box(page)).toHaveValue(TEAM_BODY);
       await editor(page)
         .getByRole("button", { name: "Revenir au texte de la campagne" })
         .click();

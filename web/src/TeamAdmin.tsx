@@ -98,6 +98,11 @@ function ConfigurationCampagne({
   const [name, setName] = useState(cfg.organisation?.name ?? "");
   const [sending, setSending] = useState(false);
   const [logoSending, setLogoSending] = useState(false);
+  // The refusal, IN THIS CARD: the page banner lives at the top of a long
+  // screen and misses the eye of whoever is scrolled down to this form — a
+  // refused save whose reason shows nowhere visible reads as a save that
+  // silently did nothing.
+  const [refus, setRefus] = useState("");
   const [busy, done] = useSubmitGuard();
 
   const save = async (e: React.FormEvent) => {
@@ -127,6 +132,7 @@ function ConfigurationCampagne({
           name: r.name,
         },
       });
+      setRefus("");
       onMessage({
         tone: "ok",
         text:
@@ -136,6 +142,7 @@ function ConfigurationCampagne({
               `${r.unfilled.map(campaignLabel).join(", ")}.`,
       });
     } catch (err) {
+      setRefus(err instanceof Error ? err.message : String(err));
       onError(err);
     } finally {
       done();
@@ -255,6 +262,11 @@ function ConfigurationCampagne({
           </p>
         </>
       )}
+      {/* the region PRE-EXISTS its first message and holds no control:
+          mounted with its text, some assistive technology never reads it */}
+      <p className={refus ? "alerte erreur" : "sr-only"}>
+        <span role="alert">{refus}</span>
+      </p>
       <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Enregistrement…" : "Enregistrer la campagne"}
       </button>
