@@ -35,6 +35,7 @@ web/public/donnees/*.csv
 # parcours complets : base jetable, binaire compilé, traces d'échec
 e2e/.tmp/
 e2e/.results/
+e2e-prod/.results/
 
 # --- Divers -------------------------------------------------------------
 # artefacts d'outils (navigateur de test, verrou uv)

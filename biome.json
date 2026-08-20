@@ -8,6 +8,7 @@
       "web/src/**/*.{ts,tsx}",
       "web/*.ts",
       "e2e/**/*.{ts,mjs}",
+      "e2e-prod/**/*.ts",
       "!**/dist",
       "!**/node_modules",
       "!api/vendor",

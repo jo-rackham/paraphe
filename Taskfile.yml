@@ -404,6 +404,19 @@ tasks:
       - pnpm exec playwright install chromium
       - pnpm exec playwright test --config e2e/playwright.config.ts
 
+  e2e-prod:
+    desc: 'Fumée sur la PROD (lecture seule + navigateur ; section connectée si PARAPHE_PROD_COORD_* posées)'
+    # Against the LIVE instance: TLS, ingress headers, published lists — what
+    # the local suite structurally cannot see. It creates nothing on the
+    # server; the signed-in section skips without the probe campaign's
+    # coordination (PARAPHE_PROD_CAMPAIGN_ORIGIN, PARAPHE_PROD_COORD_EMAIL,
+    # PARAPHE_PROD_COORD_PASSWORD), and every write it makes stays inside
+    # that campaign.
+    cmds:
+      - pnpm install
+      - pnpm exec playwright install chromium
+      - pnpm exec playwright test --config e2e-prod/prod.config.ts
+
   purge-notes:
     desc: Efface les notes et l'historique de contact (fin de campagne)
     prompt: Effacer DÉFINITIVEMENT toutes les notes de l'équipe ?
