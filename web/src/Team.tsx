@@ -29,11 +29,34 @@ import { Tableau } from "./TeamDashboard.tsx";
 import { ListeServeur } from "./TeamMayors.tsx";
 import { Profil } from "./TeamProfile.tsx";
 import { DemandeEquipe } from "./TeamRequest.tsx";
-import type { Account, MayorCard, Me, Message, ServerConfig } from "./types.ts";
+import type {
+  Account,
+  MayorCard,
+  Me,
+  Message,
+  Note,
+  ServerConfig,
+} from "./types.ts";
 
 // Team mode: the work lives in PostgreSQL, shared and walled off per local
 // team. This mode is what keeps two volunteers from writing to the same
 // mayor — the browser version cannot.
+
+/**
+ * A history line's row identifier. Optional on `Note` because browser mode
+ * has none — there a note is named by its place in the record — and always
+ * present here. Said OUT LOUD rather than asserted away: `notes/undefined`
+ * in a path is a 400 about an unreadable identifier, which tells the
+ * volunteer nothing about the card they are looking at.
+ */
+const noteId = (n: Note): number => {
+  if (n.id === undefined) {
+    throw new Error(
+      "Cette note n'a pas d'identifiant — rechargez la fiche avant de la modifier.",
+    );
+  }
+  return n.id;
+};
 
 const VIEW_TITLES: Record<string, string> = {
   guide: "Guide",
@@ -361,6 +384,23 @@ export default function Team({ config }: { config: ServerConfig }) {
           drafts={cardDrafts}
           status={chosen.mayor.status}
           notes={chosen.notes ?? []}
+          // The author corrects their own words; the coordination removes any
+          // note and rewrites none — different words under somebody else's
+          // name is « qui envoie est qui signe », one register down. Shown
+          // here, REFUSED by the server: `mine` is a boolean it computes, and
+          // this reads it rather than an address, which does not cross.
+          noteRights={(n) => ({
+            edit: !!n.mine,
+            delete: !!n.mine || account.role === "coordination",
+          })}
+          onEditNote={async (n, _i, text) => {
+            setChosen(
+              await API.editNote(chosen.mayor.insee_code, noteId(n), text),
+            );
+          }}
+          onDeleteNote={async (n) => {
+            setChosen(await API.deleteNote(chosen.mayor.insee_code, noteId(n)));
+          }}
           onBack={() => setTab("maires")}
           header={<ReserveePar mayor={chosen.mayor} me={account} />}
           onStatus={async (status: string, note: string) => {

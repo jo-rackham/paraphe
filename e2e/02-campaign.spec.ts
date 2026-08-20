@@ -96,7 +96,9 @@ test.describe
       await page.locator("table button.lien").first().click();
 
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
-      await page.getByLabel("Note").fill("écrit ce matin, réponse promise");
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("écrit ce matin, réponse promise");
       await page.getByRole("button", { name: "Enregistrer" }).click();
 
       await expect(

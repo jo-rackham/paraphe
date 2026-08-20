@@ -1226,6 +1226,26 @@ export interface CardProps {
   templates?: (Templates | null | undefined)[];
   status?: string | null;
   notes?: Note[];
+  /**
+   * What this reader may do to a given history line. ABSENT means no button
+   * at all, which is how a mode that cannot do it renders — and the answer is
+   * the MODE's to give, since the two do not compute it the same way: team
+   * mode reads the server's `mine` beside its own role, browser mode holds
+   * every note it has.
+   *
+   * It decides what is on SCREEN. What refuses is the server, and in browser
+   * mode there is nothing to refuse: the notes are this browser's own.
+   */
+  noteRights?: (n: Note) => { edit: boolean; delete: boolean };
+  /**
+   * Correcting the WORDS of one line, and removing one. Both receive the note
+   * AND its position, because the two modes name a note differently: by its
+   * row identifier on the server, by its place in the record in the browser.
+   * They may throw — the message is shown as is, which is how a note somebody
+   * has moved since reaches the volunteer.
+   */
+  onEditNote?: (n: Note, index: number, text: string) => Promise<void>;
+  onDeleteNote?: (n: Note, index: number) => Promise<void>;
   onBack: () => void;
   onStatus: (status: string, note: string) => void | Promise<void>;
   /** Team-mode banner: who reserved the card. */
@@ -1248,19 +1268,56 @@ export function Fiche({
   phoneOutreach,
   status: initialStatus,
   notes = [],
+  noteRights,
+  onEditNote,
+  onDeleteNote,
   onBack,
   onStatus,
   header,
   drafts,
 }: CardProps) {
-  const [status, setStatus] = useState(initialStatus ?? "to_contact");
+  // THE STATUS ON SCREEN IS DERIVED, not held.
+  //
+  // What is remembered is the volunteer's PICK together with the card status
+  // it was made under. While the card stands still the pick stands; the
+  // moment the card carries a different status — a save landing, or a note
+  // removal rolling it back to what the history then says — the pick is
+  // spent and the card's own status shows.
+  //
+  // Held in state and caught up from the prop, it was wrong in both
+  // directions and both were measured end to end. A catch-up during RENDER
+  // advances its ref on a render React may discard, so it landed one render
+  // late — on the render the select change caused — and recorded the
+  // PREVIOUS outcome under the new note. A catch-up in an EFFECT is worse:
+  // passive effects run after paint, so the screen showed the pick, the
+  // volunteer typed on, and the clobber arrived later. Derivation has no
+  // moment to land at.
+  const [picked, setPicked] = useState<{ under: string; value: string } | null>(
+    null,
+  );
+  const carried = initialStatus ?? "to_contact";
+  const status = picked?.under === carried ? picked.value : carried;
+  const setStatus = (value: string) => setPicked({ under: carried, value });
   const [statusError, setStatusError] = useState<string | null>(null);
   // `saving` is the STATE the button reads (aria-disabled, label); `submitting`
   // is the re-entry guard the handler reads. They are two different things, and
   // this card is the last submission in the app that conflated them — see save.
   const [submitting, submitted] = useSubmitGuard();
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // What the sr-only region beside the button says. A STRING and not a
+  // boolean, because it is now the outcome of three acts — recording a
+  // status, correcting a note, removing one — and they are not « enregistré »
+  // alike.
+  const [saved, setSaved] = useState("");
+  // The one history line being acted on, `<verb>:<key>`. Held HERE and not in
+  // each row: two rows in edit mode at once is two drafts and one `noteDraft`,
+  // and in browser mode a deletion shifts the reverse-index keys of every line
+  // NEWER than it — React then remounts them, and an editor open on one of
+  // those loses what was typed into it.
+  const [activeNote, setActiveNote] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [noteSubmitting, noteSubmitted] = useSubmitGuard();
 
   let rendered: {
     subject: string;
@@ -1379,17 +1436,67 @@ export function Fiche({
     // second click a no-op. Every other submission in the app already does this.
     if (submitting()) return;
     setStatusError(null);
-    setSaved(false);
+    setSaved("");
     setSaving(true);
     try {
       await onStatus(status, note);
       setNote("");
-      setSaved(true);
+      setSaved("Enregistré.");
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
       submitted();
       setSaving(false);
+    }
+  };
+
+  /**
+   * One act on one history line — correcting it, removing it.
+   *
+   * `holdFocusThrough` and not `rescueFocusAfterCommit`: the control that runs
+   * this DIES when the answer lands, not at the click — the row leaves the
+   * history, or the editor closes over the button that submitted it. Called
+   * after the await, the other helper finds focus already on `<body>` and
+   * cannot tell « nobody was holding anything » from « the holder just died ».
+   *
+   * The re-entry guard is a REF, like every other submission here: two clicks
+   * in the same tick run two handlers built by the same render, both read
+   * `notesBusy` as false, and both go — which on a deletion is a second
+   * request against a row that no longer exists, answered 404 to somebody
+   * whose deletion worked.
+   */
+  const onNote = async (act: () => Promise<void>, done: string) => {
+    if (noteSubmitting()) return;
+    setStatusError(null);
+    setSaved("");
+    // THE PICK IS DROPPED, and this is the only place it is.
+    //
+    // Removing a note rolls the card back to what the history then says, and
+    // that is the one thing this act has to make visible. A pick left
+    // standing hides it — and a pick already RECORDED hides it in the way
+    // that is hardest to see, because it is remembered against the card
+    // status it was made under: record « à rappeler » over « email envoyé »,
+    // remove the note, and the card returns to « email envoyé » — the very
+    // status the pick was made under, so it comes back to life and the select
+    // shows a choice nobody has made since. Measured: the roll-back in the
+    // database, the withdrawn status on screen.
+    //
+    // BEFORE the round trip, so there is no frame in between showing it. And
+    // the pick is dropped nowhere else: nothing but this moves a card
+    // BACKWARDS, which is what it takes to resurrect one.
+    setPicked(null);
+    setNotesBusy(true);
+    const restore = holdFocusThrough();
+    try {
+      await act();
+      setActiveNote(null);
+      setSaved(done);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : String(e));
+    } finally {
+      noteSubmitted();
+      setNotesBusy(false);
+      restore();
     }
   };
 
@@ -1564,21 +1671,143 @@ export function Fiche({
               what stays with a note as the list grows at the front. Two
               notes can share a timestamp, so no field of the note itself
               is unique. */}
-          {notes.map((n, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: reverse index — stable under prepend, and no field of a note is unique
-            <div className="note-item" key={notes.length - i}>
-              <span className="gris">
-                {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
-                {n.volunteer ? ` — ${n.volunteer}` : ""}
-              </span>
-              {n.note && (
-                <>
-                  <br />
-                  {n.note}
-                </>
-              )}
-            </div>
-          ))}
+          {notes.map((n, i) => {
+            // The row's identity: its own id where there is one (team mode),
+            // the reverse index where there is not (browser mode, which names
+            // a note by its position).
+            const key = String(n.id ?? notes.length - i);
+            const rights = noteRights?.(n) ?? { edit: false, delete: false };
+            const editing = activeNote === `edit:${key}`;
+            const confirming = activeNote === `delete:${key}`;
+            // Every row carries the same two buttons, so their VISIBLE names
+            // repeat down the list and a screen reader enumerates them
+            // identically.
+            //
+            // The date alone does NOT tell them apart: two outcomes recorded
+            // in the same minute — an email sent and the call that followed,
+            // which is a normal afternoon — carry the same `ts` to the
+            // minute, and the two rows then wore one name. The POSITION is
+            // what is unique, and the history is newest first, so « la note
+            // 1 » is the one just recorded.
+            const which = `${i + 1} du ${n.ts}`;
+            return (
+              <div className="note-item" key={key}>
+                <span className="gris">
+                  {n.ts} → {(STATUSES[n.status] ?? ["?"])[0]}
+                  {n.volunteer ? ` — ${n.volunteer}` : ""}
+                  {n.edited_at ? ` — modifiée le ${n.edited_at}` : ""}
+                </span>
+                {editing ? (
+                  <>
+                    <label>
+                      Texte de la note
+                      <textarea
+                        rows={3}
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                      />
+                    </label>
+                    <p>
+                      <button
+                        type="button"
+                        aria-disabled={notesBusy || undefined}
+                        onClick={() =>
+                          onNote(
+                            () =>
+                              onEditNote?.(n, i, noteDraft) ??
+                              Promise.resolve(),
+                            "Note modifiée.",
+                          )
+                        }
+                      >
+                        {notesBusy ? "Enregistrement…" : "Enregistrer la note"}
+                      </button>{" "}
+                      <button
+                        type="button"
+                        className="lien"
+                        onClick={() => {
+                          // this very button unmounts with the editor: hand
+                          // focus to the content first, or it falls to <body>
+                          focusContenu();
+                          setActiveNote(null);
+                        }}
+                      >
+                        Annuler
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {n.note && (
+                      <>
+                        <br />
+                        {n.note}
+                      </>
+                    )}
+                    {confirming ? (
+                      /* Asked in the row rather than in a window.confirm: the
+                         act removes a line from a register the whole campaign
+                         reads, and a browser dialogue is one no test can drive
+                         and jsdom does not implement. */
+                      <p className="note-actions">
+                        <strong>Supprimer cette note ?</strong>{" "}
+                        <button
+                          type="button"
+                          aria-disabled={notesBusy || undefined}
+                          onClick={() =>
+                            onNote(
+                              () => onDeleteNote?.(n, i) ?? Promise.resolve(),
+                              "Note supprimée.",
+                            )
+                          }
+                        >
+                          {notesBusy ? "Suppression…" : "Confirmer"}
+                        </button>{" "}
+                        <button
+                          type="button"
+                          className="lien"
+                          onClick={() => {
+                            focusContenu();
+                            setActiveNote(null);
+                          }}
+                        >
+                          Annuler
+                        </button>
+                      </p>
+                    ) : (
+                      (rights.edit || rights.delete) && (
+                        <p className="note-actions">
+                          {rights.edit && onEditNote && (
+                            <button
+                              type="button"
+                              className="lien"
+                              aria-label={`Modifier la note ${which}`}
+                              onClick={() => {
+                                setNoteDraft(n.note);
+                                setActiveNote(`edit:${key}`);
+                              }}
+                            >
+                              Modifier
+                            </button>
+                          )}{" "}
+                          {rights.delete && onDeleteNote && (
+                            <button
+                              type="button"
+                              className="lien"
+                              aria-label={`Supprimer la note ${which}`}
+                              onClick={() => setActiveNote(`delete:${key}`)}
+                            >
+                              Supprimer
+                            </button>
+                          )}
+                        </p>
+                      )
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1621,7 +1850,7 @@ export function Fiche({
           {/* always in the tree: a live region announces reliably only when
               its CONTENT changes, not when it appears with it */}
           <span role="status" className="gris">
-            {saved ? "Enregistré." : ""}
+            {saved}
           </span>
         </div>
       </section>

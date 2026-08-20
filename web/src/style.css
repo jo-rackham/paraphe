@@ -295,6 +295,12 @@ html { scroll-padding-bottom: 8rem; }
 }
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
+/* « Modifier », « Supprimer », and the question that stands between the
+   second and the act. Tight against the line they belong to, so a history of
+   ten notes does not become ten paragraphs of controls. */
+.note-actions { margin: .2rem 0 0; font-size: .92em; }
+.note-item label { display: block; margin-top: .4rem; }
+.note-item textarea { width: 100%; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);
           border-left: 5px solid var(--alerte-trait); border-radius: .45rem;
           padding: .5rem .8rem; }

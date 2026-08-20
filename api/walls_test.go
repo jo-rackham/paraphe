@@ -57,10 +57,13 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 	execAsMaintenance(t, s,
 		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
 			"VALUES($1,'01001',$2,'signed')", b, neighbourVolunteer)
-	execAsMaintenance(t, s,
-		"INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts) "+
-			"VALUES($1,'01001',$2,'signed',$3,'2026-01-01T00:00')",
-		b, neighbourVolunteer, neighbourNote)
+	// Its identifier is kept: `notes.id` is one sequence for the whole table,
+	// so A can NAME a row of B's by number, which is the only thing the two
+	// note routes need to reach one.
+	var neighbourNoteID int64
+	asMaintenanceRow(t, s, "INSERT INTO notes(org_id, insee_code, volunteer, "+
+		"status, note, ts) VALUES($1,'01001',$2,'signed',$3,'2026-01-01T00:00') "+
+		"RETURNING id", &neighbourNoteID, b, neighbourVolunteer, neighbourNote)
 	execAsMaintenance(t, s,
 		"INSERT INTO accounts(org_id, email, name, password_hash, role, active) "+
 			"VALUES($1,$2,'Bénévole de B','x','volunteer',true)",
@@ -248,6 +251,21 @@ func TestNoCampaignSeesAnother(t *testing.T) {
 			t.Fatalf("A's public form refused the name of %s: %d %v — the "+
 				"conflict was read across the wall", what, code, rep)
 		}
+	}
+	// B's note, NAMED BY NUMBER on A's host. `notes.id` is one sequence for
+	// the whole table, so the identifier is guessable by counting — and both
+	// routes rewrite or destroy a row that exists. The 404 is what says the
+	// row is bounded by the campaign, hence does not exist here; the readback
+	// at the end of this test is what says nothing happened anyway.
+	if code, _ := c.call(http.MethodPost,
+		fmt.Sprintf("/api/mayors/01001/notes/%d", neighbourNoteID),
+		map[string]any{"note": "réécrite depuis A"}); code != http.StatusNotFound {
+		t.Errorf("A named B's note to rewrite it: %d, want 404", code)
+	}
+	if code, _ := c.call(http.MethodDelete,
+		fmt.Sprintf("/api/mayors/01001/notes/%d", neighbourNoteID),
+		nil); code != http.StatusNotFound {
+		t.Errorf("A named B's note to delete it: %d, want 404", code)
 	}
 	// The return code, asserted: a handler that refuses writes nothing, and
 	// "B is untouched" then holds for a reason that has nothing to do with a

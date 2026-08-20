@@ -156,14 +156,18 @@ test.describe
 
       const rewritten = "Je vous écris après notre échange de mardi.";
       await page.getByLabel("Message").fill(rewritten);
-      await page.getByLabel("Note").fill("il rappelle jeudi");
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("il rappelle jeudi");
       await openTab(page, "Guide");
       await openTab(page, "Les maires");
       await page.locator("table button.lien").first().click();
       expect(await page.getByLabel("Message").inputValue()).toBe(rewritten);
-      expect(await page.getByLabel("Note").inputValue()).toBe(
-        "il rappelle jeudi",
-      );
+      expect(
+        await page
+          .getByRole("textbox", { name: "Note", exact: true })
+          .inputValue(),
+      ).toBe("il rappelle jeudi");
 
       // and a touch written AFTER the card was opened must reach the email
       // the volunteer will actually send — the letter beside it always did

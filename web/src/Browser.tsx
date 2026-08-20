@@ -834,6 +834,20 @@ export default function Browser() {
                   notes={(
                     tracking[chosen.insee_code as string]?.notes ?? []
                   ).map((n) => ({ ...n, volunteer: null }))}
+                  // Every note here was written in this browser, by whoever is
+                  // reading it: there is no author to tell from a colleague,
+                  // and nothing to refuse.
+                  noteRights={() => ({ edit: true, delete: true })}
+                  onEditNote={async (n, i, text) => {
+                    const insee = chosen.insee_code as string;
+                    const e = await DB.editNote(insee, i, n, text);
+                    setTracking((s) => ({ ...s, [insee]: e }));
+                  }}
+                  onDeleteNote={async (n, i) => {
+                    const insee = chosen.insee_code as string;
+                    const e = await DB.deleteNote(insee, i, n);
+                    setTracking((s) => ({ ...s, [insee]: e }));
+                  }}
                   onBack={() => navigate([])}
                   onStatus={async (status, note) => {
                     const insee = chosen.insee_code as string;

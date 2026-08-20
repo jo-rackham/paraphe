@@ -1413,6 +1413,76 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   columns, like the writer: `taken_by` as TEXT decides (null nobody, `"0"`
   national, a number a team), `team_name` labels, and `equipeQuiTravaille`
   normalises. Whoever adds a third attribution adds both columns.
+- **A NOTE IS CORRECTED BY ITS AUTHOR AND REMOVED BY ITS AUTHOR OR THE
+  COORDINATION**, in all three modes. It used to be definitive: a typo taken
+  during a call, a note recorded on the wrong commune, a word with no business
+  in a register the whole campaign reads — the only remedy was an UPDATE typed
+  against production, the one kind of access nobody can audit.
+  **Correcting touches the TEXT alone.** `status`, `ts`, `volunteer` and
+  `team_id` stay: a spelling is not what happened, and the status this line
+  recorded is what the campaign reads to decide whether to call this person.
+  Saying something else about the contact is a NEW status, which is the
+  control directly under the history.
+  **Rewriting is the AUTHOR's, and the coordination is not an exception to
+  it.** It removes words a campaign must not carry — a note whose author's
+  access has since been closed would otherwise stay for ever — and it never
+  puts different ones under somebody else's name, which is « whoever sends it
+  is whoever signs it » one register down. A lead gets nothing extra: the same
+  narrow line `routeToggleAccount` draws.
+  **REMOVING ROLLS THE CARD BACK TO WHAT THE HISTORY THEN SAYS.** The history
+  is the register and `assignments` is its head: the newest remaining note
+  decides the status, its date and its `updated_by_team`, and no note left is
+  a card nobody has contacted. Without it, emptying a history leaves « signé »
+  that nobody ever wrote, on a mayor every volunteer then skips. The head is
+  read WITHOUT the team filter the card applies — it may belong to another
+  team, and filtered, a volunteer's deletion would roll the card back past a
+  colleague's work they cannot see. Unconditional, hence a no-op when a line
+  from the middle goes.
+  **And the SELECT follows the card, by DERIVATION.** `Fiche` used to hold
+  its status in state, seeded at mount, and nothing moved it from outside;
+  a select still showing the withdrawn status wrote it straight back on the
+  next « Enregistrer », with a `seen` the parent had refreshed, so the server
+  accepted it — the roll-back undone by a screen that had not been told.
+  What is held now is the volunteer's PICK together with the card status it
+  was made UNDER, and the status shown is derived from the two: while the
+  card stands still the pick stands, and the moment the card carries
+  something else the card wins. Catching the state up from the prop was
+  tried twice and was wrong in both directions, each measured end to end: a
+  catch-up during RENDER advances its ref on a render React may discard, so
+  it landed one render late — on the render the select change caused — and
+  the outcome the volunteer chose was recorded as the previous one, with an
+  empty note; a catch-up in an EFFECT is worse, since passive effects run
+  after paint, so the screen showed the pick, the volunteer typed on, and
+  the clobber arrived later. Derivation has no moment to land at.
+  **A recorded pick is DROPPED where a note is removed, and nowhere else.**
+  Remembered against the status it was made under, it comes back to life the
+  day the card RETURNS to that status — which is exactly what removing the
+  head note does. Nothing else moves a card backwards, so nothing else needs
+  to drop it; dropped before the round trip, so no frame shows the withdrawn
+  status.
+  **A save is finished when the note field clears, not when the history
+  shows the line**: the line is drawn from state written INSIDE the awaited
+  call, while the handler goes on to clear the field and say « Enregistré. ».
+  Both end-to-end journeys wait on the field, and before they did they typed
+  into it in between — and recorded an empty note under the previous status.
+  **`mine` is a boolean the server computes, never the address it comes
+  from**: it is what puts « Modifier » on a line, and what refuses is the
+  predicate in the route. The two rights are separate on screen because the
+  routes behind them are two.
+  **A row's buttons are named by their POSITION and their date.** Every line
+  carries the same two, so their visible names repeat down the list and a
+  screen reader enumerates them identically; the date alone does not separate
+  them either, because two outcomes recorded in the same minute — an email
+  sent and the call that followed — share a `ts`. « la note 1 » is the one
+  just recorded, the history being newest first.
+  **The editor closes one commit AFTER the card comes back**, and until it
+  does its row carries no « Supprimer » — so a click aimed at that row lands
+  on the row BELOW and removes a note nobody meant to touch. Both journeys
+  wait for the editor to be gone.
+  Browser mode names a note by its POSITION plus the content the screen was
+  showing — the `seen` of the team version, on this side of the wire. It gains
+  no identifier: a note already written would have none, and the two paths
+  would have to be told apart for ever.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit

@@ -39,7 +39,13 @@ type idorFixture struct {
 	// a team request PENDING in campaign A: the object campaign B must not
 	// be able to name
 	teamRequestID int64
-	passwords     map[string]string
+	// team 2's note on `idorNoteCard`: the object of the edit and delete
+	// cases. On a card of its OWN so that the delete case, which succeeds,
+	// leaves `idorOwnedCard`'s single note where the card and status cases
+	// expect it — the route lists are run in map order, so nothing may
+	// depend on one running before another.
+	noteID    int64
+	passwords map[string]string
 	// clients bound to the fixture's HTTP server
 	newClientOn    func(host string) *client
 	signedInClient func(t *testing.T, host, email string) *client
@@ -63,6 +69,9 @@ const (
 
 	// the card team 2 owns: the object of every cross-team case
 	idorOwnedCard = "02000"
+	// the card carrying the note the edit and delete cases aim at
+	idorNoteCard = "02001"
+	idorNoteText = "NOTE ÉCRITE PAR L'ÉQUIPE 02"
 )
 
 func idorSetup(t *testing.T) *idorFixture {
@@ -97,6 +106,16 @@ func idorSetup(t *testing.T) *idorFixture {
 		"INSERT INTO notes(org_id, insee_code, volunteer, status, note, ts, team_id) "+
 			"VALUES($1,$2,$3,'called','NOTE DE L''ÉQUIPE 02','2026-01-01T00:00',$4)",
 		f.orgA, idorOwnedCard, idorVol2, f.team2)
+	// team 2's note on a card of its own, and the assignment it is the head
+	// of: what the edit and delete cases name, and what tells a refusal that
+	// wrote nothing from one that rolled the card back
+	execAsMaintenance(t, s,
+		"INSERT INTO assignments(org_id, insee_code, team_id, volunteer, status, "+
+			"updated_at, updated_by_team) VALUES($1,$2,$3,$4,'signed','2026-01-01T00:00',$3)",
+		f.orgA, idorNoteCard, f.team2, idorVol2)
+	asMaintenanceRow(t, s, "INSERT INTO notes(org_id, insee_code, volunteer, "+
+		"status, note, ts, team_id) VALUES($1,$2,$3,'signed',$4,'2026-01-01T00:00',$5) "+
+		"RETURNING id", &f.noteID, f.orgA, idorNoteCard, idorVol2, idorNoteText, f.team2)
 	// campaign B's work on a card A also sees in its pool
 	execAsMaintenance(t, s,
 		"INSERT INTO assignments(org_id, insee_code, volunteer, status) "+
@@ -221,6 +240,133 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 				if after != before {
 					t.Fatalf("the neighbouring campaign gained %d work row(s) from "+
 						"a write on the same INSEE code", after-before)
+				}
+			}},
+		},
+		// Correcting a note is the AUTHOR's, and nobody else's — not a
+		// colleague of the same campaign, not the coordination, which may
+		// remove words it must not carry but never put different ones under
+		// somebody else's name.
+		"POST /api/mayors/{insee}/notes/{id}": {
+			{"another team's note is not this volunteer's to rewrite", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorVol1)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID),
+					map[string]string{"note": "réécrite par quelqu'un d'autre"})
+				if code != http.StatusNotFound {
+					t.Fatalf("rewriting another team's note: %d, want 404 — a 403 "+
+						"would say the note exists", code)
+				}
+				if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
+					f.noteID); got != idorNoteText {
+					t.Fatalf("the note now reads %q", got)
+				}
+			}},
+			{"the coordination removes words, it does not replace them",
+				func(t *testing.T) {
+					c := f.signedInClient(t, idorHostA, idorCoord)
+					code, _ := c.call(http.MethodPost,
+						fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID),
+						map[string]string{"note": "réécrite par la coordination"})
+					if code != http.StatusNotFound {
+						t.Fatalf("the coordination rewriting a volunteer's note: %d, "+
+							"want 404 — it may delete one, never sign different words "+
+							"with somebody else's name", code)
+					}
+					if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
+						f.noteID); got != idorNoteText {
+						t.Fatalf("the note now reads %q", got)
+					}
+				}},
+			{"a neighbouring campaign cannot name this one's note", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostB, idorCoordB)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID),
+					map[string]string{"note": "réécrite par la voisine"})
+				if code != http.StatusNotFound {
+					t.Fatalf("naming the neighbour's note: %d, want 404 — the row is "+
+						"bounded by the campaign, so it does not exist here", code)
+				}
+				if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
+					f.noteID); got != idorNoteText {
+					t.Fatalf("the note now reads %q", got)
+				}
+			}},
+			// last of this list: the guard guards, it does not brick the
+			// feature — and every case above needed the text untouched. Run
+			// as the AUTHOR, on the campaign's own host.
+			{"its author corrects it", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorVol2)
+				code, _ := c.call(http.MethodPost,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID),
+					map[string]string{"note": "corrigée par son auteur"})
+				if code != http.StatusOK {
+					t.Fatalf("the author correcting their own note: %d", code)
+				}
+				if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
+					f.noteID); got != "corrigée par son auteur" {
+					t.Fatalf("the correction did not land: %q", got)
+				}
+			}},
+		},
+		// Removing one is the author's OR the coordination's. Asserted on the
+		// row's existence, since a handler that answers 404 and deletes anyway
+		// destroys a record nothing can bring back.
+		"DELETE /api/mayors/{insee}/notes/{id}": {
+			{"another team's note is not this volunteer's to remove", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostA, idorVol1)
+				code, _ := c.call(http.MethodDelete,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID), nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("removing another team's note: %d, want 404", code)
+				}
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM notes WHERE id=$1",
+					f.noteID); n != 1 {
+					t.Fatal("the note was removed by a volunteer who did not write it")
+				}
+			}},
+			{"a neighbouring campaign cannot remove this one's note", func(t *testing.T) {
+				c := f.signedInClient(t, idorHostB, idorCoordB)
+				code, _ := c.call(http.MethodDelete,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID), nil)
+				if code != http.StatusNotFound {
+					t.Fatalf("removing the neighbour's note: %d, want 404", code)
+				}
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM notes WHERE id=$1",
+					f.noteID); n != 1 {
+					t.Fatal("a neighbouring campaign deleted a note of this one")
+				}
+				// and the card it was the head of did not roll back either: a
+				// refusal that reached restoreHead would rewrite a status the
+				// whole campaign reads, on a campaign it cannot even see
+				if got := scalar[string](t, s, "SELECT status FROM assignments "+
+					"WHERE org_id=$1 AND insee_code=$2", f.orgA,
+					idorNoteCard); got != "signed" {
+					t.Fatalf("the card's status became %q through a refused delete", got)
+				}
+			}},
+			// last: the campaign's own coordination removes a note it did not
+			// write, which is the whole point of the second door.
+			//
+			// On a note of ITS OWN, minted here. The route lists are run in
+			// map order — a successful delete of `f.noteID` would empty the
+			// object the edit list above still needs, and which of the two
+			// runs first is Go's choice, not this file's.
+			{"the campaign's own coordination removes it", func(t *testing.T) {
+				var spare int64
+				asMaintenanceRow(t, s, "INSERT INTO notes(org_id, insee_code, "+
+					"volunteer, status, note, ts, team_id) "+
+					"VALUES($1,$2,$3,'called','à retirer','2026-01-02T00:00',$4) "+
+					"RETURNING id", &spare, f.orgA, idorNoteCard, idorVol2, f.team2)
+				c := f.signedInClient(t, idorHostA, idorCoord)
+				code, _ := c.call(http.MethodDelete,
+					fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, spare), nil)
+				if code != http.StatusOK {
+					t.Fatalf("the coordination removing a note of its campaign: %d", code)
+				}
+				if n := scalar[int](t, s, "SELECT COUNT(*) FROM notes WHERE id=$1",
+					spare); n != 0 {
+					t.Fatal("the note is still there")
 				}
 			}},
 		},

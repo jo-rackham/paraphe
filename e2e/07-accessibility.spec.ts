@@ -88,6 +88,33 @@ test.describe
       await expect(page.getByText("Pourquoi cette personne")).toBeVisible();
       await checkA11y(page, "browser:fiche");
 
+      // A HISTORY, and one of its lines open for correction. A fresh browser
+      // holds no note, so the card scanned above carries none — and the
+      // controls a history brings (two buttons per line, a confirmation that
+      // replaces one of them, a textarea that replaces the line) are then
+      // scanned nowhere at all.
+      await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("noté pour le scan");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(page.getByText("noté pour le scan")).toBeVisible();
+      await checkA11y(page, "browser:fiche avec historique");
+
+      await page.getByRole("button", { name: "Modifier la note 1 du" }).click();
+      await expect(page.getByLabel("Texte de la note")).toBeVisible();
+      await checkA11y(page, "browser:fiche, note en correction");
+
+      await page.getByRole("button", { name: "Annuler" }).click();
+      await page
+        .getByRole("button", { name: "Supprimer la note 1 du" })
+        .click();
+      await expect(page.getByText("Supprimer cette note ?")).toBeVisible();
+      await checkA11y(page, "browser:fiche, suppression confirmée");
+      await page.getByRole("button", { name: "Annuler" }).click();
+
       await openTab(page, "Guide");
       await checkA11y(page, "browser:guide");
 
@@ -201,6 +228,23 @@ test.describe
         await page.locator("table button.lien").first().click();
         await expect(page.getByText("Pourquoi cette personne")).toBeVisible();
         await checkA11y(page, "browser:fiche (sombre)");
+
+        // and the history's own controls in dark too: `--focus` and the
+        // muted-row rule are the two the palette gets wrong one theme at a
+        // time
+        await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+        await page
+          .getByRole("textbox", { name: "Note", exact: true })
+          .fill("noté pour le scan");
+        await page
+          .getByRole("button", { name: "Enregistrer", exact: true })
+          .click();
+        await expect(page.getByText("noté pour le scan")).toBeVisible();
+        await page
+          .getByRole("button", { name: "Modifier la note 1 du" })
+          .click();
+        await expect(page.getByLabel("Texte de la note")).toBeVisible();
+        await checkA11y(page, "browser:fiche, note en correction (sombre)");
       });
     });
 

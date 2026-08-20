@@ -99,7 +99,9 @@ test.describe
         await theirs
           .getByLabel("Statut")
           .selectOption({ label: "Email envoyé" });
-        await theirs.getByLabel("Note").fill("email parti le 20/08");
+        await theirs
+          .getByRole("textbox", { name: "Note", exact: true })
+          .fill("email parti le 20/08");
         await theirs
           .getByRole("button", { name: "Enregistrer", exact: true })
           .click();
@@ -108,7 +110,9 @@ test.describe
         // the national volunteer, still reading the state before that
         // write, is refused — in the card's own words
         await page.getByLabel("Statut").selectOption({ label: "Refus" });
-        await page.getByLabel("Note").fill("refus au téléphone");
+        await page
+          .getByRole("textbox", { name: "Note", exact: true })
+          .fill("refus au téléphone");
         await page
           .getByRole("button", { name: "Enregistrer", exact: true })
           .click();

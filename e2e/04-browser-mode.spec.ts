@@ -53,7 +53,9 @@ test.describe
       await first.click();
 
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
-      await page.getByLabel("Note").fill("noté hors ligne");
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("noté hors ligne");
       await page
         .getByRole("button", { name: "Enregistrer", exact: true })
         .click();
@@ -66,6 +68,71 @@ test.describe
       const link = page.getByRole("button", { name: town, exact: true });
       const row = page.locator("table tr").filter({ has: link }).first();
       await expect(row).toContainText("Email envoyé");
+    });
+
+    // The same two acts as the account version, against IndexedDB instead of
+    // PostgreSQL — and the same rule about the head, written twice because
+    // the two worlds share no code there. Everything here was written in this
+    // browser, so there is no author to tell from a colleague and nothing to
+    // refuse: the buttons are on every line.
+    test("a note is corrected and removed, and the card follows", async ({
+      page,
+    }) => {
+      await page.goto(`${STATIC_ORIGIN}/`);
+      const first = page.locator("table button.lien").first();
+      await expect(first).toBeVisible({ timeout: 20_000 });
+      await first.click();
+
+      await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("courriel parti");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(page.getByText("courriel parti")).toBeVisible();
+      // …and the SAVE is finished, which the history appearing does not say:
+      // the line is drawn from state written inside the awaited call, while
+      // the handler goes on to clear this field. Typing into it before that
+      // lands loses what was typed — measured, and it recorded an empty note.
+      await expect(
+        page.getByRole("textbox", { name: "Note", exact: true }),
+      ).toHaveValue("");
+
+      await page.getByLabel("Statut").selectOption({ label: "À rappeler" });
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("aple lundi");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(page.getByText("aple lundi")).toBeVisible();
+      await expect(
+        page.getByRole("textbox", { name: "Note", exact: true }),
+      ).toHaveValue("");
+
+      // « la note 1 » is the most recent: the history is newest first, and
+      // two outcomes of the same minute share a date, so the position is what
+      // names a row.
+      await page.getByRole("button", { name: "Modifier la note 1 du" }).click();
+      await page.getByLabel("Texte de la note").fill("rappeler lundi");
+      await page.getByRole("button", { name: "Enregistrer la note" }).click();
+      await expect(page.getByText("rappeler lundi")).toBeVisible();
+      await expect(page.getByText(/modifiée le/).first()).toBeVisible();
+      // the editor closes on success — and until it does, its row carries no
+      // « Supprimer », so the next click would land on the row BELOW
+      await expect(page.getByLabel("Texte de la note")).toHaveCount(0);
+
+      await page
+        .getByRole("button", { name: "Supprimer la note 1 du" })
+        .click();
+      await expect(page.getByText("Supprimer cette note ?")).toBeVisible();
+      await page.getByRole("button", { name: "Confirmer" }).click();
+      await expect(page.getByText("rappeler lundi")).toHaveCount(0);
+      // the card goes back to what the history now says, and not to the
+      // status it was announcing
+      await expect(page.getByLabel("Statut")).toHaveValue("email_sent");
+      await expect(page.getByText("courriel parti")).toBeVisible();
     });
 
     test("never claims to be the team application", async ({ page }) => {
@@ -156,7 +223,9 @@ test.describe
       const town = (await first.innerText()).trim();
       await first.click();
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
-      await page.getByLabel("Note").fill("avant la sauvegarde");
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("avant la sauvegarde");
       await page
         .getByRole("button", { name: "Enregistrer", exact: true })
         .click();

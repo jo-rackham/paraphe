@@ -64,6 +64,21 @@ export interface Note {
   status: string;
   note: string;
   ts: string;
+  /**
+   * The row's own identifier, in team mode — what the edit and delete routes
+   * need to name one. Browser mode has none: a note there is named by its
+   * position in the record that holds it.
+   */
+  id?: number;
+  /**
+   * Whether the reader WROTE this line. A boolean and never the address it is
+   * computed from: what crosses between colleagues of one campaign is the
+   * card, never the person. It is what puts « Modifier » on a line and takes
+   * it off the next — the server is what refuses.
+   */
+  mine?: boolean;
+  /** When its author last corrected the words; absent = never. */
+  edited_at?: string | null;
 }
 
 export interface Account {
@@ -277,6 +292,6 @@ export interface TeamData {
 export interface Tracking {
   insee_code: string;
   status: string;
-  notes: { ts: string; status: string; note: string }[];
+  notes: { ts: string; status: string; note: string; edited_at?: string }[];
   updated_at: string;
 }

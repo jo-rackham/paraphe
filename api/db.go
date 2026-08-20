@@ -261,6 +261,12 @@ func schema(ctx context.Context, tx pgx.Tx, cfg *Config, bootstrapSlug string) (
 		`UPDATE notes SET team_id = 0 WHERE team_id IS NULL`,
 		`ALTER TABLE notes ALTER COLUMN team_id SET DEFAULT 0`,
 		`ALTER TABLE notes ALTER COLUMN team_id SET NOT NULL`,
+		// When the author last corrected the WORDS. NULL is a note nobody has
+		// touched since it was written, which is every row that predates the
+		// column. A shared register rewritten with nothing saying so is what
+		// « one team watched signé become refusé and could ask whom » already
+		// cost once, one column over.
+		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS edited_at TEXT`,
 		// Local teams: a team = a work scope (usually one or more
 		// departments) with its lead. The name is only unique WITHIN a
 		// campaign: two campaigns each have their own "Nord" team.

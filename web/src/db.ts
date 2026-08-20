@@ -166,6 +166,108 @@ export async function saveTracking(
   return entry;
 }
 
+/**
+ * A note held here has NO identifier, and does not gain one: a note already
+ * written would have none, and the two paths would have to be told apart for
+ * ever. It is named by its POSITION plus the content the screen was showing —
+ * the `seen` of the team version, written on this side of the wire.
+ *
+ * `expected` is compared rather than trusted, because the array is re-read:
+ * two tabs on the same card, or a card left open while an import lands, and
+ * position 0 is no longer the line the volunteer pressed. Refusing beats
+ * rewriting a note nobody meant to touch.
+ *
+ * Assumed limit: two notes of the same minute, the same status and the same
+ * text are indistinguishable here, so the comparison lets a swap between them
+ * through. They are the same line to every reader — editing either is the
+ * same act — and the alternative is an identifier a note already written
+ * would not have.
+ */
+type LocalNote = Tracking["notes"][number];
+/**
+ * What identifies a note beside its position: the three fields a write sets
+ * and nothing touches afterwards. Stated as a SUBSET rather than as the whole
+ * record, because the caller holds a card's `Note` — the shape the team
+ * version's API answers with — and the fields the two do not share are
+ * precisely the ones this comparison has no business reading.
+ */
+type NoteSeen = Pick<LocalNote, "ts" | "status" | "note">;
+
+/** The record, with position `index` confirmed to still hold `expected`. */
+async function heldNotes(
+  insee: string,
+  index: number,
+  expected: NoteSeen,
+): Promise<[IDBDatabase, Tracking, LocalNote[]]> {
+  const db = await open();
+  const current = await tx<Tracking>(db, "tracking", "readonly", (s) =>
+    s.get(insee),
+  );
+  const notes = current?.notes ?? [];
+  const at = notes[index];
+  if (
+    !current ||
+    !at ||
+    at.ts !== expected.ts ||
+    at.status !== expected.status ||
+    at.note !== expected.note
+  ) {
+    throw new Error(
+      "Cette note a changé depuis son affichage — rouvrez la fiche.",
+    );
+  }
+  return [db, current, notes];
+}
+
+/**
+ * Correcting the WORDS, and nothing else — the same rule as the server's. The
+ * status the note recorded and when the contact happened are not a spelling,
+ * so the card's own status and date are left exactly where they were.
+ */
+export async function editNote(
+  insee: string,
+  index: number,
+  expected: NoteSeen,
+  text: string,
+): Promise<Tracking> {
+  const [db, current, notes] = await heldNotes(insee, index, expected);
+  const entry: Tracking = {
+    ...current,
+    notes: notes.map((n, i) =>
+      i === index ? { ...n, note: text, edited_at: timestamp() } : n,
+    ),
+  };
+  await tx(db, "tracking", "readwrite", (s) => s.put(entry));
+  return entry;
+}
+
+/**
+ * Removing one, and putting the card back to what the history then says.
+ *
+ * THE HISTORY IS THE REGISTER AND `status` IS ITS HEAD, the server's rule
+ * written on this side: a card whose last note has just gone would otherwise
+ * keep announcing « signé » with nothing on record saying so, and emptying
+ * the history left a status nobody ever wrote.
+ */
+export async function deleteNote(
+  insee: string,
+  index: number,
+  expected: NoteSeen,
+): Promise<Tracking> {
+  const [db, current, held] = await heldNotes(insee, index, expected);
+  const notes = held.filter((_, i) => i !== index);
+  const entry: Tracking = {
+    ...current,
+    status: notes[0]?.status ?? "to_contact",
+    // the line that now decides dates the card; with none left, the card
+    // moved NOW
+    updated_at: notes[0]?.ts ?? timestamp(),
+    notes,
+  };
+  await tx(db, "tracking", "readwrite", (s) => s.put(entry));
+  return entry;
+}
+
 export async function readSetting<T>(key: string, fallback: T): Promise<T> {
   const db = await open();
   const r = await tx<Setting>(db, "settings", "readonly", (s) => s.get(key));

@@ -46,7 +46,11 @@ var routeLimits = map[string]string{
 	"GET /api/mayors/{insee}":         "none: authenticated read",
 	"GET /api/export.csv":             "export_account",
 	"POST /api/mayors/{insee}/status": "write_account",
-	"POST /api/batch":                 "write_account",
+	// Correcting one's own note, and removing one: authenticated writes on a
+	// card, the same act as recording a status one line up.
+	"POST /api/mayors/{insee}/notes/{id}":   "write_account",
+	"DELETE /api/mayors/{insee}/notes/{id}": "write_account",
+	"POST /api/batch":                       "write_account",
 
 	"GET /api/team":                         "none: authenticated read",
 	"POST /api/team/group":                  "write_account",
@@ -148,6 +152,8 @@ func TestEveryWriteRouteIsActuallyUnderItsCeiling(t *testing.T) {
 	// values: a wired route refuses before its handler ever reads them.
 	reachable := map[string]string{
 		"POST /api/mayors/{insee}/status":         "/api/mayors/01001/status",
+		"POST /api/mayors/{insee}/notes/{id}":     "/api/mayors/01001/notes/1",
+		"DELETE /api/mayors/{insee}/notes/{id}":   "/api/mayors/01001/notes/1",
 		"POST /api/batch":                         "/api/batch",
 		"POST /api/team/group":                    "/api/team/group",
 		"POST /api/team/group/{id}":               "/api/team/group/1",

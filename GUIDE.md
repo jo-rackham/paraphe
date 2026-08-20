@@ -162,6 +162,14 @@ même campagne, c'est une maladresse, pas une faute.
    règle d'or : une note de deux lignes évite qu'un collègue rappelle un
    maire déjà vu (le pire faux pas possible). Prenez un nouveau lot quand le
    vôtre est traité.
+5. **Une note se corrige et se supprime.** Sous chaque ligne de l'historique,
+   « Modifier » retouche le texte de vos propres notes — la ligne dit ensuite
+   qu'elle a été modifiée — et « Supprimer » la retire, après confirmation.
+   Supprimer la note la plus récente ramène la fiche au statut que dit le
+   reste de l'historique : effacez le « refus », la fiche revient à ce qui
+   était noté avant. Écrivez donc sans hésiter, quitte à corriger : une note
+   approximative vaut mieux qu'une case vide. La coordination peut retirer
+   n'importe quelle note ; personne ne peut réécrire celle d'un autre.
 
 Rythme réaliste : un lot de 10 = ~1 h d'emails, ou ~2 h d'appels étalés sur
 la semaine (rappels compris). Dites au coordinateur combien de temps vous

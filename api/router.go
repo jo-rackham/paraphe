@@ -158,6 +158,12 @@ func (s *Server) router() chi.Router {
 				Get("/export.csv", s.routeExport)
 			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/mayors/{insee}/status", s.routeStatus)
+			// Correcting one's own words, and removing a note. No jsonOnly on
+			// the deletion: it carries no body, like DELETE /campaign/logo.
+			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
+				Post("/mayors/{insee}/notes/{id}", s.routeEditNote)
+			r.With(guard(s.limitAccount(limitWriteAccount))).
+				Delete("/mayors/{insee}/notes/{id}", s.routeDeleteNote)
 			r.With(guard(s.limitAccount(limitWriteAccount)), guard(jsonOnly)).
 				Post("/batch", s.routeBatch)
 		})

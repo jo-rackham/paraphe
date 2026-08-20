@@ -332,6 +332,24 @@ export const setStatus = (
     method: "POST",
     body: { status, note, seen },
   });
+/** Correcting the WORDS of one's own note. The status it recorded, and when,
+ *  are not a spelling — they stay. Both routes answer the fresh card, read
+ *  inside the transaction that wrote, so the screen never has to guess. */
+export const editNote = (
+  insee: string,
+  id: number,
+  note: string,
+): Promise<Card> =>
+  call(`mayors/${encodeURIComponent(insee)}/notes/${id}`, {
+    method: "POST",
+    body: { note },
+  });
+/** Its author, or the campaign's coordination. Removing the newest note puts
+ *  the card back to what the history then says. */
+export const deleteNote = (insee: string, id: number): Promise<Card> =>
+  call(`mayors/${encodeURIComponent(insee)}/notes/${id}`, {
+    method: "DELETE",
+  });
 export const takeBatch = ({
   department,
   rank,

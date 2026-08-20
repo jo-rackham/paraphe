@@ -22,7 +22,9 @@ test.describe
       // all: a row's name is ambiguous across 1 060 rows, an INSEE is not
       await first.click();
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
-      await page.getByLabel("Note").fill("noté avant le changement de liste");
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("noté avant le changement de liste");
       await page
         .getByRole("button", { name: "Enregistrer", exact: true })
         .click();

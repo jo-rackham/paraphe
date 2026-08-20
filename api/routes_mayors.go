@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -384,12 +385,19 @@ func (s *Server) cardAndNotes(w http.ResponseWriter, r *http.Request,
 		filter += fmt.Sprintf(" AND (n.team_id IS NULL OR n.team_id=%s)",
 			req.p(accountOf(r).MyTeam()))
 	}
+	// `mine` and not the address: `volunteer` is already COALESCE'd to the
+	// NAME, and an address of another team does not cross — the campaign's
+	// counters have always been visible to all and nominative to nobody. It
+	// is what the screen shows the « Modifier » button from; what REFUSES is
+	// the predicate in the two routes below.
+	mine := "(n.volunteer=" + req.p(accountOf(r).Email) + ") AS mine"
 	// LIMIT: this history is re-read on EVERY status write, so an unbounded
 	// one is paid again at each POST — 800 long notes make a 96 MB body and
 	// take the server's heap from 1 to 320 MB for a single request. Nobody
 	// has contacted one mayor 200 times.
 	notes, err := s.rows(r,
-		"SELECT COALESCE(c.name, n.volunteer) AS volunteer, n.status, n.note, n.ts "+
+		"SELECT n.id, COALESCE(c.name, n.volunteer) AS volunteer, n.status, "+
+			"n.note, n.ts, n.edited_at, "+mine+" "+
 			"FROM notes n LEFT JOIN accounts c "+
 			"ON c.email = n.volunteer AND c.org_id = n.org_id "+
 			"WHERE n.org_id=$1 AND "+filter+
@@ -526,10 +534,186 @@ func (s *Server) routeStatus(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	// the card is re-read INSIDE the transaction, before its commit: the
-	// answer then describes exactly what is recorded, and a failing commit
-	// can still be reported — which answering 200 first would make
-	// impossible.
+	s.answerCard(w, r, insee)
+}
+
+type noteEdit struct {
+	Note string `json:"note"`
+}
+
+// noteID reads the {id} of the two routes below, or answers the refusal
+// itself. int64 and not int32: `notes.id` is a BIGINT, and an identifier past
+// int4 has already answered 500 once, one table over.
+func noteID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(pathParam(r, "id"), 10, 64)
+	if err != nil {
+		errorJSON(w, http.StatusBadRequest, "Identifiant de note illisible.")
+		return 0, false
+	}
+	return id, true
+}
+
+// POST /api/mayors/{insee}/notes/{id} — correcting the WORDS of one's own
+// note.
+//
+// The text alone. `status`, `ts`, `volunteer` and `team_id` stay where they
+// are: correcting a spelling is not rewriting what happened, and the status
+// this note recorded is what the whole campaign reads to decide whether to
+// call this person. Somebody who wants to say something else about the
+// contact records a new status, which is the control directly under this
+// history.
+func (s *Server) routeEditNote(w http.ResponseWriter, r *http.Request) {
+	insee := pathParam(r, "insee")
+	id, ok := noteID(w, r)
+	if !ok {
+		return
+	}
+	var d noteEdit
+	if !readBody(w, r, &d) {
+		return
+	}
+	// The same ceiling as writing one, and for the same reason: what a call
+	// is worth noting fits in 5 000 characters, and this row is re-read on
+	// every status write.
+	if utf8.RuneCountInString(d.Note) > maxNoteRunes {
+		errorJSON(w, http.StatusBadRequest,
+			"Une note ne doit pas dépasser %d caractères.", maxNoteRunes)
+		return
+	}
+	// ONE statement, not a read followed by a write: the authorization is the
+	// predicate, so there is no window between deciding and writing. AND THE
+	// AUTHOR IS THE ONLY ONE — a coordination may delete words it must not
+	// carry, it may not put different ones under somebody else's name. That
+	// is « whoever sends it is whoever signs it », one register down.
+	req := scoped(r)
+	tag, err := s.tx(r).Exec(r.Context(),
+		"UPDATE notes SET note="+req.p(strings.TrimSpace(d.Note))+
+			", edited_at="+req.p(shortTimestamp())+
+			" WHERE org_id=$1 AND id="+req.p(id)+
+			" AND insee_code="+req.p(insee)+
+			" AND volunteer="+req.p(accountOf(r).Email), req.args...)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	// 404 and never 403: a 403 would say the note exists — on this card, in
+	// this campaign, written by somebody. The same reading as every account
+	// route.
+	if tag.RowsAffected() == 0 {
+		errorJSON(w, http.StatusNotFound,
+			"Aucune note de vous à cet endroit : seule la personne qui a écrit "+
+				"une note peut en corriger le texte.")
+		return
+	}
+	s.answerCard(w, r, insee)
+}
+
+// DELETE /api/mayors/{insee}/notes/{id} — removing a note, and putting the
+// card back to what the history then says.
+//
+// Its author, or the campaign's coordination: a note written by an account
+// that has since been closed would otherwise stay for ever, and the only
+// remedy left would be an UPDATE typed against production — the one kind of
+// access nobody can audit.
+func (s *Server) routeDeleteNote(w http.ResponseWriter, r *http.Request) {
+	insee := pathParam(r, "insee")
+	id, ok := noteID(w, r)
+	if !ok {
+		return
+	}
+	me := accountOf(r)
+	req := scoped(r)
+	// The author's predicate is omitted for a coordination and present for
+	// everybody else — the same shape routeToggleAccount builds its filter
+	// with, and for the same reason: the role decides which clause applies,
+	// never which statement runs.
+	mine := ""
+	if !me.Coordination() {
+		mine = " AND volunteer=" + req.p(me.Email)
+	}
+	tag, err := s.tx(r).Exec(r.Context(),
+		"DELETE FROM notes WHERE org_id=$1 AND id="+req.p(id)+
+			" AND insee_code="+req.p(insee)+mine, req.args...)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		errorJSON(w, http.StatusNotFound,
+			"Aucune note à supprimer ici : une note se retire par la personne "+
+				"qui l'a écrite, ou par la coordination.")
+		return
+	}
+	if !s.restoreHead(w, r, insee) {
+		return
+	}
+	// A coordination removing words it did not write is an act the campaign
+	// is owed a trace of. Pseudonymised like every other event: what is
+	// logged is that it happened, not to whom.
+	if me.Coordination() {
+		s.securityEvent(r, slog.LevelInfo, "note_deleted",
+			"by", s.accountPseudonym(me.Email))
+	}
+	s.answerCard(w, r, insee)
+}
+
+// restoreHead puts the card's status back to what its history now says.
+//
+// THE HISTORY IS THE REGISTER AND `assignments` IS ITS HEAD. Left alone, a
+// card whose last note has just gone keeps announcing « signé » to the whole
+// campaign with nothing on record saying so — and emptying the history
+// entirely left a status nobody ever wrote. The newest remaining note
+// decides; none left is a card nobody has contacted.
+//
+// Read WITHOUT the team filter the card applies: nothing here reaches the
+// browser, and the note that now decides may well belong to another team —
+// filtered, a volunteer's deletion would roll the card back past a colleague's
+// work that they cannot see.
+func (s *Server) restoreHead(w http.ResponseWriter, r *http.Request,
+	insee string) bool {
+	head := scoped(r)
+	var status, ts *string
+	var team *int
+	err := s.tx(r).QueryRow(r.Context(),
+		"SELECT status, ts, team_id FROM notes "+
+			"WHERE org_id=$1 AND insee_code="+head.p(insee)+
+			" ORDER BY id DESC LIMIT 1", head.args...).Scan(&status, &ts, &team)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.failure(w, err)
+		return false
+	}
+	// No note left: the card goes back to what a card nobody has touched
+	// says, and it moved NOW — `updated_at` is when the card last changed,
+	// and this is a change.
+	at := shortTimestamp()
+	state := StatusToContact
+	if status != nil {
+		state = *status
+	}
+	if ts != nil {
+		at = *ts
+	}
+	// Unconditional, and a no-op when a note from the MIDDLE of the history
+	// was removed: the head is then the same row it already was. An
+	// assignments row that does not exist is a card nobody has worked, and
+	// there is nothing to put back.
+	put := scoped(r)
+	if _, err := s.tx(r).Exec(r.Context(),
+		"UPDATE assignments SET status="+put.p(state)+
+			", updated_at="+put.p(at)+", updated_by_team="+put.p(team)+
+			" WHERE org_id=$1 AND insee_code="+put.p(insee),
+		put.args...); err != nil {
+		s.failure(w, err)
+		return false
+	}
+	return true
+}
+
+// answerCard re-reads the card INSIDE the transaction and commits behind it,
+// as routeStatus does: the answer then describes exactly what is recorded,
+// and a failing commit can still be reported — which answering 200 first
+// would make impossible.
+func (s *Server) answerCard(w http.ResponseWriter, r *http.Request, insee string) {
 	card, ok := s.cardAndNotes(w, r, insee)
 	if !ok {
 		return

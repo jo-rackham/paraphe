@@ -716,11 +716,17 @@ func TestAnExemptionDescribesTheWholeStatement(t *testing.T) {
 	}
 }
 
-// Tables the application only ever adds to. `notes` grows by one row per
-// status write, `hosting_requests` by one row per public form, and nothing
-// deletes from either — so a SELECT over them without a ceiling is a
-// response that grows without one. The card history is re-read on EVERY
-// status write, which made one volunteer's 300 posts hold 386 MB of heap.
+// Tables that GROW without a ceiling. `notes` gains a row per status write,
+// `hosting_requests` one per public form — so a SELECT over them without a
+// bound is a response that grows without one. The card history is re-read on
+// EVERY status write, which made one volunteer's 300 posts hold 386 MB of
+// heap.
+//
+// « Append-only » is the name and no longer the whole truth: an author may
+// now remove one of their notes, and a coordination any of them. That takes
+// nothing off this rule — one deletion by hand does not bound a table a
+// campaign adds to a thousand times, and what a read must not do is return
+// however many rows happen to be there.
 func TestEveryReadOfAnAppendOnlyTableIsBounded(t *testing.T) {
 	appendOnly := []string{"NOTES", "HOSTING_REQUESTS"}
 	files := apiPackage(t)
