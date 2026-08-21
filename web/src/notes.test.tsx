@@ -1058,11 +1058,13 @@ describe("a pick belongs to the mayor it was made on", () => {
     expect(sheet).toMatch(/\.note-texte\s*\{[^}]*white-space:\s*pre-wrap/);
   });
 
-  // TEN MINUTES OF CAREFUL REWRITING ARE NOT THROWN AWAY BY A MISCLICK.
-  // Opening « Modifier » on another line replaced the one draft this card
-  // held, silently, and coming back showed the original text again — the
-  // rewrite gone with no word about it. Each line keeps its own.
-  it("keeps an unsaved correction when another line is opened", async () => {
+  // TEN MINUTES OF CAREFUL REWRITING ARE NOT THROWN AWAY WITHOUT A WORD.
+  // Opening « Modifier » on another line abandons the correction in progress
+  // — one editor, one draft — and the screen SAYS SO. Held per line instead,
+  // the drafts were keyed by the row's position, and in browser mode a
+  // removal shifts those positions: a draft typed for one line came back
+  // under another, and pressing « Enregistrer la note » wrote it there.
+  it("says so when opening another line abandons a correction", async () => {
     await render({
       notes: [
         { ...MINE, mine: true },
@@ -1076,11 +1078,212 @@ describe("a pick belongs to the mayor it was made on", () => {
 
     await click("Modifier la note 2 du 2026-01-03T10:00");
     expect(noteEditor()?.value).toBe("note de Bruno");
+    expect(text(), "the abandoned correction was not mentioned").toContain(
+      "correction en cours",
+    );
+
+    // and it is gone, not hiding somewhere waiting to land on another line
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    expect(noteEditor()?.value).toBe("aple demain");
+  });
+
+  // A DRAFT NEVER COMES BACK UNDER ANOTHER LINE. Browser mode names a note by
+  // its POSITION, and a removal shifts every position newer than it — so a
+  // draft kept by position was handed to whichever line inherited the number.
+  // The volunteer opened what they took for their own recent draft, pressed
+  // save, and the wrong note was overwritten with words about another
+  // contact.
+  it("never hands a correction to the line that inherited a position", async () => {
+    // no ids: this is how browser mode's history arrives
+    const local = (note: string, ts: string) => ({
+      volunteer: null,
+      status: "to_contact",
+      note,
+      ts,
+    });
+    const sent: string[][] = [];
+    function Trois() {
+      const [notes, setNotes] = useState<Note[]>([
+        local("récente", "2026-01-03T10:00"),
+        local("du milieu", "2026-01-02T10:00"),
+        local("ancienne", "2026-01-01T10:00"),
+      ]);
+      return (
+        <Fiche
+          mayor={MAYOR}
+          cfg={EMPTY_CFG}
+          notes={notes}
+          noteRights={() => ({ edit: true, delete: true })}
+          onEditNote={async (_n, i, t) => {
+            sent.push([String(i), t]);
+          }}
+          onDeleteNote={async (_n, i) => {
+            setNotes((held) => held.filter((_, at) => at !== i));
+          }}
+          onBack={() => {}}
+          onStatus={() => {}}
+        />
+      );
+    }
+    await act(() => {
+      root.render(<Trois />);
+    });
+
+    await click("Modifier la note 2 du 2026-01-02T10:00");
+    await type(noteEditor()!, "écrit à propos de celle du milieu");
+    await click("Annuler");
+
+    // the OLDEST goes: every position newer than it shifts down by one
+    await click("Supprimer la note 3 du 2026-01-01T10:00");
+    await click("Confirmer");
+    await flush();
+
+    await click("Modifier la note 1 du 2026-01-03T10:00");
+    expect(
+      noteEditor()?.value,
+      "the newest line was handed a correction written about another",
+    ).toBe("récente");
+  });
+
+  // A LANDING ACT CLOSES ITS OWN EDITOR, NOT WHICHEVER ONE IS OPEN. On a
+  // rural connection a correction takes a second or two; the volunteer moves
+  // to another line and starts writing what the mayor is saying. The first
+  // one landed and closed THAT editor, and every character went with it —
+  // no warning, because the message about an abandoned correction only fires
+  // when one editor replaces another, not when one is taken away.
+  it("closes the editor it was opened from, not the one now open", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    await render({
+      notes: [
+        { ...MINE, mine: true },
+        { ...THEIRS, mine: true },
+      ],
+      noteRights: () => ({ edit: true, delete: false }),
+      onEditNote: () => inFlight,
+    });
+    await click("Modifier la note 2 du 2026-01-03T10:00");
+    await type(noteEditor()!, "correction de la ligne 2");
+    await click("Enregistrer la note");
 
     await click("Modifier la note 1 du 2026-01-02T10:00");
-    expect(noteEditor()?.value, "the rewrite was thrown away in silence").toBe(
-      "dix minutes de réécriture",
-    );
+    await type(noteEditor()!, "ce que le maire dit maintenant");
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+
+    expect(
+      noteEditor()?.value,
+      "the landing correction took away the editor open on another line",
+    ).toBe("ce que le maire dit maintenant");
+  });
+
+  // « ANNULER » MUST NOT LET THE THING IT CANCELS HAPPEN. Pressed while the
+  // removal is already out, it closed the question — which reads as « done,
+  // nothing removed » — and the note went anyway, with « Note supprimée. »
+  // underneath. The request cannot be taken back, so the button refuses and
+  // says so rather than promising what it cannot do.
+  it("does not offer to cancel a removal that is already out", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const removed: number[] = [];
+    await render({
+      noteRights: () => ({ edit: false, delete: true }),
+      onDeleteNote: (_n, i) => {
+        removed.push(i);
+        return inFlight;
+      },
+    });
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+
+    const cancel = button("Annuler");
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      cancel.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      text(),
+      "the question was put away, which reads as « nothing was removed »",
+    ).toContain("Suppression…");
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+    expect(removed).toEqual([0]);
+  });
+
+  // A STATUS CHOSEN WHILE A REMOVAL IS OUT IS THE VOLUNTEER'S CURRENT
+  // INTENTION. The roll-back that lands is about the history, not about the
+  // outcome they have just decided; dropping their choice in silence leaves
+  // the select showing the rolled-back status, and the next « Enregistrer »
+  // — which a hurried volunteer presses without re-reading — files THAT
+  // against a named mayor.
+  it("keeps a status chosen while the removal was out", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const filed: string[] = [];
+    function Carte() {
+      const [notes, setNotes] = useState<Note[]>([
+        { ...MINE, status: "to_call_back", mine: true },
+        { ...THEIRS, status: "email_sent", mine: true },
+      ]);
+      return (
+        <Fiche
+          mayor={MAYOR}
+          cfg={EMPTY_CFG}
+          notes={notes}
+          status={notes[0]?.status ?? "to_contact"}
+          noteRights={() => ({ edit: false, delete: true })}
+          onDeleteNote={(_n, i) =>
+            inFlight.then(() => {
+              setNotes((held) => held.filter((_, at) => at !== i));
+            })
+          }
+          onBack={() => {}}
+          onStatus={(s) => {
+            filed.push(s);
+          }}
+        />
+      );
+    }
+    await act(() => {
+      root.render(<Carte />);
+    });
+    const select = () => container.querySelector("select")!;
+    expect(select().value).toBe("to_call_back");
+
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+    // they change their mind about the OUTCOME while the removal is out
+    await act(async () => {
+      const s = select();
+      s.value = "refused";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+    expect(
+      select().value,
+      "the choice made during the removal was dropped in silence",
+    ).toBe("refused");
+    await click("Enregistrer");
+    await flush();
+    expect(filed).toEqual(["refused"]);
   });
 
   // And what the screen SAYS about the last act belongs to the card it was

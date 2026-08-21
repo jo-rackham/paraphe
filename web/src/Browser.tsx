@@ -58,6 +58,34 @@ const VIEW_TITLES: Record<string, string> = {
 export default function Browser() {
   const [mayors, setMayors] = useState<Mayor[]>([]);
   const [tracking, setTracking] = useState<Record<string, Tracking>>({});
+  /**
+   * Revising a history line, and REFRESHING WHAT THE SCREEN HOLDS WHEN IT IS
+   * REFUSED.
+   *
+   * A refusal here means one thing: this browser holds a version the screen
+   * has not seen, because another window wrote. This mode reads its store
+   * ONCE, at load — no card opening re-reads it — so « rouvrez la fiche »
+   * sent the volunteer to the list and back to exactly what they had, and the
+   * second attempt was refused the same way. The only gesture that worked was
+   * a full reload, which the sentence never mentioned.
+   *
+   * Re-read on the refusal and the tool heals itself: the history under the
+   * message is the true one, and the volunteer can see what changed and
+   * decide. The refusal is re-raised — the card owns the sentence.
+   */
+  const reviseNote = async (
+    insee: string,
+    act: (insee: string) => Promise<Tracking>,
+  ) => {
+    try {
+      const revised = await act(insee);
+      setTracking((s) => ({ ...s, [insee]: revised }));
+    } catch (e) {
+      const fresh = await DB.readTracking(insee);
+      if (fresh) setTracking((s) => ({ ...s, [insee]: fresh }));
+      throw e;
+    }
+  };
   const [cfg, setCfg] = useState<Campaign>(EMPTY_CFG);
   // The logo as a DATA URI, never a URL. This mode promises that nothing
   // leaves the browser, and a remote address in the header would make that
@@ -838,16 +866,16 @@ export default function Browser() {
                   // reading it: there is no author to tell from a colleague,
                   // and nothing to refuse.
                   noteRights={() => ({ edit: true, delete: true })}
-                  onEditNote={async (n, i, text) => {
-                    const insee = chosen.insee_code as string;
-                    const e = await DB.editNote(insee, i, n, text);
-                    setTracking((s) => ({ ...s, [insee]: e }));
-                  }}
-                  onDeleteNote={async (n, i) => {
-                    const insee = chosen.insee_code as string;
-                    const e = await DB.deleteNote(insee, i, n);
-                    setTracking((s) => ({ ...s, [insee]: e }));
-                  }}
+                  onEditNote={(n, i, text) =>
+                    reviseNote(chosen.insee_code as string, (insee) =>
+                      DB.editNote(insee, i, n, text),
+                    )
+                  }
+                  onDeleteNote={(n, i) =>
+                    reviseNote(chosen.insee_code as string, (insee) =>
+                      DB.deleteNote(insee, i, n),
+                    )
+                  }
                   onBack={() => navigate([])}
                   onStatus={async (status, note) => {
                     const insee = chosen.insee_code as string;

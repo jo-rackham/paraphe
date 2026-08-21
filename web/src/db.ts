@@ -129,6 +129,22 @@ export async function replaceMayors(rows: Mayor[]): Promise<number> {
   return new Set(rows.map((r) => r.insee_code)).size;
 }
 
+/**
+ * One mayor's record, straight from the store.
+ *
+ * For the moment after a REFUSAL: this browser holds a version the screen has
+ * not seen — another tab wrote — and the screen has to show it rather than
+ * ask for a gesture. `loadTracking` would read every mayor a volunteer has
+ * ever worked to answer about one.
+ */
+export async function readTracking(insee: string): Promise<Tracking | null> {
+  const db = await open();
+  return (
+    (await tx<Tracking>(db, "tracking", "readonly", (s) => s.get(insee))) ??
+    null
+  );
+}
+
 export async function loadTracking(): Promise<Record<string, Tracking>> {
   const db = await open();
   const rows =
@@ -265,8 +281,17 @@ async function reviseNote(
     return revise(current, notes);
   });
   if (!entry) {
+    // What the sentence asks for has to be a gesture that DOES something.
+    // « rouvrez la fiche » sent the volunteer to the list and back, where
+    // nothing had changed — this mode reads its store once, at load — and the
+    // second attempt was refused the same way; only a full reload worked, and
+    // nothing said so. The history refreshes itself on the refusal now, and
+    // the words that are left name the gesture that shows it: the volunteer's
+    // own editor is open OVER that line, holding the text they typed, which a
+    // refusal must not throw away.
     throw new Error(
-      "Cette note a changé depuis son affichage — rouvrez la fiche.",
+      "Cette note a changé depuis son affichage — une autre fenêtre l'a " +
+        "modifiée. Annulez pour voir son texte.",
     );
   }
   return entry;

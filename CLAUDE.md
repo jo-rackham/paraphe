@@ -1479,12 +1479,18 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   empty note; a catch-up in an EFFECT is worse, since passive effects run
   after paint, so the screen showed the pick, the volunteer typed on, and
   the clobber arrived later. Derivation has no moment to land at.
-  **A recorded pick is DROPPED where a note is removed, and nowhere else.**
-  Remembered against the status it was made under, it comes back to life the
-  day the card RETURNS to that status — which is exactly what removing the
-  head note does. Nothing else moves a card backwards, so nothing else needs
-  to drop it; dropped before the round trip, so no frame shows the withdrawn
-  status. NOT on a correction, which moves the card nowhere: written into the
+  **A recorded pick is DROPPED where a note is removed, and nowhere else** —
+  dropped before the round trip, so no frame shows the withdrawn status.
+  It used to also remember the status it was made UNDER, so that a spent pick
+  would not come back to life the day the card RETURNED to that status. Only
+  one thing returns a card to a status it has left, and that thing already
+  drops the pick: the comparison bought nothing and it cost a wrong status
+  against a named mayor. A status chosen WHILE the removal was out was
+  remembered under the pre-roll-back value, so the roll-back dropped it in
+  silence, the select showed the rolled-back status, and the next
+  « Enregistrer » — which a hurried volunteer presses without re-reading —
+  filed THAT. A pick made after the drop is the volunteer's current
+  intention and stands. NOT on a correction, which moves the card nowhere: written into the
   act the two share it fired on both, and a volunteer who chose an outcome and
   then fixed a typo in an older line lost the choice to the fix — silently,
   the select simply reverting, so the next « Enregistrer » filed the status
@@ -1544,6 +1550,20 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   save was bricked until they went elsewhere. Symmetrically a save left an
   editor open over the correction it had just written, and it made « a
   refusal is not a roll-back » unreachable.
+  **AN ACT CLOSES ITS OWN EDITOR, NOT WHICHEVER ONE IS OPEN.** On a rural
+  connection a correction takes a second or two, and the volunteer moves to
+  another line and starts writing what the mayor is saying; closed
+  unconditionally, the landing act took THAT editor away and every character
+  with it — in silence, because the sentence about an abandoned correction
+  only fires when one editor replaces another, not when one is taken away.
+  Opening an editor supersedes nothing, so the counter has nothing to say
+  about it: what is compared is the editor itself.
+  **AND « ANNULER » DOES NOT OFFER TO CANCEL WHAT IS ALREADY OUT.** Pressed
+  while the request was in flight it closed the question — which reads as
+  « nothing was removed » — and the note went anyway, with « Note supprimée. »
+  underneath. It cannot be taken back, so the control refuses and says so
+  rather than promise what it cannot do. Both cancels, the editor's and the
+  confirmation's.
   **AND TYPING SUPERSEDES NOTHING**, which is why a counter cannot be the
   whole answer: on a weak connection the button reads « Enregistrement… » for
   a second or two and a volunteer still on the telephone goes on writing, on
@@ -1559,11 +1579,32 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   `.note-texte` is `pre-wrap`, and the rule is pinned by reading the
   stylesheet — jsdom loads none, so a computed style would answer the empty
   string whatever the CSS says.
-- **ONE DRAFT PER LINE.** Held as a single string, opening « Modifier » on
-  another line replaced it, so ten minutes of careful rewriting went in
-  silence and coming back showed the original text again. It is the rule the
-  rewritten email and the call note already follow one panel up: a rewrite
-  that cannot be kept is a loss, and is said rather than swallowed.
+- **ONE EDITOR, ONE DRAFT — AND ABANDONING IT IS SAID.** Kept per line and
+  keyed like the rows, it inherited the rows' own instability: browser mode
+  names a note by its POSITION, a removal shifts every position newer than it,
+  and a draft typed for one line came back under whichever line inherited its
+  number. The volunteer opened what they took for their own recent draft,
+  pressed « Enregistrer la note », and the wrong note was overwritten with
+  words about another contact — measured. A map keyed by anything a note
+  carries has the same shape of problem one collision further out; one draft
+  has none, because the editor it belongs to is on screen. What it costs is
+  the rewrite in progress when another line is opened, and that is not
+  swallowed: the screen says so, which is the rule the rewritten email already
+  follows one panel up. `noteKey` is the ONE derivation of a line's identity —
+  `activeNote` and the React key are two readings of the same thing, and a
+  second spelling is a second defect.
+  **Assumed**: the draft dies with the card, like the editor it is in. The
+  email and the call note survive a tab click through `cardDrafts` because
+  they are VISIBLE and pre-filled; a closed editor claims nothing.
+- **A REFUSAL IN BROWSER MODE REFRESHES WHAT THE SCREEN HOLDS.** That mode
+  reads its store ONCE, at load, so « rouvrez la fiche » sent the volunteer to
+  the list and back to exactly what they had, and the second attempt was
+  refused the same way; only a full reload worked, and nothing said so. A
+  refusal means one thing — another window wrote — so `reviseNote` re-reads
+  that one record and hands it to the screen before re-raising. The sentence
+  then names a gesture that DOES something: the volunteer's own editor is open
+  over that line, holding text a refusal must not throw away, so « Annulez
+  pour voir son texte » is what is left to say.
   **Assumed**: correcting a line to nothing is allowed and stores an empty
   note. It is not the same act as removing the line — removing rolls the card
   back, and somebody who recorded the right outcome and wrote the wrong words

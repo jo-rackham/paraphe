@@ -135,6 +135,72 @@ test.describe
       await expect(page.getByText("courriel parti")).toBeVisible();
     });
 
+    // TWO WINDOWS ON ONE CARD — a shared computer, a volunteer with two tabs.
+    // The store refuses the second write, which is right; what was wrong was
+    // the sentence: « rouvrez la fiche » sent them to the list and back to
+    // exactly what they had, because this mode reads its store ONCE, at load.
+    // The second attempt was refused the same way, and the only gesture that
+    // worked was a full reload, which nothing mentioned. The refusal now
+    // refreshes the history under it.
+    test("a refusal from another window shows what that window wrote", async ({
+      context,
+      page,
+    }) => {
+      await page.goto(`${STATIC_ORIGIN}/`);
+      const first = page.locator("table button.lien").first();
+      await expect(first).toBeVisible({ timeout: 20_000 });
+      await first.click();
+      await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+      await page
+        .getByRole("textbox", { name: "Note", exact: true })
+        .fill("écrit dans la première fenêtre");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(
+        page.getByText("écrit dans la première fenêtre"),
+      ).toBeVisible();
+      const card = page.url();
+
+      // the SAME browser, the same store, the same card
+      const other = await context.newPage();
+      await other.goto(card);
+      await expect(
+        other.getByRole("button", { name: "Modifier la note 1 du" }),
+      ).toBeVisible({ timeout: 20_000 });
+      await other
+        .getByRole("button", { name: "Modifier la note 1 du" })
+        .click();
+      await other
+        .getByLabel("Texte de la note")
+        .fill("corrigé par l'autre fenêtre");
+      await other.getByRole("button", { name: "Enregistrer la note" }).click();
+      await expect(
+        other.getByText("corrigé par l'autre fenêtre"),
+      ).toBeVisible();
+
+      // the first window still shows what it loaded, and its correction is
+      // refused — as it must be, or one of the two would be lost in silence
+      await page.getByRole("button", { name: "Modifier la note 1 du" }).click();
+      await page.getByLabel("Texte de la note").fill("corrigé par la première");
+      await page.getByRole("button", { name: "Enregistrer la note" }).click();
+      await expect(
+        page.getByText(/a changé depuis son affichage/),
+      ).toBeVisible();
+      // the words they typed are still in the box — a refusal throws nothing
+      // away — and the line already carries the other window's mark, without
+      // a reload
+      await expect(page.getByLabel("Texte de la note")).toHaveValue(
+        "corrigé par la première",
+      );
+      await expect(page.getByText(/modifiée le/).first()).toBeVisible();
+
+      // and the gesture the sentence names shows the other window's text
+      await page.getByRole("button", { name: "Annuler" }).click();
+      await expect(page.getByText("corrigé par l'autre fenêtre")).toBeVisible();
+      await other.close();
+    });
+
     test("never claims to be the team application", async ({ page }) => {
       await page.goto(`${STATIC_ORIGIN}/`);
       // no mode marker, and therefore no promise that work reaches a server

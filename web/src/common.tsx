@@ -1302,17 +1302,24 @@ export function Fiche({
   // the list is, and « Enregistrer » filed it against the wrong person. It is
   // the trap this card already paid for with the rewritten email, one field
   // over: keying on the render alone missed the identity.
-  const [picked, setPicked] = useState<{
-    who: string;
-    under: string;
-    value: string;
-  } | null>(null);
+  // A PICK IS SPENT WHERE THE CARD MOVES BACKWARDS, and nowhere else.
+  //
+  // It used to remember the card status it was made UNDER, so that a pick
+  // already recorded would not come back to life the day the card returned to
+  // that status. Only ONE thing returns a card to a status it has left —
+  // removing a note — and that act already drops the pick before its round
+  // trip. So the comparison bought nothing, and it cost: a status chosen
+  // WHILE the removal was out was remembered under the pre-roll-back value,
+  // so the roll-back silently dropped it, the select showed the rolled-back
+  // status, and the next « Enregistrer » — which a hurried volunteer presses
+  // without re-reading — filed THAT against a named mayor. Measured.
+  const [picked, setPicked] = useState<{ who: string; value: string } | null>(
+    null,
+  );
   const carried = initialStatus ?? "to_contact";
   const mine = cardWho(mayor);
-  const status =
-    picked?.who === mine && picked.under === carried ? picked.value : carried;
-  const setStatus = (value: string) =>
-    setPicked({ who: mine, under: carried, value });
+  const status = picked?.who === mine ? picked.value : carried;
+  const setStatus = (value: string) => setPicked({ who: mine, value });
   const [statusError, setStatusError] = useState<string | null>(null);
   // `saving` is the STATE the button reads (aria-disabled, label); `submitting`
   // is the re-entry guard the handler reads. They are two different things, and
@@ -1330,13 +1337,22 @@ export function Fiche({
   // NEWER than it — React then remounts them, and an editor open on one of
   // those loses what was typed into it.
   const [activeNote, setActiveNote] = useState<string | null>(null);
-  // ONE DRAFT PER LINE, keyed like the rows. Held as a single string, opening
-  // « Modifier » on another line replaced it — so ten minutes of careful
-  // rewriting went, silently, and coming back showed the original text again
-  // with no word about what had happened. It is the same rule the rewritten
-  // email and the call note already follow one panel up: a rewrite that
-  // cannot be kept is a loss.
-  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  // ONE EDITOR, ONE DRAFT — and abandoning it is SAID.
+  //
+  // Kept per line and keyed like the rows, it inherited the rows' own
+  // instability: browser mode names a note by its POSITION, a removal shifts
+  // every position newer than it, and a draft typed for one line came back
+  // under whichever line inherited its number. The volunteer opened what they
+  // took for their own recent draft, pressed « Enregistrer la note », and the
+  // wrong note was overwritten with words about another contact. A map keyed
+  // by anything a note carries has the same shape of problem, one collision
+  // further out; one draft has none, because the editor it belongs to is on
+  // screen.
+  //
+  // What that costs is the rewrite in progress when another line is opened,
+  // and it is not swallowed: the screen says the correction was abandoned,
+  // which is the rule the rewritten email already follows one panel up.
+  const [noteDraft, setNoteDraft] = useState("");
   const [notesBusy, setNotesBusy] = useState(false);
   const [noteSubmitting, noteSubmitted] = useSubmitGuard();
   // How many acts of each KIND this card has begun. Declared here because the
@@ -1444,7 +1460,7 @@ export function Fiche({
     // campaign changed its logo.
     if (shown.current.who !== who) {
       setActiveNote(null);
-      setNoteDrafts({});
+      setNoteDraft("");
       // and what the screen SAID about the last act: « Enregistré. » over a
       // mayor nobody has written to, or a red alert about a refusal on
       // somebody else, is read as this card's.
@@ -1535,6 +1551,19 @@ export function Fiche({
   };
   const superseded = (kind: { current: number }, act: number) =>
     kind.current !== act;
+
+  /**
+   * A history line's identity for this render: its own id where the server
+   * gives one, its POSITION where it does not — browser mode names a note by
+   * where it sits. Written once, because `activeNote` and the React key are
+   * two readings of the same thing and a second spelling is a second bug.
+   */
+  const noteKey = (n: Note, i: number) => String(n.id ?? notes.length - i);
+  /** The line whose editor is open, if one is — what an abandoned correction
+   *  is compared against. */
+  const editedNote = activeNote?.startsWith("edit:")
+    ? notes.find((n, i) => `edit:${noteKey(n, i)}` === activeNote)
+    : undefined;
 
   const save = async () => {
     // A REF, not the `saving` state: two clicks in the same tick run two
@@ -1634,10 +1663,20 @@ export function Fiche({
     setNotesBusy(true);
     const restore = holdFocusThrough();
     const mine = begin(revisions);
+    // WHICH EDITOR THIS ACT MAY CLOSE: its own, and no other. On a rural
+    // connection a correction takes a second or two, and the volunteer moves
+    // to another line and starts writing what the mayor is saying. Closed
+    // unconditionally, the landing act took THAT editor away and every
+    // character with it — and in silence, because the sentence about an
+    // abandoned correction only fires when one editor replaces another, not
+    // when one is taken away. Opening an editor supersedes nothing, so the
+    // counter has nothing to say about this: what is compared is the editor
+    // itself.
+    const from = activeNote;
     try {
       await act();
       if (superseded(revisions, mine)) return;
-      setActiveNote(null);
+      setActiveNote((open) => (open === from ? null : open));
       setSaved(done);
     } catch (e) {
       if (superseded(revisions, mine)) return;
@@ -1827,7 +1866,7 @@ export function Fiche({
             // The row's identity: its own id where there is one (team mode),
             // the reverse index where there is not (browser mode, which names
             // a note by its position).
-            const key = String(n.id ?? notes.length - i);
+            const key = noteKey(n, i);
             const rights = noteRights?.(n) ?? { edit: false, delete: false };
             const editing = activeNote === `edit:${key}`;
             const confirming = activeNote === `delete:${key}`;
@@ -1855,13 +1894,8 @@ export function Fiche({
                       Texte de la note
                       <textarea
                         rows={3}
-                        value={noteDrafts[key] ?? n.note}
-                        onChange={(e) =>
-                          setNoteDrafts((held) => ({
-                            ...held,
-                            [key]: e.target.value,
-                          }))
-                        }
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
                       />
                     </label>
                     <p>
@@ -1871,7 +1905,7 @@ export function Fiche({
                         onClick={() =>
                           onNote(
                             () =>
-                              onEditNote?.(n, i, noteDrafts[key] ?? n.note) ??
+                              onEditNote?.(n, i, noteDraft) ??
                               Promise.resolve(),
                             "Note modifiée.",
                           )
@@ -1882,7 +1916,14 @@ export function Fiche({
                       <button
                         type="button"
                         className="lien"
+                        aria-disabled={notesBusy || undefined}
                         onClick={() => {
+                          // NOT WHILE THE ACT IS OUT. Pressed then, it closed
+                          // the editor — which reads as « nothing was written »
+                          // — and the correction landed anyway. The request
+                          // cannot be taken back, so the button refuses rather
+                          // than promise what it cannot do.
+                          if (notesBusy) return;
                           // this very button unmounts with the editor: hand
                           // focus to the content first, or it falls to <body>
                           focusContenu();
@@ -1930,7 +1971,12 @@ export function Fiche({
                         <button
                           type="button"
                           className="lien"
+                          aria-disabled={notesBusy || undefined}
                           onClick={() => {
+                            // not while the removal is already out: closing
+                            // the question reads as « nothing was removed »,
+                            // and the note went anyway
+                            if (notesBusy) return;
                             focusContenu();
                             setActiveNote(null);
                           }}
@@ -1947,6 +1993,19 @@ export function Fiche({
                               className="lien"
                               aria-label={`Modifier la note ${which}`}
                               onClick={() => {
+                                // a rewrite that cannot be kept is a loss:
+                                // say so rather than swap the text under the
+                                // volunteer without a word
+                                if (
+                                  activeNote?.startsWith("edit:") &&
+                                  activeNote !== `edit:${key}` &&
+                                  noteDraft !== editedNote?.note
+                                ) {
+                                  setSaved(
+                                    "La correction en cours a été abandonnée.",
+                                  );
+                                }
+                                setNoteDraft(n.note);
                                 setActiveNote(`edit:${key}`);
                               }}
                             >
