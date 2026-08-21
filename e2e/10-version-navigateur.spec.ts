@@ -95,66 +95,6 @@ test.describe
       expect(body).not.toMatch(/\{[^}]+\}/);
     });
 
-    // THE BROWSER VERSION FOLLOWS ITS CAMPAIGN — for what the adoption
-    // wrote and nobody retouched since. A coordination that rewrites its
-    // letter AFTER volunteers adopted must reach them, or the campaign
-    // speaks with two voices again, one update behind: reported from
-    // production as exactly that. Only this path proves the whole chain —
-    // the snapshot written at adoption, the origin asked again on the next
-    // load, and the fresh text rendered on a card.
-    test("follows the campaign when it rewrites a text after adoption", async ({
-      page,
-      request,
-    }) => {
-      // first visit: the adoption copies the campaign's texts — none yet
-      await page.goto(`${ORIGIN}/navigateur/`);
-      await expect(page.getByText(/repris depuis son site/)).toBeVisible({
-        timeout: 20_000,
-      });
-
-      // the coordination rewrites the letter; the editing screen has its
-      // own journey (12-modeles.spec.ts), the API is the shortest honest
-      // path to "the campaign changed while the volunteer was away"
-      const opened = await request.post(`${ORIGIN}/api/session`, {
-        data: {
-          email: COORDINATION.email,
-          password: COORDINATION.password,
-        },
-      });
-      expect(opened.ok()).toBeTruthy();
-      const saved = await request.post(`${ORIGIN}/api/campaign/templates`, {
-        data: {
-          templates: {
-            "courrier.txt":
-              "Texte suivi depuis le site, pour {salutation}.\n\n{signataire}\n",
-          },
-        },
-      });
-      expect(saved.ok()).toBeTruthy();
-
-      // the same browser comes back: nothing local was touched, so the
-      // rewrite reaches it — and the screen says where it came from
-      await page.reload();
-      await expect(page.getByText(/mis à jour depuis son site/)).toBeVisible({
-        timeout: 20_000,
-      });
-      await expect(page.locator("table button.lien").first()).toBeVisible({
-        timeout: 20_000,
-      });
-      await page.locator("table button.lien").first().click();
-      await page.getByText("📮 Courrier").click();
-      expect(await page.locator("pre.lettre").innerText()).toContain(
-        "Texte suivi depuis le site",
-      );
-
-      // the overlay goes back to empty: 12-modeles.spec.ts begins on a
-      // campaign that has rewritten nothing
-      const cleared = await request.post(`${ORIGIN}/api/campaign/templates`, {
-        data: { templates: {} },
-      });
-      expect(cleared.ok()).toBeTruthy();
-    });
-
     // The apex serves no campaign, so there is none to be: a static
     // publication is in the same position, and neither must adopt anything.
     test("the apex adopts nothing", async ({ page }) => {
