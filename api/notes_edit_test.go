@@ -141,6 +141,36 @@ func TestCorrectingANoteMovesItsTextAndNoOtherColumn(t *testing.T) {
 	}
 }
 
+// A NOTE REMOVED SINCE IS NOT A NOTE THAT IS NOT YOURS. Two tabs on one card
+// — or a coordination working a queue while a volunteer corrects a typo — and
+// the second act names a line the first has taken away. Told « seule la
+// personne qui a écrit une note peut en corriger le texte » about a note they
+// wrote themselves, a volunteer doubts their session and tries again.
+func TestCorrectingANoteSomebodyRemovedSaysThatItIsGone(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 1, "60")
+	pw := createAccount(t, s, "n@exemple.fr", RoleVolunteer, nil)
+	c := newClient(t, srv)
+	c.signIn("n@exemple.fr", pw)
+
+	rep := write(t, c, "60000", "to_call_back", "à corriger", "")
+	id := noteIDOf(t, rep, "à corriger")
+	if code, _ := c.call(http.MethodDelete, notePath("60000", id),
+		nil); code != http.StatusOK {
+		t.Fatalf("removing one's own note: %d", code)
+	}
+
+	code, body := c.call(http.MethodPost, notePath("60000", id),
+		map[string]string{"note": "trop tard"})
+	if code != http.StatusNotFound {
+		t.Fatalf("correcting a note that is gone: %d, want 404", code)
+	}
+	if said := text(body["error"]); !strings.Contains(said, "supprimée") {
+		t.Errorf("the refusal says %q, and what happened is that the line was "+
+			"removed", said)
+	}
+}
+
 // A note left untouched carries NO mark. Written the other way round —
 // stamping `edited_at` at the insert, or on every write — the sentence
 // « modifiée le … » would appear under every note in the campaign and mean
@@ -184,11 +214,19 @@ func TestOnlyTheAuthorRewritesTheirOwnWords(t *testing.T) {
 		"a colleague of the same team": cb,
 		"the campaign's coordination":  cc,
 	} {
+		// 403 and not 404, and the difference is the whole point: BOTH of
+		// these READ that line, with its author's name beside it, so saying
+		// « it is not yours » reveals nothing the history does not already
+		// show. The 404 is kept for a note this reader cannot see — another
+		// team's, another campaign's — and for one that is GONE, which is
+		// what a colleague removing it from the other tab produces. Told
+		// « seule la personne qui a écrit une note peut la corriger » about
+		// their OWN note, a volunteer reads a session gone wrong.
 		code, _ := c.call(http.MethodPost, notePath("60000", id),
 			map[string]string{"note": "réécrite par " + who})
-		if code != http.StatusNotFound {
-			t.Errorf("%s rewriting somebody else's note: %d, want 404 — a 403 "+
-				"would say the note exists", who, code)
+		if code != http.StatusForbidden {
+			t.Errorf("%s rewriting a note they can READ: %d, want 403 — the "+
+				"404 is for a note they cannot see, or one that is gone", who, code)
 		}
 		if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",
 			id); got != original {

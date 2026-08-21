@@ -1423,6 +1423,18 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   recorded is what the campaign reads to decide whether to call this person.
   Saying something else about the contact is a NEW status, which is the
   control directly under the history.
+  **A REFUSAL SAYS WHICH OF THE TWO IT IS.** One sentence for both told
+  somebody correcting THEIR OWN note, which a colleague had just removed from
+  the other tab, that « seule la personne qui a écrit une note peut en
+  corriger le texte » — an authorization refusal, about a note they wrote,
+  which reads as a session gone wrong. The existence question is asked
+  THROUGH THE READER'S OWN EYES, with the filter the card applies: a note
+  they cannot see and a note that is gone both answer 404, which is the true
+  sentence for them, and a note they can READ answers 403 and says it is not
+  theirs. That is not the account routes' rule loosened — there, existence is
+  the secret; here the line is in front of them with its author's name beside
+  it. The removal's own refusal stays one sentence, because « aucune note à
+  supprimer ici » is true of both.
   **Rewriting is the AUTHOR's, and the coordination is not an exception to
   it.** It removes words a campaign must not carry — a note whose author's
   access has since been closed would otherwise stay for ever — and it never
@@ -1506,10 +1518,57 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   screen SAID goes too — « Enregistré. » over a mayor nobody has written to,
   or a red alert about a refusal on somebody else, is read as this card's.
   On WHO alone, not on the render: an editor must not close because the
-  campaign changed its logo. What stays is what belongs to a REQUEST IN
-  FLIGHT — the busy flags and the re-entry guards — and an unsaved
-  correction is abandoned by leaving the card, which is what « Annuler »
-  does.
+  campaign changed its logo. An unsaved correction is abandoned by leaving
+  the card, which is what « Annuler » does.
+  **AND WHAT AN ACT WRITES WHEN IT LANDS IS WRITTEN ONLY IF NOTHING HAS
+  SUPERSEDED IT**, because clearing per-card state at the swap does not
+  reach a request that lands AFTER it — the terminal writes happen past the
+  await. The worst was `setNote("")`: the volunteer opens the next card,
+  starts typing what that mayor just said, the previous request lands, and
+  the field empties under their hands. Its confirmation, its refusal and its
+  editor-closing went the same way, onto a card they were not about.
+  **Not the mayor's IDENTITY**, which was the first answer and is one round
+  short: leave a card with a request in flight, come back, start writing
+  again — the identity matches, the gate opens, and the field is emptied a
+  second time. A COUNTER answers the real question; anything that follows an
+  act supersedes it, and leaving the card is one thing that does.
+  **It gates the cleanup too**, and that is not a detail: releasing the
+  re-entry guards at the swap is right — two mayors are two requests — but
+  ungated, the guard the FIRST act releases when it lands is by then the
+  SECOND card's, and the next click doubles its save.
+  **ONE COUNTER PER KIND OF ACT.** Recording an outcome and revising a line
+  have two buttons, two guards and two busy labels, and each cleans up after
+  itself. Counted together, correcting a line while a save was in flight
+  superseded the save's own cleanup: the guard stayed armed with nothing to
+  release it and « Enregistrement… » stood on a card nobody had left, so the
+  save was bricked until they went elsewhere. Symmetrically a save left an
+  editor open over the correction it had just written, and it made « a
+  refusal is not a roll-back » unreachable.
+  **AND TYPING SUPERSEDES NOTHING**, which is why a counter cannot be the
+  whole answer: on a weak connection the button reads « Enregistrement… » for
+  a second or two and a volunteer still on the telephone goes on writing, on
+  the same card, with no other act in between. What a save clears is WHAT IT
+  SENT, compared through the setter.
+  Four rounds of adversarial review walked past four successive answers here
+  — identity, then one counter, then the ungated cleanup, then the counter
+  itself — and each walk-past was reproduced before the next answer was
+  written.
+- **A CALL NOTE IS WRITTEN IN LINES**, and the history swallowed them:
+  « rappeler avant 11 h » over « secrétariat: Mme X » came back as one run of
+  words. The editor kept them all along, which is what made it invisible.
+  `.note-texte` is `pre-wrap`, and the rule is pinned by reading the
+  stylesheet — jsdom loads none, so a computed style would answer the empty
+  string whatever the CSS says.
+- **ONE DRAFT PER LINE.** Held as a single string, opening « Modifier » on
+  another line replaced it, so ten minutes of careful rewriting went in
+  silence and coming back showed the original text again. It is the rule the
+  rewritten email and the call note already follow one panel up: a rewrite
+  that cannot be kept is a loss, and is said rather than swallowed.
+  **Assumed**: correcting a line to nothing is allowed and stores an empty
+  note. It is not the same act as removing the line — removing rolls the card
+  back, and somebody who recorded the right outcome and wrote the wrong words
+  wants the status kept. Refusing would push them into the control that
+  undoes more than they asked.
   **A save is finished when the note field clears, not when the history
   shows the line**: the line is drawn from state written INSIDE the awaited
   call, while the handler goes on to clear the field and say « Enregistré. ».

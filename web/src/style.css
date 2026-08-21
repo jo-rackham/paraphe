@@ -299,6 +299,9 @@ html { scroll-padding-bottom: 8rem; }
    second and the act. Tight against the line they belong to, so a history of
    ten notes does not become ten paragraphs of controls. */
 .note-actions { margin: .2rem 0 0; font-size: .92em; }
+/* a call note is written in lines — « rappeler avant 11 h », then the name of
+   the secretary — and the editor keeps them */
+.note-texte { display: block; white-space: pre-wrap; }
 .note-item label { display: block; margin-top: .4rem; }
 .note-item textarea { width: 100%; }
 .alerte { background: var(--alerte-fond); border: 1px solid var(--alerte-trait);

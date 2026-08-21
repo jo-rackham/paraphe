@@ -268,9 +268,14 @@ func TestEveryRouteIdentifierHasAForeignRefusalCase(t *testing.T) {
 					code, _ := c.call(http.MethodPost,
 						fmt.Sprintf("/api/mayors/%s/notes/%d", idorNoteCard, f.noteID),
 						map[string]string{"note": "réécrite par la coordination"})
-					if code != http.StatusNotFound {
+					// 403: a coordination READS every note of its campaign, so
+					// « this one is not yours » reveals nothing the history
+					// does not already show. The 404 next door is for a note
+					// this reader cannot see — the neighbour's — and for one
+					// that is gone.
+					if code != http.StatusForbidden {
 						t.Fatalf("the coordination rewriting a volunteer's note: %d, "+
-							"want 404 — it may delete one, never sign different words "+
+							"want 403 — it may delete one, never sign different words "+
 							"with somebody else's name", code)
 					}
 					if got := scalar[string](t, s, "SELECT note FROM notes WHERE id=$1",

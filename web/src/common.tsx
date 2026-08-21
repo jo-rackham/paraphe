@@ -1325,14 +1325,25 @@ export function Fiche({
   // alike.
   const [saved, setSaved] = useState("");
   // The one history line being acted on, `<verb>:<key>`. Held HERE and not in
-  // each row: two rows in edit mode at once is two drafts and one `noteDraft`,
+  // each row: two rows in edit mode at once is two drafts and one open editor,
   // and in browser mode a deletion shifts the reverse-index keys of every line
   // NEWER than it — React then remounts them, and an editor open on one of
   // those loses what was typed into it.
   const [activeNote, setActiveNote] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState("");
+  // ONE DRAFT PER LINE, keyed like the rows. Held as a single string, opening
+  // « Modifier » on another line replaced it — so ten minutes of careful
+  // rewriting went, silently, and coming back showed the original text again
+  // with no word about what had happened. It is the same rule the rewritten
+  // email and the call note already follow one panel up: a rewrite that
+  // cannot be kept is a loss.
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [notesBusy, setNotesBusy] = useState(false);
   const [noteSubmitting, noteSubmitted] = useSubmitGuard();
+  // How many acts of each KIND this card has begun. Declared here because the
+  // block that resets per-card state bumps both; what they are FOR is under
+  // `superseded`.
+  const saves = useRef(0);
+  const revisions = useRef(0);
 
   let rendered: {
     subject: string;
@@ -1433,12 +1444,27 @@ export function Fiche({
     // campaign changed its logo.
     if (shown.current.who !== who) {
       setActiveNote(null);
-      setNoteDraft("");
+      setNoteDrafts({});
       // and what the screen SAID about the last act: « Enregistré. » over a
       // mayor nobody has written to, or a red alert about a refusal on
       // somebody else, is read as this card's.
       setStatusError(null);
       setSaved("");
+      // The CONTROLS are this card's too. A save still in flight on the
+      // previous one left this button reading « Enregistrement… » and its
+      // re-entry guard armed, so a click here was swallowed in silence — and
+      // then the previous card's « Enregistré. » arrived and read as this
+      // one's, so the volunteer walked away believing they had recorded
+      // something. Releasing the guards allows a second request while the
+      // first is still out, which is right: they are two different mayors.
+      setSaving(false);
+      setNotesBusy(false);
+      submitted();
+      noteSubmitted();
+      // and anything still in flight is now about a card nobody is looking
+      // at: it writes nothing when it lands (see `superseded`)
+      saves.current += 1;
+      revisions.current += 1;
     }
     shown.current = { basis, who };
     const e = freshEmail();
@@ -1462,6 +1488,54 @@ export function Fiche({
     }
   });
 
+  /**
+   * WHAT AN ACT WRITES WHEN IT LANDS IS WRITTEN ONLY IF NOTHING HAS
+   * SUPERSEDED IT.
+   *
+   * Clearing per-card state when the mayor changes does not reach a request
+   * that lands AFTER it: the terminal writes of an act happen past the await,
+   * and in browser mode the card swaps under a mounted component. The worst
+   * was `setNote("")` — the volunteer opens the next card, starts typing what
+   * that mayor just said, the previous request lands, and the field empties
+   * under their hands. Its confirmation, its refusal and its editor-closing
+   * went the same way, onto a card they were not about.
+   *
+   * NOT the mayor's IDENTITY, which was the first answer and is one round
+   * short: leave a card with a request in flight, come back to it, start
+   * writing again — the identity matches, the gate opens, and the landing
+   * request empties the field a second time. A COUNTER answers the real
+   * question. Anything that follows an act supersedes it: another act, or
+   * leaving the card.
+   *
+   * It gates the `finally` too, and that is not a detail. Releasing the
+   * re-entry guards when the card changes is right — two mayors are two
+   * requests — but ungated, the guard the FIRST act releases when it lands is
+   * by then the SECOND card's, and the next click doubles its save. One note
+   * per intention is the whole reason that guard exists.
+   *
+   * ONE COUNTER PER KIND OF ACT. Recording an outcome and revising a line
+   * are two acts, with two buttons, two re-entry guards and two busy labels,
+   * and each cleans up after ITSELF. Counted together, correcting a line
+   * while a save was in flight superseded the save's own cleanup: the guard
+   * stayed armed with nothing to release it and the button read
+   * « Enregistrement… » on a card the volunteer had not left, so the save was
+   * bricked until they went somewhere else. Symmetrically a save left an
+   * editor open over the correction it had just written, and it made « a
+   * refusal is not a roll-back » unreachable — the dropped pick was never
+   * given back.
+   *
+   * Both are bumped from the render block as well as at each act: LEAVING the
+   * card supersedes everything in flight. A ref advanced by a render React
+   * discards only makes an act look superseded when it is not, which skips a
+   * write rather than misplacing one — the safe direction.
+   */
+  const begin = (kind: { current: number }) => {
+    kind.current += 1;
+    return kind.current;
+  };
+  const superseded = (kind: { current: number }, act: number) =>
+    kind.current !== act;
+
   const save = async () => {
     // A REF, not the `saving` state: two clicks in the same tick run two
     // handlers built by the same render, both read `saving` as false, and both
@@ -1479,15 +1553,29 @@ export function Fiche({
     setStatusError(null);
     setSaved("");
     setSaving(true);
+    // see `superseded`: what this writes at the end is written only if
+    // nothing has followed it — another act, or leaving the card
+    const act = begin(saves);
     try {
       await onStatus(status, note);
-      setNote("");
+      if (superseded(saves, act)) return;
+      // WHAT IS CLEARED IS WHAT WAS SENT, and typing supersedes nothing —
+      // which is why the counter cannot be the whole answer. On a weak
+      // connection the button reads « Enregistrement… » for a second or two,
+      // and a volunteer still on the telephone goes on writing; the save then
+      // landed and emptied the field, on the same card, with no other act in
+      // between. Compared through the SETTER, so what is read is the field as
+      // it stands and not as this closure remembers it.
+      setNote((typed) => (typed === note ? "" : typed));
       setSaved("Enregistré.");
     } catch (e) {
+      if (superseded(saves, act)) return;
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
-      submitted();
-      setSaving(false);
+      if (!superseded(saves, act)) {
+        submitted();
+        setSaving(false);
+      }
     }
   };
 
@@ -1545,16 +1633,21 @@ export function Fiche({
     if (rollsBack) setPicked(null);
     setNotesBusy(true);
     const restore = holdFocusThrough();
+    const mine = begin(revisions);
     try {
       await act();
+      if (superseded(revisions, mine)) return;
       setActiveNote(null);
       setSaved(done);
     } catch (e) {
+      if (superseded(revisions, mine)) return;
       setPicked((since) => since ?? dropped);
       setStatusError(e instanceof Error ? e.message : String(e));
     } finally {
-      noteSubmitted();
-      setNotesBusy(false);
+      if (!superseded(revisions, mine)) {
+        noteSubmitted();
+        setNotesBusy(false);
+      }
       restore();
     }
   };
@@ -1762,8 +1855,13 @@ export function Fiche({
                       Texte de la note
                       <textarea
                         rows={3}
-                        value={noteDraft}
-                        onChange={(e) => setNoteDraft(e.target.value)}
+                        value={noteDrafts[key] ?? n.note}
+                        onChange={(e) =>
+                          setNoteDrafts((held) => ({
+                            ...held,
+                            [key]: e.target.value,
+                          }))
+                        }
                       />
                     </label>
                     <p>
@@ -1773,7 +1871,7 @@ export function Fiche({
                         onClick={() =>
                           onNote(
                             () =>
-                              onEditNote?.(n, i, noteDraft) ??
+                              onEditNote?.(n, i, noteDrafts[key] ?? n.note) ??
                               Promise.resolve(),
                             "Note modifiée.",
                           )
@@ -1800,7 +1898,12 @@ export function Fiche({
                     {n.note && (
                       <>
                         <br />
-                        {n.note}
+                        {/* A CALL LOG HAS LINES. The editor keeps them and
+                            this swallowed them: « rappeler avant 11 h » over
+                            « secrétariat: Mme X » came back as one run of
+                            words, and a volunteer could not read their own
+                            notes. */}
+                        <span className="note-texte">{n.note}</span>
                       </>
                     )}
                     {confirming ? (
@@ -1844,7 +1947,6 @@ export function Fiche({
                               className="lien"
                               aria-label={`Modifier la note ${which}`}
                               onClick={() => {
-                                setNoteDraft(n.note);
                                 setActiveNote(`edit:${key}`);
                               }}
                             >

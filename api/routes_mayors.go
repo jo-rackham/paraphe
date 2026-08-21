@@ -596,13 +596,43 @@ func (s *Server) routeEditNote(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	// 404 and never 403: a 403 would say the note exists — on this card, in
-	// this campaign, written by somebody. The same reading as every account
-	// route.
+	// TWO REFUSALS, because they are two different things to be told.
+	//
+	// One sentence for both said « seule la personne qui a écrit une note peut
+	// en corriger le texte » to somebody correcting THEIR OWN note that a
+	// colleague had just removed from the other tab — an authorization
+	// refusal, about a note they wrote, which reads as a session gone wrong.
+	// They try again, or they stop.
+	//
+	// The existence question is asked THROUGH THE READER'S OWN EYES: the same
+	// filter the card applies, so nothing is revealed that the history does
+	// not already show. A note this reader cannot see and a note that is gone
+	// get the same answer, which is the one that is true for them.
 	if tag.RowsAffected() == 0 {
-		errorJSON(w, http.StatusNotFound,
-			"Aucune note de vous à cet endroit : seule la personne qui a écrit "+
-				"une note peut en corriger le texte.")
+		seen := scoped(r)
+		visible := "n.insee_code=" + seen.p(insee) + " AND n.id=" + seen.p(id)
+		if !accountOf(r).Coordination() {
+			visible += fmt.Sprintf(" AND (n.team_id IS NULL OR n.team_id=%s)",
+				seen.p(accountOf(r).MyTeam()))
+		}
+		var there bool
+		if err := s.tx(r).QueryRow(r.Context(),
+			"SELECT EXISTS(SELECT 1 FROM notes n WHERE n.org_id=$1 AND "+
+				visible+")", seen.args...).Scan(&there); err != nil {
+			s.failure(w, err)
+			return
+		}
+		if !there {
+			errorJSON(w, http.StatusNotFound,
+				"Cette note n'est plus dans l'historique : quelqu'un l'a "+
+					"supprimée depuis. Rafraîchissez la fiche.")
+			return
+		}
+		// It is there and it is somebody else's. Saying so costs nothing: the
+		// reader has the line in front of them, with the name beside it.
+		errorJSON(w, http.StatusForbidden,
+			"Cette note n'est pas de vous : seule la personne qui l'a écrite "+
+				"peut en corriger le texte.")
 		return
 	}
 	s.answerCard(w, r, insee)

@@ -10,6 +10,7 @@
 // browser mode holds every note it has, team mode reads the server's `mine`
 // beside its own role.
 
+import { readFileSync } from "node:fs";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -593,6 +594,9 @@ describe("a pick belongs to the mayor it was made on", () => {
         <button type="button" onClick={() => setMayor(OTHER)}>
           fiche suivante
         </button>
+        <button type="button" onClick={() => setMayor(MAYOR)}>
+          fiche précédente
+        </button>
         <Fiche
           mayor={mayor}
           cfg={EMPTY_CFG}
@@ -601,8 +605,13 @@ describe("a pick belongs to the mayor it was made on", () => {
           onEditNote={wiring.onEditNote}
           onDeleteNote={wiring.onDeleteNote}
           onBack={() => {}}
-          onStatus={(s) => {
+          // the card it was started on is recorded WITH the answer, and a
+          // wiring that wants to hold the request open is honoured — without
+          // that, a test about what lands after a swap resolves before the
+          // swap and passes having exercised nothing
+          onStatus={(s, note) => {
             filed.push(`${mayor.insee_code}:${s}`);
+            return wiring.onStatus?.(s, note);
           }}
         />
       </>
@@ -693,6 +702,385 @@ describe("a pick belongs to the mayor it was made on", () => {
       "the question followed the volunteer to another mayor",
     ).not.toContain("Supprimer cette note ?");
     expect(removed).toEqual([]);
+  });
+
+  // A REQUEST STARTED ON ONE CARD FINISHES ON THE CARD IT WAS STARTED ON.
+  //
+  // Clearing per-card state at the swap is not enough: the terminal writes of
+  // an act happen AFTER the await, and the mayor may have changed in between.
+  // The worst of them is `setNote("")` — the volunteer opens the next card
+  // and starts typing what the mayor just said, the previous request lands,
+  // and the field empties under their hands.
+  it("does not empty the next card's note when the previous save lands", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const filed: string[] = [];
+    await act(() => {
+      root.render(
+        <DeuxFiches filed={filed} wiring={{ onStatus: () => inFlight }} />,
+      );
+    });
+    await click("Enregistrer");
+
+    await click("fiche suivante");
+    const field = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith("Note"))!
+      .querySelector("textarea")!;
+    await type(field, "il rappelle jeudi");
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+
+    expect(field.value, "the note typed on the next card was emptied").toBe(
+      "il rappelle jeudi",
+    );
+    expect(
+      text(),
+      "the previous card's confirmation landed here",
+    ).not.toContain("Enregistré.");
+  });
+
+  // The same, one act over: a refusal about a line of the PREVIOUS card,
+  // shown over this one, is an error a volunteer cannot act on.
+  it("does not show the previous card's refusal on the next", async () => {
+    let refuse: (e: Error) => void = () => {};
+    const inFlight = new Promise<void>((_r, reject) => {
+      refuse = reject;
+    });
+    await act(() => {
+      root.render(
+        <DeuxFiches
+          filed={[]}
+          notes={[{ ...MINE, mine: true }]}
+          wiring={{
+            noteRights: () => ({ edit: false, delete: true }),
+            onDeleteNote: () => inFlight,
+          }}
+        />,
+      );
+    });
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+
+    await click("fiche suivante");
+    await act(async () => {
+      refuse(new Error("Aucune note à supprimer ici."));
+      await inFlight.catch(() => {});
+    });
+    await flush();
+
+    expect(text()).not.toContain("Aucune note à supprimer ici.");
+  });
+
+  // And the controls of the next card are its own: a save still in flight on
+  // the previous one left this button reading « Enregistrement… » and its
+  // re-entry guard armed, so a click here was refused in silence — and then
+  // the previous card's « Enregistré. » arrived and read as this one's.
+  it("does not leave the next card's button busy or refusing", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const filed: string[] = [];
+    await act(() => {
+      root.render(
+        <DeuxFiches filed={filed} wiring={{ onStatus: () => inFlight }} />,
+      );
+    });
+    await click("Enregistrer");
+    await click("fiche suivante");
+
+    // found by its place, not by its label — the label IS what is wrong
+    const save = container.querySelector<HTMLButtonElement>(
+      ".barre-statut button",
+    )!;
+    expect(
+      save.textContent,
+      "the next card's button is busy with the previous card's request",
+    ).toBe("Enregistrer");
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(filed, "the click on the next card was swallowed").toHaveLength(2);
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+  });
+
+  // AND COMING BACK IS NOT BEING THERE ALL ALONG. Gating the terminal writes
+  // on the mayor's IDENTITY is necessary and not sufficient: leave the card
+  // with a request in flight, come back to it, start writing again — the
+  // identity matches, the gate opens, and the landing request empties the
+  // field for the second time. What supersedes an act is any act after it,
+  // and leaving the card is one.
+  it("does not empty a card returned to while its own save was in flight", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    await act(() => {
+      root.render(
+        <DeuxFiches filed={[]} wiring={{ onStatus: () => inFlight }} />,
+      );
+    });
+    const field = () =>
+      [...container.querySelectorAll("label")]
+        .find((l) => l.textContent?.startsWith("Note"))!
+        .querySelector("textarea")!;
+    await type(field(), "premier passage");
+    await click("Enregistrer");
+
+    await click("fiche suivante");
+    await click("fiche précédente");
+    await type(field(), "deuxième passage");
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+    expect(field().value, "the second visit's note was emptied").toBe(
+      "deuxième passage",
+    );
+  });
+
+  // AND A FINISHED ACT DOES NOT UNLOCK SOMEBODY ELSE'S. Releasing the
+  // re-entry guards when the card changes is right — two mayors are two
+  // requests — but the guard the first act releases when it lands is then
+  // the SECOND card's, and the next click doubles its save. One note per
+  // intention is the whole reason that guard exists.
+  it("does not unlock the next card's button when the previous act lands", async () => {
+    let releaseFirst: () => void = () => {};
+    const first = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+    const second = new Promise<void>(() => {});
+    const filed: string[] = [];
+    let call = 0;
+    await act(() => {
+      root.render(
+        <DeuxFiches
+          filed={filed}
+          wiring={{
+            onStatus: () => (++call === 1 ? first : second),
+          }}
+        />,
+      );
+    });
+    await click("Enregistrer");
+    await click("fiche suivante");
+    await click("Enregistrer");
+    expect(filed).toHaveLength(2);
+
+    // the first card's request lands; the second is still out
+    await act(async () => {
+      releaseFirst();
+      await first;
+    });
+    await flush();
+
+    const save = container.querySelector<HTMLButtonElement>(
+      ".barre-statut button",
+    )!;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(
+      filed,
+      "the second card was saved twice for one intention",
+    ).toHaveLength(2);
+  });
+
+  // AND ONE ACT DOES NOT SUPERSEDE ANOTHER OF A DIFFERENT KIND. Recording an
+  // outcome and correcting a line are two acts with two buttons, two
+  // re-entry guards and two busy labels; what each writes when it lands is
+  // its own to write. Counted together, correcting a line while a save was
+  // in flight left « Enregistrement… » on a card the volunteer had not left,
+  // and its guard armed with nothing to release it: the save was bricked
+  // until they went somewhere else.
+  it("does not brick the save because a line was corrected meanwhile", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    await render({
+      notes: [{ ...MINE, mine: true }],
+      noteRights: () => ({ edit: true, delete: false }),
+      onEditNote: async () => {},
+      onStatus: () => inFlight,
+    });
+    await click("Enregistrer");
+
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    await type(noteEditor()!, "corrigée pendant ce temps");
+    await click("Enregistrer la note");
+    await flush();
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+    const save = container.querySelector<HTMLButtonElement>(
+      ".barre-statut button",
+    )!;
+    expect(save.textContent, "the save never came back").toBe("Enregistrer");
+  });
+
+  // The same the other way round: the correction lands, and the editor it
+  // was typed in is still on screen because a save had been started since.
+  it("closes the editor even if a save was started meanwhile", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    await render({
+      notes: [{ ...MINE, mine: true }],
+      noteRights: () => ({ edit: true, delete: false }),
+      onEditNote: () => inFlight,
+      onStatus: async () => {},
+    });
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    await type(noteEditor()!, "corrigée");
+    await click("Enregistrer la note");
+
+    await click("Enregistrer");
+    await flush();
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+    expect(
+      noteEditor(),
+      "the editor outlived the correction it held",
+    ).toBeUndefined();
+  });
+
+  // And « a refusal is not a roll-back » holds whatever else the volunteer
+  // did in between: the pick dropped for a removal comes back when that
+  // removal is turned down, even if a save was started while it was out.
+  it("gives the pick back on a refusal that a save overlapped", async () => {
+    let refuse: (e: Error) => void = () => {};
+    const inFlight = new Promise<void>((_r, reject) => {
+      refuse = reject;
+    });
+    await render({
+      notes: [{ ...MINE, status: "email_sent", mine: true }],
+      noteRights: () => ({ edit: false, delete: true }),
+      onDeleteNote: () => inFlight,
+      onStatus: async () => {},
+    });
+    const select = () => container.querySelector("select")!;
+    await act(async () => {
+      const s = select();
+      s.value = "to_call_back";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+
+    await click("Enregistrer");
+    await flush();
+    await act(async () => {
+      refuse(new Error("Aucune note à supprimer ici."));
+      await inFlight.catch(() => {});
+    });
+    await flush();
+    expect(
+      select().value,
+      "the refused removal kept the choice it dropped",
+    ).toBe("to_call_back");
+  });
+
+  // AND TYPING SUPERSEDES NOTHING, which is why the counter cannot be the
+  // whole answer. On a weak connection — a phone, a train, rural 4G — the
+  // button reads « Enregistrement… » for a second or two, and a volunteer
+  // still on the telephone goes on writing. The save lands and empties the
+  // field: what it clears is what it SENT, and this is neither the same card
+  // nor a different act, so nothing had superseded it.
+  it("clears only the note it actually sent", async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const sent: string[] = [];
+    await render({
+      onStatus: (_s, note) => {
+        sent.push(note);
+        return inFlight;
+      },
+    });
+    const field = () =>
+      [...container.querySelectorAll("label")]
+        .find((l) => l.textContent?.startsWith("Note"))!
+        .querySelector("textarea")!;
+    await type(field(), "premier envoi");
+    await click("Enregistrer");
+
+    // still on the phone, still writing
+    await type(field(), "premier envoi — puis rappel à 15 h");
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+    await flush();
+
+    expect(sent).toEqual(["premier envoi"]);
+    expect(field().value, "what was typed during the save was erased").toBe(
+      "premier envoi — puis rappel à 15 h",
+    );
+  });
+
+  // A CALL LOG HAS LINES. The editor keeps them and the history swallowed
+  // them: « rappeler avant 11 h \n secrétariat: Mme X » came back as one run
+  // of words, and a volunteer could not read their own notes.
+  // The RULE and not the computed style: jsdom loads no stylesheet, so
+  // `getComputedStyle` here would answer the empty string whatever the CSS
+  // says. What is checked is that the text is in an element of its own and
+  // that the sheet keeps that element's lines.
+  it("keeps the lines of a note that has several", async () => {
+    await render({
+      notes: [{ ...MINE, note: "ligne une\nligne deux", mine: true }],
+    });
+    const held = container.querySelector(".note-item span.note-texte");
+    expect(held?.textContent).toBe("ligne une\nligne deux");
+    // run from `web/`, like every other suite here
+    const sheet = readFileSync("src/style.css", "utf8");
+    expect(sheet).toMatch(/\.note-texte\s*\{[^}]*white-space:\s*pre-wrap/);
+  });
+
+  // TEN MINUTES OF CAREFUL REWRITING ARE NOT THROWN AWAY BY A MISCLICK.
+  // Opening « Modifier » on another line replaced the one draft this card
+  // held, silently, and coming back showed the original text again — the
+  // rewrite gone with no word about it. Each line keeps its own.
+  it("keeps an unsaved correction when another line is opened", async () => {
+    await render({
+      notes: [
+        { ...MINE, mine: true },
+        { ...THEIRS, mine: true },
+      ],
+      noteRights: () => ({ edit: true, delete: false }),
+      onEditNote: async () => {},
+    });
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    await type(noteEditor()!, "dix minutes de réécriture");
+
+    await click("Modifier la note 2 du 2026-01-03T10:00");
+    expect(noteEditor()?.value).toBe("note de Bruno");
+
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    expect(noteEditor()?.value, "the rewrite was thrown away in silence").toBe(
+      "dix minutes de réécriture",
+    );
   });
 
   // And what the screen SAYS about the last act belongs to the card it was
