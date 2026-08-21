@@ -123,6 +123,7 @@ export default function Browser() {
     view,
     card: routedCard,
     go: setTab,
+    hrefOf,
   } = useView(BROWSER_VIEWS, "liste");
   const tab = view === "liste" && routedCard ? "fiche" : view;
   // The card comes from what this browser HOLDS — no network in this mode,
@@ -417,40 +418,42 @@ export default function Browser() {
         //
         // The campaign's texts are a LAYER under the volunteer's overlay —
         // local → campaign → image, the resolution team mode already lives
-        // by — so following it is refreshing a CACHE, file by file: a
-        // coordination that rewrites its letter reaches every browser that
-        // did not rewrite that file, and a volunteer's own rewrite masks
-        // exactly the file it rewrote, nothing more. The FIELDS have no
-        // layering; they still follow by the snapshot the adoption left —
-        // byte for byte what it wrote means the volunteer typed none of it.
+        // by — and THE LAYER FOLLOWS THE ORIGIN UNCONDITIONALLY: it
+        // overwrites nothing (the overlay masks it file by file), and the
+        // campaign that served this very page is the evident default for
+        // what an empty file inherits. Gated on the nine fields being
+        // intact, one locally edited description silenced every template
+        // the campaign wrote — measured on production, and reported as
+        // « ne charge toujours pas par défaut ». Only the FIELDS keep the
+        // snapshot condition, because they are what a refresh overwrites.
         const snapshot =
           adoption !== null && adoption.slug === own.slug ? adoption : null;
         const fieldsUntouched =
           sameAdoptedFields(c, own.campaign) ||
           (snapshot !== null && sameAdoptedFields(c, snapshot.campaign));
-        if (fieldsUntouched) {
-          try {
-            let followed = false;
-            // MIGRATION, once: before the layer existed, adopting MERGED the
-            // campaign's texts into the local overlay. An overlay that is
-            // byte for byte what the campaign says (or what the old
-            // snapshot copied) was never the volunteer's writing — it moves
-            // under the layer, where it goes back to inheriting.
-            if (
-              Object.keys(cachedTpl).length === 0 &&
-              Object.keys(localTpl).length > 0 &&
-              (sameTemplates(localTpl, own.templates) ||
-                (snapshot !== null &&
-                  sameTemplates(localTpl, snapshot.templates)))
-            ) {
-              await DB.writeSetting("modeles", {});
-              setTemplates({});
-            }
-            if (!sameTemplates(cachedTpl, own.templates)) {
-              await DB.writeSetting("modeles_campagne", own.templates);
-              setCampaignTemplates(own.templates);
-              followed = true;
-            }
+        try {
+          let followed = false;
+          // MIGRATION, once: before the layer existed, adopting MERGED the
+          // campaign's texts into the local overlay. An overlay that is
+          // byte for byte what the campaign says (or what the old
+          // snapshot copied) was never the volunteer's writing — it moves
+          // under the layer, where it goes back to inheriting.
+          if (
+            Object.keys(cachedTpl).length === 0 &&
+            Object.keys(localTpl).length > 0 &&
+            (sameTemplates(localTpl, own.templates) ||
+              (snapshot !== null &&
+                sameTemplates(localTpl, snapshot.templates)))
+          ) {
+            await DB.writeSetting("modeles", {});
+            setTemplates({});
+          }
+          if (!sameTemplates(cachedTpl, own.templates)) {
+            await DB.writeSetting("modeles_campagne", own.templates);
+            setCampaignTemplates(own.templates);
+            followed = true;
+          }
+          if (fieldsUntouched) {
             if (!sameAdoptedFields(c, own.campaign)) {
               // reachable only through the snapshot branch above: the
               // campaign corrected a field the volunteer never touched
@@ -467,24 +470,26 @@ export default function Browser() {
                 ),
               });
             }
-            if (followed) {
-              setAdopted(
-                `Les textes de la campagne « ${own.name} » ont été mis à ` +
-                  "jour depuis son site. Ils restent dans ce navigateur, " +
-                  "et vous pouvez les modifier dans « Ma campagne ».",
-              );
-            }
-          } catch (e) {
-            // a rejected write must be said, like the adoption's own
-            setMessage({
-              tone: "erreur",
-              text: `Mise à jour impossible : ${e instanceof Error ? e.message : String(e)}`,
-            });
           }
-          return;
+          if (followed) {
+            setAdopted(
+              `Les textes de la campagne « ${own.name} » ont été mis à ` +
+                "jour depuis son site. Ils restent dans ce navigateur, " +
+                "et vous pouvez les modifier dans « Ma campagne ».",
+            );
+          }
+        } catch (e) {
+          // a rejected write must be said, like the adoption's own
+          setMessage({
+            tone: "erreur",
+            text: `Mise à jour impossible : ${e instanceof Error ? e.message : String(e)}`,
+          });
         }
+        if (fieldsUntouched) return;
         // past here the campaign's nine fields are the volunteer's own
-        // writing, and a ?org= link is answered exactly as before
+        // writing, and a ?org= link is answered exactly as before — its
+        // sentence speaks about the fields, which is what a link would
+        // have replaced
       }
       // Offered ONLY on a campaign nobody has touched. "Not complete" was
       // the wrong test: a volunteer who had filled eight fields of nine —
@@ -765,6 +770,7 @@ export default function Browser() {
           ]}
           tab={tab}
           onTab={setTab}
+          hrefOf={hrefOf}
         />
         <span className="qui">aucune donnée ne quitte ce navigateur</span>
         <ThemeToggle />

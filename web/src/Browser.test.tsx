@@ -97,9 +97,11 @@ async function renderWithOffer() {
 
 const text = () => container.textContent ?? "";
 
-function button(label: string): HTMLButtonElement {
-  const b = [...container.querySelectorAll("button")].find((el) =>
-    el.textContent?.includes(label),
+function button(label: string): HTMLElement {
+  // "button, a": the nav tabs are links now — a real href is what lets
+  // ctrl+clic open a view in a new tab — and this helper reaches them too
+  const b = [...container.querySelectorAll<HTMLElement>("button, a")].find(
+    (el) => el.textContent?.includes(label),
   );
   if (!b) throw new Error(`no button « ${label} » on screen`);
   return b;
@@ -550,11 +552,14 @@ describe("the offer banner, rendered", () => {
         expect(stored.contact_email).toBe("corrige@sienne.fr");
       });
 
-      // Fields the volunteer rewrote: this browser stopped being the
-      // campaign's own version, and NOTHING follows — not even the layer,
-      // which would put a campaign's texts under a configuration that no
-      // longer names it.
-      it("leaves a campaign the volunteer edited entirely alone", async () => {
+      // Fields the volunteer rewrote stay theirs — a refresh would
+      // overwrite them. THE LAYER STILL FOLLOWS: it overwrites nothing,
+      // the overlay masks it file by file, and gated on the fields one
+      // locally edited description silenced every template the campaign
+      // wrote — measured on production, reported as « la version
+      // navigateur ne charge toujours pas par défaut les custom
+      // templates ».
+      it("keeps edited fields and still lets the layer follow", async () => {
         await DB.writeSetting("campagne", {
           ...asAdopted,
           candidat: "Le Mien",
@@ -564,17 +569,17 @@ describe("the offer banner, rendered", () => {
           campaign: seven(),
         });
         await servedByCampaign(OFFERED, TPL_V1);
-        await until(() => text().includes("Bourg-Réel"), "the app opens");
-        await flush();
-        await flush();
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the layer lands despite the edited field",
+        );
         const stored = await DB.readSetting<Record<string, string>>(
           "campagne",
           {},
         );
         expect(stored.candidat).toBe("Le Mien");
         expect(await DB.readSetting("modeles", {})).toEqual({});
-        expect(await DB.readSetting("modeles_campagne", {})).toEqual({});
-        expect(text()).not.toContain("mis à jour depuis son site");
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V1);
       });
     });
 
