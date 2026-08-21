@@ -43,9 +43,11 @@ async function until(pred: () => boolean, what: string) {
   throw new Error(`never happened: ${what}`);
 }
 
-function button(label: string): HTMLButtonElement {
-  const b = [...container.querySelectorAll("button")].find((el) =>
-    el.textContent?.includes(label),
+function button(label: string): HTMLElement {
+  // "button, a": the nav tabs are links now — a real href is what lets
+  // ctrl+clic open a view in a new tab — and this helper reaches them too
+  const b = [...container.querySelectorAll<HTMLElement>("button, a")].find(
+    (el) => el.textContent?.includes(label),
   );
   if (!b) throw new Error(`no button « ${label} » on screen`);
   return b;

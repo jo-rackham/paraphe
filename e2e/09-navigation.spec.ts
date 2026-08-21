@@ -90,6 +90,31 @@ test.describe
       await other.close();
     });
 
+    // The nav tabs are LINKS carrying each view's address: a plain click
+    // stays a view change with no reload, and a modified click is the
+    // browser's — which only a real browser can prove, because opening a
+    // tab is not an event a unit test can observe.
+    test("ctrl+clic opens a tab in a new one, plain click stays here", async ({
+      page,
+      context,
+    }) => {
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      const opened = context.waitForEvent("page");
+      await page
+        .getByRole("link", { name: "Les maires", exact: true })
+        .click({ modifiers: ["ControlOrMeta"] });
+      const other = await opened;
+      await expect(other).toHaveURL(/\/maires$/);
+      await expect(
+        other.getByRole("heading", { name: "Les maires" }),
+      ).toBeVisible();
+      await other.close();
+      // …and the first tab never moved: the modified click was the
+      // browser's alone
+      await expect(page.getByRole("heading", { name: "Guide" })).toBeVisible();
+      await expect(page).toHaveURL(/\/$/);
+    });
+
     test("an address nobody serves lands on a screen, never on a blank page", async ({
       page,
     }) => {

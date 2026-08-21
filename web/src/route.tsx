@@ -125,7 +125,12 @@ export function useRoute(): string[] {
 export function useView(
   known: readonly string[],
   home: string,
-): { view: string; card: string | null; go: (view: string) => void } {
+): {
+  view: string;
+  card: string | null;
+  go: (view: string) => void;
+  hrefOf: (view: string) => string;
+} {
   const segments = useRoute();
   const first = segments[0] ?? "";
   const view = known.includes(first) ? first : home;
@@ -139,5 +144,13 @@ export function useView(
     (to: string) => navigate(to === home ? [] : [to]),
     [home],
   );
-  return { view, card: segments[1] ?? null, go };
+  // `hrefOf` is the SAME rule read instead of written — the address a nav
+  // link carries, so a modified click (new tab) and a plain click (view
+  // change) open the same screen. A second copy of the home rule in the
+  // nav is how the two would drift.
+  const hrefOf = useCallback(
+    (to: string) => href(to === home ? [] : [to]),
+    [home],
+  );
+  return { view, card: segments[1] ?? null, go, hrefOf };
 }

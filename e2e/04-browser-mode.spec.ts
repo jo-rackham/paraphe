@@ -308,7 +308,7 @@ test.describe
       });
       await expect(page.getByText("Campagne non configurée")).toBeVisible();
 
-      await page.getByRole("button", { name: "Ma campagne" }).click();
+      await page.getByRole("link", { name: "Ma campagne" }).click();
       const fields: [string, string][] = [
         ["Son nom", CANDIDATE],
         ["Qui c'est, en une ligne", "candidate indépendante, institutrice"],
@@ -339,7 +339,7 @@ test.describe
       // the banner that told the volunteer not to send anything is gone
       await expect(page.getByText("Campagne non configurée")).toHaveCount(0);
 
-      await page.getByRole("button", { name: "Les maires" }).click();
+      await page.getByRole("link", { name: "Les maires" }).click();
       await page.locator("table button.lien").first().click();
       const body = await page.getByLabel("Message").inputValue();
       expect(body).toContain(CANDIDATE);
@@ -366,7 +366,7 @@ test.describe
       // Self-contained on purpose: Playwright hands each test a fresh
       // browser, so the campaign configured by the previous one is not
       // here. The backup must carry BOTH the tracking and the campaign.
-      await page.getByRole("button", { name: "Ma campagne" }).click();
+      await page.getByRole("link", { name: "Ma campagne" }).click();
       await page.getByLabel("Son nom", { exact: true }).fill(CANDIDATE);
       await page
         .getByRole("button", { name: "Enregistrer", exact: true })
@@ -375,7 +375,7 @@ test.describe
         page.getByText("Campagne enregistrée dans ce navigateur."),
       ).toBeVisible();
 
-      await page.getByRole("button", { name: "Mes données" }).click();
+      await page.getByRole("link", { name: "Mes données" }).click();
       const receiving = page.waitForEvent("download");
       // the arrow is decorative (aria-hidden): not part of the button's name
       await page.getByRole("button", { name: "Exporter (JSON)" }).click();
@@ -388,7 +388,7 @@ test.describe
       await expect(
         page.getByText("Tout a été effacé de ce navigateur."),
       ).toBeVisible();
-      await page.getByRole("button", { name: "Les maires" }).click();
+      await page.getByRole("link", { name: "Les maires" }).click();
       await expect(page.getByText("Aucune liste chargée")).toBeVisible();
 
       // RELOAD before restoring. Erasing and importing in the same page
@@ -401,13 +401,13 @@ test.describe
         timeout: 20_000,
       });
 
-      await page.getByRole("button", { name: "Mes données" }).click();
+      await page.getByRole("link", { name: "Mes données" }).click();
       await page
         .locator('input[accept=".json,application/json"]')
         .setInputFiles(backup);
       await expect(page.getByText(/Import :/)).toBeVisible();
 
-      await page.getByRole("button", { name: "Les maires" }).click();
+      await page.getByRole("link", { name: "Les maires" }).click();
       const link = page.getByRole("button", { name: town, exact: true });
       const row = page.locator("table tr").filter({ has: link }).first();
       await expect(row).toContainText("Email envoyé");
@@ -416,7 +416,7 @@ test.describe
       // default. Skipping the settings would bring the campaign back empty
       // after a wipe, reverting every message to the shipped template with a
       // report that says nothing.
-      await page.getByRole("button", { name: "Ma campagne" }).click();
+      await page.getByRole("link", { name: "Ma campagne" }).click();
       await expect(page.getByLabel("Son nom", { exact: true })).toHaveValue(
         CANDIDATE,
       );

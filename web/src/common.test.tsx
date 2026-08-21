@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Alerte, EMPTY_CFG, Fiche, httpUrl } from "./common.tsx";
+import { Alerte, EMPTY_CFG, Fiche, httpUrl, NavOnglets } from "./common.tsx";
 import type { Mayor, Message } from "./types.ts";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -56,6 +56,74 @@ describe("httpUrl", () => {
     expect(httpUrl("https://ailleurs.test/paraphe/")).toBe(
       "https://ailleurs.test/paraphe/",
     );
+  });
+});
+
+// LINKS, not buttons: every view has an address, and a real href is what
+// lets ctrl+clic open a tab in a new one. A plain primary click stays a
+// view change with no reload — so the handler must tell the two apart, and
+// mixing them up either breaks the SPA (plain click reloads) or breaks the
+// browser (ctrl+clic navigates in place).
+describe("NavOnglets", () => {
+  const render = (onTab: (k: string) => void) =>
+    act(() => {
+      root.render(
+        <NavOnglets
+          tabs={[
+            ["guide", "Guide"],
+            ["maires", "Les maires"],
+          ]}
+          tab="guide"
+          onTab={onTab}
+          hrefOf={(k) => (k === "guide" ? "/" : `/${k}`)}
+        />,
+      );
+    });
+  const tabLink = (name: string) =>
+    [...container.querySelectorAll("nav a")].find(
+      (a) => a.textContent === name,
+    ) as HTMLAnchorElement;
+
+  it("carries each view's address, and marks the current one", () => {
+    render(() => {});
+    expect(tabLink("Les maires").getAttribute("href")).toBe("/maires");
+    expect(tabLink("Guide").getAttribute("href")).toBe("/");
+    expect(tabLink("Guide").getAttribute("aria-current")).toBe("page");
+    expect(tabLink("Les maires").getAttribute("aria-current")).toBeNull();
+  });
+
+  it("turns a plain click into a view change, no reload", () => {
+    const seen: string[] = [];
+    render((k) => seen.push(k));
+    const e = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => {
+      tabLink("Les maires").dispatchEvent(e);
+    });
+    expect(seen).toEqual(["maires"]);
+    // prevented, or the browser would ALSO follow the href and reload
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    ["ctrl", { ctrlKey: true }],
+    ["cmd", { metaKey: true }],
+    ["shift", { shiftKey: true }],
+    ["alt", { altKey: true }],
+  ])("leaves a %s+click to the browser", (_name, mod) => {
+    const seen: string[] = [];
+    render((k) => seen.push(k));
+    const e = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ...mod,
+    });
+    act(() => {
+      tabLink("Les maires").dispatchEvent(e);
+    });
+    // not handled and not prevented: the browser opens the href its own
+    // way — a new tab, a new window
+    expect(seen).toEqual([]);
+    expect(e.defaultPrevented).toBe(false);
   });
 });
 

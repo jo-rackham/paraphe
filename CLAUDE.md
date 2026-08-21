@@ -310,6 +310,14 @@ licence for the RNE.
   to a blank tree, and the known list is per MODE — the same path is a real
   view in one and nonsense in another, which is what three modes on one
   bundle means.
+  **The nav tabs are LINKS, not buttons** (`NavOnglets`): every view has an
+  address, and a real href is what lets ctrl+clic open one in a new tab — a
+  button navigates and offers nothing. A plain primary click is intercepted
+  (view change, no reload); a MODIFIED click is the browser's, untouched.
+  The href comes from `useView`'s own `hrefOf`, the home rule read instead
+  of written — a second copy in the nav is how a modified click and a plain
+  one would open two different screens. `header nav a.lien` wears the
+  buttons' clothes, text-decoration included.
   A card lives UNDER its list (`/maires/<insee>`), so « précédent » from a
   card lands on the list. It is loaded by ONE effect keyed on the INSEE, so
   a click, a shared link and a history move take the same path — a deep link
@@ -1020,18 +1028,20 @@ campaign → image** by `mergeTemplates`.
   writing, and the editor shows the campaign's text as the PLACEHOLDER of an
   empty box — a live inheritance, per file: « revenir au texte de la
   campagne » is emptying the box, exactly as a team does.
-  **THE LAYER FOLLOWS ITS CAMPAIGN.** Every load asks the origin
-  (`ownCampaign`, unconditionally — which browsers may follow is decided by
-  the ANSWER, not by guessing from the store), and while the nine fields are
-  still what the adoption wrote, the layer is refreshed to what the campaign
-  says today: a coordination's correction reaches every browser that did not
-  rewrite that file, and a volunteer's rewrite masks exactly the file it
-  rewrote, nothing more. Fields the volunteer edited stop everything —
-  a campaign's texts must not sit under a configuration that no longer names
-  it. The FIELDS themselves still follow by the snapshot the adoption leaves
-  (`adoption`: slug + the seven adopted keys — a form is one block, with no
-  useful per-key inheritance). WHO SIGNS still does not travel, and signing
-  for oneself does not count as touching. The refresh is announced in the
+  **THE LAYER FOLLOWS ITS CAMPAIGN, UNCONDITIONALLY.** Every load asks the
+  origin (`ownCampaign` — which browsers may follow is decided by the
+  ANSWER, not by guessing from the store), and the layer is refreshed to
+  what the campaign says today: a coordination's correction reaches every
+  browser that did not rewrite that file, and a volunteer's rewrite masks
+  exactly the file it rewrote, nothing more. NOT gated on the nine fields:
+  the layer overwrites nothing local, and gated, one locally edited
+  description silenced every template the campaign wrote — measured on
+  production, reported as « ne charge toujours pas par défaut ». Only the
+  FIELDS keep a condition, because they are what a refresh overwrites: they
+  follow by the snapshot the adoption leaves (`adoption`: slug + the seven
+  adopted keys — a form is one block, with no useful per-key inheritance),
+  and fields the volunteer edited stay theirs. WHO SIGNS still does not
+  travel, and signing for oneself does not count as touching. The refresh is announced in the
   provenance slot (« mis à jour depuis son site »); a refusal on that path
   says the local texts stand, not that nothing was filled in. MIGRATION,
   once: a local overlay that is byte for byte what the campaign says — or

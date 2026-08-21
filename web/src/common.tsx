@@ -394,23 +394,40 @@ export function NavOnglets({
   tabs,
   tab,
   onTab,
+  hrefOf,
 }: {
   tabs: [string, string][];
   tab: string;
   onTab: (key: string) => void;
+  /**
+   * Where each tab lives — `useView`'s own `hrefOf`, so the address a
+   * modified click opens is the one a plain click writes. LINKS, not
+   * buttons: every view has an address, and a real href is what lets
+   * ctrl+clic open it in a new tab — a button navigates and offers nothing.
+   */
+  hrefOf: (key: string) => string;
 }) {
   return (
     <nav aria-label="Navigation principale">
       {tabs.map(([key, name]) => (
-        <button
-          type="button"
+        <a
           key={key}
           className="lien"
+          href={hrefOf(key)}
           aria-current={tab === key ? "page" : undefined}
-          onClick={() => onTab(key)}
+          onClick={(e) => {
+            // a MODIFIED click is the browser's — new tab, new window,
+            // download: exactly what carrying a real href is for. A plain
+            // primary click stays a view change, with no reload. Middle
+            // click never reaches onClick (it is auxclick) and falls to
+            // the browser on its own.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            onTab(key);
+          }}
         >
           {name}
-        </button>
+        </a>
       ))}
     </nav>
   );

@@ -95,7 +95,7 @@ test.describe
         // is no push channel here, so a revoked session falls at its NEXT
         // REQUEST. A tab left untouched keeps showing a screen it can no
         // longer write from, and says so the moment it tries.
-        await theirs.getByRole("button", { name: "Les maires" }).click();
+        await theirs.getByRole("link", { name: "Les maires" }).click();
         await expect(
           theirs.getByRole("heading", { name: "Connexion" }),
         ).toBeVisible({ timeout: 15_000 });

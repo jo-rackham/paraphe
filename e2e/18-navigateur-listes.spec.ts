@@ -33,7 +33,7 @@ test.describe
       ).toBeVisible();
       const cardUrl = page.url();
 
-      await page.getByRole("button", { name: "Mes données" }).click();
+      await page.getByRole("link", { name: "Mes données" }).click();
       await expect(
         page.getByText(/Chargée actuellement : liste prioritaire/),
       ).toBeVisible();
@@ -65,7 +65,7 @@ test.describe
       await expect(page.locator("table button.lien").first()).toBeVisible({
         timeout: 20_000,
       });
-      await page.getByRole("button", { name: "Mes données" }).click();
+      await page.getByRole("link", { name: "Mes données" }).click();
       await page.getByRole("button", { name: "Données fictives" }).click();
 
       // said in capitals, twice: the message and the loaded-list line — a
@@ -76,11 +76,11 @@ test.describe
       ).toBeVisible();
 
       // its cards open like any other's
-      await page.getByRole("button", { name: "Les maires" }).click();
+      await page.getByRole("link", { name: "Les maires" }).click();
       await expect(page.locator("table button.lien").first()).toBeVisible();
 
       // …and the way back to the real list works both ways
-      await page.getByRole("button", { name: "Mes données" }).click();
+      await page.getByRole("link", { name: "Mes données" }).click();
       await page.getByRole("button", { name: "Liste prioritaire" }).click();
       await expect(
         page.getByText(/Chargée actuellement : liste prioritaire/),

@@ -156,7 +156,7 @@ test.describe
       // an empty box, exactly as team mode shows an inherited text: filled
       // in as the value it would be a frozen copy, and the campaign's next
       // correction would stop reaching this browser.
-      await page.getByRole("button", { name: "Ma campagne" }).click();
+      await page.getByRole("link", { name: "Ma campagne" }).click();
       await choose(page, "courrier.txt");
       await expect(box(page)).toHaveValue("");
       expect(await box(page).getAttribute("placeholder")).toContain(

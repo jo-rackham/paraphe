@@ -77,7 +77,12 @@ const TEAM_VIEWS = ["guide", "tableau", "maires", "equipe", "profil"] as const;
 export default function Team({ config }: { config: ServerConfig }) {
   const [cfg, setCfg] = useState(config);
   const [me, setMe] = useState<Me | null>(null);
-  const { view, card: routedCard, go: setTab } = useView(TEAM_VIEWS, "guide");
+  const {
+    view,
+    card: routedCard,
+    go: setTab,
+    hrefOf,
+  } = useView(TEAM_VIEWS, "guide");
   // « fiche » is not a view of its own in the address bar: a card lives
   // UNDER the list it came from, so `précédent` from a card lands on the
   // list rather than wherever the visitor happened to be before.
@@ -382,6 +387,7 @@ export default function Team({ config }: { config: ServerConfig }) {
       me={me}
       tab={tab}
       setTab={setTab}
+      hrefOf={hrefOf}
       onSignOut={signOut}
       message={message}
       onMessage={setMessage}
@@ -531,6 +537,8 @@ interface CoquilleProps {
   me?: Me | null;
   tab?: string;
   setTab?: (v: string) => void;
+  /** Where each tab lives — required with setTab: the nav renders links. */
+  hrefOf?: (v: string) => string;
   onSignOut?: () => void;
   /**
    * The page-level message lives in the SHELL so its live region exists
@@ -549,6 +557,7 @@ function Coquille({
   me,
   tab,
   setTab,
+  hrefOf,
   onSignOut,
   message,
   onMessage,
@@ -580,8 +589,13 @@ function Coquille({
           sous={cfg.organisation?.name}
           onHome={me && setTab ? () => setTab("guide") : undefined}
         />
-        {me && setTab && (
-          <NavOnglets tabs={tabs} tab={tab ?? ""} onTab={setTab} />
+        {me && setTab && hrefOf && (
+          <NavOnglets
+            tabs={tabs}
+            tab={tab ?? ""}
+            onTab={setTab}
+            hrefOf={hrefOf}
+          />
         )}
         {me && (
           <span className="qui">

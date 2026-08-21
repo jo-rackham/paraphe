@@ -140,7 +140,7 @@ test.describe
 
       // the active tab is stated, not only coloured
       await expect(
-        page.getByRole("button", { name: "Les maires" }),
+        page.getByRole("link", { name: "Les maires" }),
       ).toHaveAttribute("aria-current", "page");
 
       // opening a card unmounts the clicked button: focus must land on the

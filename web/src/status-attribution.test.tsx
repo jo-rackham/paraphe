@@ -181,7 +181,7 @@ describe("the card of a mayor another team statused", () => {
     });
     await until(() => screen().includes("Mon tableau"), "the app opens");
     await act(async () => {
-      [...container.querySelectorAll("button")]
+      [...container.querySelectorAll<HTMLElement>("button, a")]
         .find((b) => b.textContent?.includes("Mon tableau"))!
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });

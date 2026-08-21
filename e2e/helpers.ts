@@ -16,9 +16,10 @@ export async function signIn(
   await expect(page.getByRole("button", { name: "déconnexion" })).toBeVisible();
 }
 
-/** Moves to one of the campaign tabs. */
+/** Moves to one of the campaign tabs — links now: a real href is what
+ * lets ctrl+clic open a view in a new tab. */
 export async function openTab(page: Page, name: string) {
-  await page.getByRole("button", { name, exact: true }).click();
+  await page.getByRole("link", { name, exact: true }).click();
 }
 
 /**
@@ -55,9 +56,7 @@ export async function openFirstCard(page: Page) {
  * assertions in the accessibility sweep.
  */
 export async function openManagement(page: Page) {
-  await page
-    .getByRole("button", { name: /^(Ma campagne|Mon équipe)$/ })
-    .click();
+  await page.getByRole("link", { name: /^(Ma campagne|Mon équipe)$/ }).click();
 }
 
 // The throwaway relay, read back. Shared because two journeys open a link

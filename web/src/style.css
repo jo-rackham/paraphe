@@ -137,10 +137,13 @@ header nav { display: flex; flex-wrap: wrap; gap: .4rem .9rem;
 /* header button.lien, not header .lien: at equal specificity the later
    `button.lien` rule was winning, and its olive link colour reads 3.8:1
    on the dark header — below the 4.5:1 floor. The cream this rule always
-   declared reads 15:1 */
-header button.lien { color: var(--entete-txt); background: none; border: 0;
-                     font: inherit; cursor: pointer; padding: .35rem .6rem;
-                     border-radius: .4rem; }
+   declared reads 15:1. The nav tabs are <a> now (a real href is what lets
+   ctrl+clic open a view in a new tab) and wear the same clothes; the
+   text-decoration is for them, a button never had one. */
+header button.lien, header nav a.lien {
+  color: var(--entete-txt); background: none; border: 0;
+  font: inherit; cursor: pointer; padding: .35rem .6rem;
+  border-radius: .4rem; text-decoration: none; }
 header .lien:hover { background: var(--entete-hover); color: var(--jaune-vif); }
 header .lien[aria-current] { background: var(--entete-hover);
                              color: var(--jaune-vif); }
