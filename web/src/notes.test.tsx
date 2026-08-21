@@ -1647,6 +1647,45 @@ describe("an act is aimed at a line, not at a position", () => {
     expect(document.activeElement?.id).toBe("contenu");
   });
 
+  // ONE SENTENCE PER EVENT, INCLUDING THE NEXT ONE. What silences the store's
+  // refusal is a ref, and a ref outlives the act that set it: not put back at
+  // the start of the following one, it swallows that one's own refusal — a
+  // dropped connection, a 409, a 500 — and the volunteer is told nothing at
+  // all. The code puts it back; nothing saw that it did.
+  it("says a refusal of its own after a line has gone", async () => {
+    const boom = "La connexion a été perdue — la note n'est pas partie.";
+    let fails = false;
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[
+            ligne("la première", "2026-01-08T10:00"),
+            ligne("la seconde", "2026-01-07T10:00"),
+          ]}
+          onEditNote={async () => {
+            if (fails) throw new Error(boom);
+          }}
+        />,
+      );
+    });
+    await click("Modifier la note 1 du 2026-01-08T10:00");
+    // a colleague removes the very line that editor is open on
+    await act(async () => {
+      setLignes([ligne("la seconde", "2026-01-07T10:00")]);
+    });
+    expect(text()).toContain("n'est plus dans l'historique");
+
+    // …and the next act fails for a reason entirely its own
+    fails = true;
+    await click("Modifier la note 1 du 2026-01-07T10:00");
+    await click("Enregistrer la note");
+    await flush();
+    expect(
+      text(),
+      "the refusal was swallowed by the line that went before it",
+    ).toContain(boom);
+  });
+
   // `sameLine` is NOT an identity — it leaves the text out, so an afternoon
   // of « à rappeler » produces lines that answer to it alike. Matched row by
   // row, the aim opened an editor on every one of them, sharing one draft.

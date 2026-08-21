@@ -195,18 +195,51 @@ export default function Team({ config }: { config: ServerConfig }) {
    * fetched counts: a write answering after the volunteer has moved to
    * another mayor would otherwise put the previous one back on screen, which
    * is « A's commune under B's address » one level up.
+   *
+   * AND A REFUSED ANSWER IS NOT DROPPED, IT IS ASKED AGAIN — because ask-order
+   * is not commit-order either, and ordering by it alone inverts the defect
+   * rather than closing it. Delay the REQUEST instead of the response and the
+   * server commits the correction AFTER the status: its answer then carries
+   * both, and it is the fresher one, dropped for having been asked first. The
+   * screen said « Note modifiée. » over the text as it was before, and
+   * announced « Note supprimée. » under a line still on screen with its
+   * buttons — the whole campaign reading the other thing. Both directions
+   * measured, one per round.
+   *
+   * The client cannot tell which answer is newer; a READ can, and this is why
+   * the second question settles it: a query started later runs on a snapshot
+   * at least as new as one started earlier, so the last-ASKED read is the
+   * freshest full stop. It costs a round trip, and only where two writes
+   * overlapped — the ordinary card pays nothing.
    */
   const writes = useRef(0);
   // STABLE, because the card-loading effect asks for one: recreated at every
   // render it would be a dependency that changes at every render, and the
-  // effect would refetch the card for ever. It closes over a ref and a state
-  // setter, which are both stable by construction.
-  const showsCard = useCallback(() => {
-    const mine = ++writes.current;
-    return (fresh: API.Card) => {
-      if (writes.current === mine) setChosen(fresh);
-    };
-  }, []);
+  // effect would refetch the card for ever. It closes over a ref, a state
+  // setter and `report`, all three stable by construction.
+  //
+  // `again` is the card to ask about when this answer is refused. A card being
+  // LOADED passes none: its answer is refused because the volunteer has moved
+  // on, and what they moved to is already on its way.
+  const showsCard = useCallback(
+    (again?: string) => {
+      const mine = ++writes.current;
+      return (fresh: API.Card) => {
+        if (writes.current === mine) {
+          setChosen(fresh);
+          return;
+        }
+        if (!again) return;
+        const asked = ++writes.current;
+        API.card(again)
+          .then((c) => {
+            if (writes.current === asked) setChosen(c);
+          })
+          .catch(report);
+      };
+    },
+    [report],
+  );
   useEffect(() => {
     if (!me || !routedCard) {
       loading.current = null;
@@ -425,17 +458,17 @@ export default function Team({ config }: { config: ServerConfig }) {
             delete: !!n.mine || account.role === "coordination",
           })}
           onEditNote={async (n, _i, text) => {
-            const show = showsCard();
+            const show = showsCard(chosen.mayor.insee_code);
             show(await API.editNote(chosen.mayor.insee_code, noteId(n), text));
           }}
           onDeleteNote={async (n) => {
-            const show = showsCard();
+            const show = showsCard(chosen.mayor.insee_code);
             show(await API.deleteNote(chosen.mayor.insee_code, noteId(n)));
           }}
           onBack={() => setTab("maires")}
           header={<ReserveePar mayor={chosen.mayor} me={account} />}
           onStatus={async (status: string, note: string) => {
-            const show = showsCard();
+            const show = showsCard(chosen.mayor.insee_code);
             const fresh = await API.setStatus(
               chosen.mayor.insee_code,
               status,

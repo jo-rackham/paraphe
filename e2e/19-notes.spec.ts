@@ -142,10 +142,24 @@ test.describe
       await expect(note).toHaveValue("");
       await expect(page.getByText("dit avoir signé")).toBeVisible();
 
-      // the correction lands last, and its answer knows nothing of it
-      await expect(page.getByText("premier contact, ok")).toBeVisible();
+      // The correction lands last. Whether its answer knows of the status
+      // depends on which of the two the server COMMITTED first, and the
+      // client cannot tell — so the screen ends on what the server says,
+      // whichever way round it went.
+      //
+      // Read from the HISTORY and not from the page: `getByText` matched the
+      // still-open editor, whose value is what the volunteer typed, so this
+      // journey passed while the history under it showed the text as it was
+      // before. The editor closes on its own when the act lands.
+      await expect(page.getByLabel("Texte de la note")).toHaveCount(0);
+      const ligne = (said: string) =>
+        page.locator(".note-texte", { hasText: said });
       await expect(
-        page.getByText("dit avoir signé"),
+        ligne("premier contact, ok"),
+        "the correction the server recorded is not in the history",
+      ).toBeVisible();
+      await expect(
+        ligne("dit avoir signé"),
         "the signature disappeared from a card the server has recorded it on",
       ).toBeVisible();
       await expect(page.getByLabel("Statut")).toHaveValue("signed");

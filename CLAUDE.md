@@ -1760,9 +1760,21 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   (`showsCard`), and a card being FETCHED counts — a write answering after the
   volunteer moved to another mayor would otherwise put the previous one back
   on screen, which is « A's commune under B's address » one level up.
-  **Assumed**: it orders by what was asked, not by what committed, which no
-  client can know. The case it does not cover is a later request committing
-  first, which for one volunteer clicking in sequence is the order they see.
+  **AND A REFUSED ANSWER IS NOT DROPPED, IT IS ASKED AGAIN.** Ordering by
+  ask-time alone INVERTS this defect rather than closing it, and the round
+  after measured the inversion: delay the REQUEST instead of the response and
+  the server commits the correction AFTER the status, so its answer carries
+  both and is the fresher one — dropped for having been asked first. The
+  screen then said « Note modifiée. » over the text as it was before, and
+  « Note supprimée. » under a line still on screen with its buttons, while the
+  whole campaign read the other thing. Arrival order and ask order are both
+  wrong, because neither is COMMIT order and no client can see that one.
+  A READ can: a query started later runs on a snapshot at least as new as one
+  started earlier, so the last-ASKED read is the freshest, full stop. A
+  refused answer therefore asks the server once more, and only there — two
+  writes that did not overlap pay nothing. **Assumed**: the second question
+  is not asked when a CARD LOAD is refused, because what refused it is the
+  volunteer moving on, and what they moved to is already on its way.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit
