@@ -15,6 +15,7 @@ import { CAMPAIGN_KEYS } from "../../noyau/messages.ts";
 import Browser from "./Browser.tsx";
 import { CAMPAIGN_FIELDS, EMPTY_CFG } from "./common.tsx";
 import * as DB from "./db.ts";
+import { ADOPTED_KEYS } from "./prefill.ts";
 
 // spy mode: real IndexedDB behavior everywhere, but a single test can make
 // one write fail — the failure path has no other way to be exercised
@@ -252,6 +253,7 @@ describe("the offer banner, rendered", () => {
     /** An instance serving its own browser version, with no ?org= at all. */
     const servedByCampaign = async (
       campaign: Record<string, string> = OFFERED,
+      templates: Record<string, string> = {},
     ) => {
       window.history.replaceState({}, "", "/");
       vi.stubGlobal("fetch", (url: string) =>
@@ -264,6 +266,7 @@ describe("the offer banner, rendered", () => {
                     slug: "sienne",
                     name: "Camille Sienne",
                     campaign,
+                    templates,
                   }),
               }
             : { ok: false, status: 404, json: () => Promise.resolve({}) },
@@ -413,6 +416,120 @@ describe("the offer banner, rendered", () => {
         expect(stored[key]).toBe("");
       },
     );
+
+    // THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN — for what
+    // the adoption wrote and nobody retouched since. A coordination that
+    // rewrites its letter after volunteers adopted must reach them, or the
+    // campaign speaks with two voices again, one update behind: reported
+    // from production as « le template custom devrait aussi être autochargé
+    // dans la version navigateur ». What the volunteer touched is theirs,
+    // and nothing overwrites it.
+    describe("following the campaign as it edits its texts", () => {
+      const TPL_V1 = { "email_decouverte.txt": "OBJET: v1\n\nDécouverte v1." };
+      const TPL_V2 = { "email_decouverte.txt": "OBJET: v2\n\nDécouverte v2." };
+      // what adopt() writes into "campagne": the offered values, the two
+      // personal keys kept at the template value
+      const asAdopted = {
+        ...OFFERED,
+        signataire: EMPTY_CFG.signataire,
+        signataire_qualite: EMPTY_CFG.signataire_qualite,
+      };
+      const seven = () =>
+        Object.fromEntries(ADOPTED_KEYS.map((k) => [k, OFFERED[k]]));
+
+      // The store of every browser from BEFORE the snapshot existed: the
+      // campaign adopted, no overlay, no snapshot. This is the exact state
+      // the production report was filed from.
+      it("adopts the texts a campaign wrote after this browser adopted it", async () => {
+        await DB.writeSetting("campagne", asAdopted);
+        await servedByCampaign(OFFERED, TPL_V1);
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the refresh says where the texts came from",
+        );
+        expect(await DB.readSetting("modeles", {})).toEqual(TPL_V1);
+        // and the snapshot now exists, so the next edit follows too
+        expect(
+          await DB.readSetting<Record<string, unknown>>("adoption", {}),
+        ).toMatchObject({ slug: "sienne", templates: TPL_V1 });
+      });
+
+      it("keeps the templates the volunteer rewrote", async () => {
+        const mine = { "email_decouverte.txt": "OBJET: à moi\n\nMon texte." };
+        await DB.writeSetting("campagne", asAdopted);
+        await DB.writeSetting("modeles", mine);
+        await servedByCampaign(OFFERED, TPL_V2);
+        await until(() => text().includes("Bourg-Réel"), "the app opens");
+        await flush();
+        await flush();
+        expect(await DB.readSetting("modeles", {})).toEqual(mine);
+        expect(text()).not.toContain("mis à jour depuis son site");
+      });
+
+      // The snapshot is what tells a campaign's rewrite from a volunteer's:
+      // the store still holds byte for byte what the adoption wrote, so the
+      // next version may replace it.
+      it("follows a rewrite while the store holds what adoption wrote", async () => {
+        await DB.writeSetting("campagne", asAdopted);
+        await DB.writeSetting("modeles", TPL_V1);
+        await DB.writeSetting("adoption", {
+          slug: "sienne",
+          campaign: seven(),
+          templates: TPL_V1,
+        });
+        await servedByCampaign(OFFERED, TPL_V2);
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the rewrite lands",
+        );
+        expect(await DB.readSetting("modeles", {})).toEqual(TPL_V2);
+      });
+
+      // …and the campaign's nine follow by the same rule: intact since the
+      // adoption means the coordination's correction reaches this browser.
+      it("follows a corrected campaign field the volunteer never touched", async () => {
+        await DB.writeSetting("campagne", asAdopted);
+        await DB.writeSetting("adoption", {
+          slug: "sienne",
+          campaign: seven(),
+          templates: {},
+        });
+        const corrected = { ...OFFERED, contact_email: "corrige@sienne.fr" };
+        await servedByCampaign(corrected, {});
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the correction lands",
+        );
+        const stored = await DB.readSetting<Record<string, string>>(
+          "campagne",
+          {},
+        );
+        expect(stored.contact_email).toBe("corrige@sienne.fr");
+      });
+
+      it("leaves a campaign the volunteer edited entirely alone", async () => {
+        await DB.writeSetting("campagne", {
+          ...asAdopted,
+          candidat: "Le Mien",
+        });
+        await DB.writeSetting("adoption", {
+          slug: "sienne",
+          campaign: seven(),
+          templates: {},
+        });
+        await servedByCampaign(OFFERED, TPL_V1);
+        await until(() => text().includes("Bourg-Réel"), "the app opens");
+        await flush();
+        await flush();
+        const stored = await DB.readSetting<Record<string, string>>(
+          "campagne",
+          {},
+        );
+        expect(stored.candidat).toBe("Le Mien");
+        expect(await DB.readSetting("modeles", {})).toEqual({});
+        expect(text()).not.toContain("mis à jour depuis son site");
+      });
+    });
 
     // Absence is silent — an apex, a static host, a captive portal. An
     // ANSWER this build cannot take is not absence, and swallowing it is

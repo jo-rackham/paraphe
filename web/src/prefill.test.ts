@@ -11,9 +11,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CAMPAIGN_KEYS, unfilledKeys } from "../../noyau/messages.ts";
 import { EMPTY_CFG } from "./common.tsx";
 import {
+  ADOPTED_KEYS,
   fetchCampaign,
   instanceDomain,
+  readAdoption,
   requestedSlug,
+  sameAdoptedFields,
+  sameTemplates,
   untouchedCampaign,
   validSlug,
 } from "./prefill.ts";
@@ -297,4 +301,69 @@ describe("when the offer may appear at all", () => {
       ).toBe(false);
     },
   );
+});
+
+// WHAT THE LAST ADOPTION WROTE, remembered — the reference that tells
+// « still the campaign's » from « made their own since », which is what lets
+// a campaign's own browser version follow the campaign as it edits its
+// texts, and nothing else.
+describe("the adoption snapshot", () => {
+  it("never carries the keys that name a person", () => {
+    expect(ADOPTED_KEYS).not.toContain("signataire");
+    expect(ADOPTED_KEYS).not.toContain("signataire_qualite");
+    expect(ADOPTED_KEYS).toContain("candidat");
+  });
+
+  // Who signs never travelled, so a volunteer signing for themselves must
+  // not read as "made the campaign their own": the comparison skips the
+  // personal keys entirely.
+  it("compares the adopted keys and ignores who signs", () => {
+    const a = { ...whole(), signataire: "Jeanne Bénévole" };
+    const b = { ...whole(), signataire: "" };
+    expect(sameAdoptedFields(a, b)).toBe(true);
+    expect(sameAdoptedFields(a, { ...b, candidat: "Autre" })).toBe(false);
+  });
+
+  it("compares the six templates by value, absent reading as empty", () => {
+    expect(sameTemplates({}, {})).toBe(true);
+    expect(sameTemplates({ "email.txt": "" }, {})).toBe(true);
+    expect(sameTemplates({ "email.txt": "x" }, {})).toBe(false);
+    expect(sameTemplates({ "email.txt": "x" }, { "email.txt": "x" })).toBe(
+      true,
+    );
+  });
+
+  // Judged like everything read back from IndexedDB: a restored backup or
+  // another version can have written anything under this key, and an
+  // unusable snapshot is a missing one — which every browser from before it
+  // existed has, and which must never throw the app into the boundary.
+  it("reads back what an adoption stored", () => {
+    const stored = {
+      slug: "sienne",
+      campaign: whole(),
+      templates: { "email.txt": "OBJET: s\n\nCorps." },
+    };
+    const read = readAdoption(stored);
+    expect(read?.slug).toBe("sienne");
+    expect(read?.campaign.candidat).toBe("valeur de candidat");
+    expect(read?.templates).toEqual({ "email.txt": "OBJET: s\n\nCorps." });
+  });
+
+  it.each([
+    ["nothing", null],
+    ["a plain string", "sienne"],
+    ["a slug that names a host", { slug: "a.b", campaign: {}, templates: {} }],
+    ["a campaign that is not an object", { slug: "ok", campaign: 3 }],
+  ])("answers null to %s", (_what, value) => {
+    expect(readAdoption(value)).toBeNull();
+  });
+
+  it("drops what the template filter would drop on the wire", () => {
+    const read = readAdoption({
+      slug: "sienne",
+      campaign: whole(),
+      templates: { "email.txt": 42, "courriel.txt": "x" },
+    });
+    expect(read?.templates).toEqual({});
+  });
 });

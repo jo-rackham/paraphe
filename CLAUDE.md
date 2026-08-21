@@ -1012,11 +1012,30 @@ campaign → image** by `mergeTemplates`.
   **ONE overlay there, not two.** In team mode the campaign's layer is LIVE —
   a coordination corrects its letter and every team that did not rewrite it
   gets the correction — so the two are kept apart and the inherited one is
-  only ever a placeholder. In browser mode nothing is live by promise:
-  adopting COPIES the texts, exactly as it copies the nine fields, and after
-  that they are this browser's. Showing them as the value is the honest
-  reading; pretending they are inherited would promise an update that can
-  never arrive.
+  only ever a placeholder. In browser mode adopting COPIES the texts, exactly
+  as it copies the nine fields, and what the volunteer touches is theirs.
+  Showing them as the value is the honest reading.
+  **AND THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN**, for what
+  the adoption wrote and nobody retouched since. A coordination that rewrote
+  its letter AFTER volunteers adopted did not reach them — the campaign spoke
+  with two voices again, one update behind, reported from production as « le
+  template custom devrait aussi être autochargé dans la version navigateur ».
+  `adopt` therefore leaves a SNAPSHOT (`adoption` in settings: slug, the
+  seven adopted keys, the templates) and the next load asks the origin again
+  when the store is still followable: fields byte-for-byte what the adoption
+  wrote (or what the origin says today), templates equal to the snapshot's —
+  or EMPTY, which is followable on its face: every browser from before the
+  snapshot existed holds exactly that, and an empty overlay was nobody's
+  writing. Anything the volunteer touched stops the refresh for its half and
+  says nothing — it is theirs. The refresh is announced in the provenance
+  slot (« mis à jour depuis son site »); a refusal on that path says the
+  local texts stand, not that nothing was filled in. WHO SIGNS still does
+  not travel, and signing for oneself does not count as touching: the
+  comparison reads the seven adopted keys only. Assumed: a logo alone
+  changing does not trigger a refresh (its key is content-addressed, there
+  is nothing to compare without downloading), and a volunteer who emptied
+  their overlay ON PURPOSE after adopting reads as followable — the cheaper
+  mistake, since what returns is what the campaign sends.
   **Bounded on the way in** (`offeredTemplates`), and that bound is the one
   thing there that is not cosmetic: this mode stores what it adopts and
   promises to hold only what its owner put there, so a campaign answering with

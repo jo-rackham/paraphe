@@ -26,6 +26,7 @@
 import {
   CAMPAIGN_KEYS,
   MAX_TEMPLATE_RUNES,
+  PERSONAL_CAMPAIGN_KEYS,
   TEMPLATE_FILES,
   unfilledKeys,
 } from "../../noyau/messages.ts";
@@ -129,6 +130,59 @@ export function validSlug(slug: string): boolean {
  */
 export const untouchedCampaign = (cfg: Campaign): boolean =>
   unfilledKeys(cfg).length === CAMPAIGN_KEYS.length;
+
+/** The keys an adoption writes — the nine minus the two that name a person. */
+export const ADOPTED_KEYS = CAMPAIGN_KEYS.filter(
+  (k) => !PERSONAL_CAMPAIGN_KEYS.includes(k),
+);
+
+/** Value equality over the adopted keys; a missing key reads as "". */
+export const sameAdoptedFields = (a: Campaign, b: Campaign): boolean =>
+  ADOPTED_KEYS.every((k) => (a[k] ?? "") === (b[k] ?? ""));
+
+/** Value equality over the six templates; a missing file reads as "". */
+export const sameTemplates = (a: Templates, b: Templates): boolean =>
+  TEMPLATE_FILES.every((f) => (a[f] ?? "") === (b[f] ?? ""));
+
+/**
+ * What an adoption WROTE, as this browser remembers it — the reference that
+ * tells « still what the campaign said » from « made their own since ».
+ *
+ * It exists because the campaign's own browser version FOLLOWS its campaign:
+ * what the adoption wrote and nobody retouched is rewritten by the next
+ * adoption, and without a snapshot a campaign that corrected its letter
+ * could not be told apart from a volunteer who rewrote theirs.
+ */
+export interface Adoption {
+  slug: string;
+  /** the adopted keys only: who signs never travelled, so it is not here */
+  campaign: Campaign;
+  templates: Templates;
+}
+
+/**
+ * The stored snapshot, judged like everything read back from IndexedDB
+ * (`offeredTemplates` reads the wire and the store with one filter, and this
+ * is the same posture): a restored backup, another tab or an older version
+ * can have written anything under this key. Unusable answers null — a
+ * missing snapshot, which every browser from before this existed has.
+ */
+export function readAdoption(value: unknown): Adoption | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as {
+    slug?: unknown;
+    campaign?: unknown;
+    templates?: unknown;
+  };
+  if (typeof v.slug !== "string" || !validSlug(v.slug)) return null;
+  if (!v.campaign || typeof v.campaign !== "object") return null;
+  const campaign: Campaign = {};
+  for (const k of ADOPTED_KEYS) {
+    const val = (v.campaign as Record<string, unknown>)[k];
+    campaign[k] = typeof val === "string" ? val : "";
+  }
+  return { slug: v.slug, campaign, templates: offeredTemplates(v.templates) };
+}
 
 /**
  * The instance a `?org=` may name a campaign of.
