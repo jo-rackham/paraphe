@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -83,6 +84,16 @@ func TestCorrectingANoteMovesItsTextAndNoOtherColumn(t *testing.T) {
 
 	rep := write(t, c, "60000", "to_call_back", "aple demain", "")
 	id := noteIDOf(t, rep, "aple demain")
+	// BACK-DATED, and that is what makes the mark's VALUE checkable at all.
+	// `shortTimestamp` has MINUTE granularity, so a note written, corrected
+	// and asserted inside one minute carries the same string in `ts`, in
+	// `opened` and in `closed` — and `edited_at=ts`, which announces that the
+	// correction happened when the contact did, then satisfies the bound
+	// below with the whole suite green. Measured. It is the lesson
+	// `db.test.ts` states one side of the wire over, where the clock is
+	// frozen and moved by hand for the same reason.
+	execAsMaintenance(t, s,
+		"UPDATE notes SET ts='2020-03-15T09:00' WHERE id=$1", id)
 	before := scalar[string](t, s, "SELECT ts FROM notes WHERE id=$1", id)
 
 	// the window the correction happens in, to the minute the column is
@@ -505,6 +516,50 @@ func TestACoordinationRemovesANoteItDidNotWrite(t *testing.T) {
 	if n := scalar[int](t, s, "SELECT COUNT(*) FROM notes WHERE id=$1",
 		id); n != 0 {
 		t.Fatal("the note is still there")
+	}
+}
+
+// …AND THE TRACE IS OF THAT ACT, NOT OF EVERY REMOVAL A COORDINATION MAKES.
+//
+// Most of what a coordination removes is its OWN — a typo it took during a
+// call, like everybody else. Fired on those too, the line stopped marking
+// anything: the one event worth finding sat in a stream of identical ones,
+// with no author on the record to tell them apart by.
+func TestOnlyANoteACoordinationDidNotWriteIsRecorded(t *testing.T) {
+	s, srv := testServer(t)
+	seedMayors(t, s, 1, "60")
+	team := createTeam(t, s, "Nord", "")
+	pwV := createAccount(t, s, "v@exemple.fr", RoleVolunteer, &team)
+	pwC := createAccount(t, s, "coord@exemple.fr", RoleCoordination, nil)
+	cv, cc := newClient(t, srv), newClient(t, srv)
+	cv.signIn("v@exemple.fr", pwV)
+	cc.signIn("coord@exemple.fr", pwC)
+
+	theirs := noteIDOf(t,
+		write(t, cv, "60000", "to_call_back", "note du bénévole", ""),
+		"note du bénévole")
+	own := noteIDOf(t,
+		write(t, cc, "60000", "email_sent", "note de la coordination",
+			"to_call_back"),
+		"note de la coordination")
+
+	buf := capturingLog(t, slog.LevelInfo)
+	if code, rep := cc.call(http.MethodDelete, notePath("60000", own),
+		nil); code != http.StatusOK {
+		t.Fatalf("a coordination removing its own note: %d %v", code, rep)
+	}
+	if strings.Contains(buf.String(), "note_deleted") {
+		t.Errorf("a coordination removing its own words was recorded as an "+
+			"act against somebody else's: %s", buf.String())
+	}
+
+	if code, rep := cc.call(http.MethodDelete, notePath("60000", theirs),
+		nil); code != http.StatusOK {
+		t.Fatalf("a coordination removing a volunteer's note: %d %v", code, rep)
+	}
+	if !strings.Contains(buf.String(), "note_deleted") {
+		t.Error("a coordination removed words it did not write, and the " +
+			"campaign is told nothing")
 	}
 }
 

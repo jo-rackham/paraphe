@@ -661,26 +661,37 @@ func (s *Server) routeDeleteNote(w http.ResponseWriter, r *http.Request) {
 	if !me.Coordination() {
 		mine = " AND volunteer=" + req.p(me.Email)
 	}
-	tag, err := s.tx(r).Exec(r.Context(),
+	// WHO WROTE IT comes back WITH the row, rather than being asked for in a
+	// SELECT of its own: read beforehand, the answer would be about a row this
+	// DELETE may well not remove. A note that predates the column being filled
+	// carries NULL, and NULL is nobody — never this caller.
+	var author *string
+	err := s.tx(r).QueryRow(r.Context(),
 		"DELETE FROM notes WHERE org_id=$1 AND id="+req.p(id)+
-			" AND insee_code="+req.p(insee)+mine, req.args...)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	if tag.RowsAffected() == 0 {
+			" AND insee_code="+req.p(insee)+mine+
+			" RETURNING volunteer", req.args...).Scan(&author)
+	if errors.Is(err, pgx.ErrNoRows) {
 		errorJSON(w, http.StatusNotFound,
 			"Aucune note à supprimer ici : une note se retire par la personne "+
 				"qui l'a écrite, ou par la coordination.")
 		return
 	}
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
 	if !s.restoreHead(w, r, insee) {
 		return
 	}
-	// A coordination removing words it did not write is an act the campaign
-	// is owed a trace of. Pseudonymised like every other event: what is
-	// logged is that it happened, not to whom.
-	if me.Coordination() {
+	// A coordination removing words IT DID NOT WRITE is the act the campaign
+	// is owed a trace of. Pseudonymised like every other event: what is logged
+	// is that it happened, not to whom.
+	//
+	// Fired on its own notes as well, the line stopped marking anything: most
+	// of what a coordination removes is its own — a typo it took during a call
+	// — so the one event worth finding sat in a stream of identical ones, with
+	// no author on the record to tell them apart by.
+	if me.Coordination() && (author == nil || *author != me.Email) {
 		s.securityEvent(r, slog.LevelInfo, "note_deleted",
 			"by", s.accountPseudonym(me.Email))
 	}

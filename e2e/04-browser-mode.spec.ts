@@ -201,6 +201,64 @@ test.describe
       await other.close();
     });
 
+    // A REMOVAL THE STORE REFUSES MUST NOT LEAVE ITS QUESTION BEHIND.
+    //
+    // Browser mode names a note by its POSITION, so a refusal — which re-reads
+    // the record, one line shorter — slid the standing « Supprimer cette
+    // note ? » onto the note that inherited the number. « Confirmer » then
+    // removed a line nobody had pointed at, from the only copy of this
+    // volunteer's work.
+    test("a removal refused takes its question with it", async ({
+      context,
+      page,
+    }) => {
+      await page.goto(`${STATIC_ORIGIN}/`);
+      const first = page.locator("table button.lien").first();
+      await expect(first).toBeVisible({ timeout: 20_000 });
+      await first.click();
+      const note = page.getByRole("textbox", { name: "Note", exact: true });
+
+      await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+      await note.fill("la plus ancienne");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(note).toHaveValue("");
+      await page.getByLabel("Statut").selectOption({ label: "À rappeler" });
+      await note.fill("la plus récente");
+      await page
+        .getByRole("button", { name: "Enregistrer", exact: true })
+        .click();
+      await expect(note).toHaveValue("");
+      const card = page.url();
+
+      // another window removes the OLDER of the two — the one whose number
+      // the newer inherits the moment it goes
+      const other = await context.newPage();
+      await other.goto(card);
+      const removeOlder = { name: "Supprimer la note 2 du" };
+      await expect(other.getByRole("button", removeOlder)).toBeVisible({
+        timeout: 20_000,
+      });
+      await other.getByRole("button", removeOlder).click();
+      await other.getByRole("button", { name: "Confirmer" }).click();
+      await expect(other.getByText("la plus ancienne")).toBeHidden();
+      await other.close();
+
+      // the first window is still showing both, and asks about the one that
+      // has gone
+      await page.getByRole("button", removeOlder).click();
+      await page.getByRole("button", { name: "Confirmer" }).click();
+      await expect(
+        page.getByText(/a changé depuis son affichage/),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Confirmer" }),
+        "the question outlived the line it was asked about",
+      ).toBeHidden();
+      await expect(page.getByText("la plus récente")).toBeVisible();
+    });
+
     test("never claims to be the team application", async ({ page }) => {
       await page.goto(`${STATIC_ORIGIN}/`);
       // no mode marker, and therefore no promise that work reaches a server

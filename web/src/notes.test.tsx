@@ -1333,3 +1333,142 @@ describe("what a card renders without the wiring", () => {
     expect(onStatus).not.toHaveBeenCalled();
   });
 });
+
+// AN ACT IS AIMED AT A LINE, NOT AT A POSITION.
+//
+// Browser mode names a note by where it sits, so a key re-binds the moment
+// the history changes length — and held as the aim it re-bound under acts
+// that were already open, in both directions. Neither of these needs a race:
+// the history moves because THIS screen moved it.
+describe("an act is aimed at a line, not at a position", () => {
+  const ligne = (note: string, ts: string): Note => ({
+    volunteer: "Alice",
+    status: "to_contact",
+    note,
+    ts,
+    mine: true,
+  });
+
+  // No id: browser mode, where a line is named by its position.
+  const LIGNES: Note[] = [
+    ligne("récente", "2026-01-04T10:00"),
+    ligne("milieu 1", "2026-01-03T10:00"),
+    ligne("milieu 2", "2026-01-02T10:00"),
+    ligne("ancienne", "2026-01-01T10:00"),
+  ];
+
+  let setLignes: (n: Note[]) => void = () => {};
+
+  function Registre(wiring: Wiring) {
+    const [notes, setNotes] = useState<Note[]>(LIGNES);
+    setLignes = setNotes;
+    return (
+      <Fiche
+        mayor={MAYOR}
+        cfg={EMPTY_CFG}
+        notes={notes}
+        noteRights={() => ({ edit: true, delete: true })}
+        onEditNote={wiring.onEditNote}
+        onDeleteNote={wiring.onDeleteNote}
+        onBack={() => {}}
+        onStatus={() => {}}
+      />
+    );
+  }
+
+  // A removal the store REFUSES re-reads the record and hands it back, which
+  // is what makes a second attempt possible at all. The list is then one line
+  // shorter, every key NEWER than the gap slides along, and the standing
+  // « Supprimer cette note ? » came back attached to whichever note inherited
+  // the number. « Confirmer » removed it.
+  it("drops the question when the line it was asked about has gone", async () => {
+    const removed: string[] = [];
+    const onDeleteNote = async (n: Note) => {
+      if (n.note === "milieu 2") {
+        // another window got there first: the store re-reads, then re-raises
+        setLignes(LIGNES.filter((x) => x.note !== "milieu 2"));
+        throw new Error("Cette note a changé depuis son affichage");
+      }
+      removed.push(n.note);
+    };
+    await act(() => {
+      root.render(<Registre onDeleteNote={onDeleteNote} />);
+    });
+    await click("Supprimer la note 3 du 2026-01-02T10:00");
+    await click("Confirmer");
+    await flush();
+
+    const asked = [...container.querySelectorAll("button")].some(
+      (b) => b.textContent === "Confirmer",
+    );
+    expect(
+      asked,
+      "the question outlived the line it was asked about, on a row that " +
+        "inherited its number",
+    ).toBe(false);
+    expect(removed, "a note nobody pointed at was removed").toEqual([]);
+  });
+
+  // A line that has gone takes its act with it — and the words typed into
+  // that act go too, so it is SAID. « La correction en cours a été
+  // abandonnée » does not fire here: that sentence is for opening ANOTHER
+  // editor, not for losing this one.
+  it("says so when the line an editor was open on has gone", async () => {
+    await act(() => {
+      root.render(<Registre onEditNote={async () => {}} />);
+    });
+    await click("Modifier la note 2 du 2026-01-03T10:00");
+    expect(noteEditor()).toBeTruthy();
+
+    // a colleague removes that very line: nothing on this screen was clicked
+    await act(async () => {
+      setLignes(LIGNES.filter((x) => x.note !== "milieu 1"));
+    });
+    expect(
+      noteEditor(),
+      "the editor stayed open over a line that is not there",
+    ).toBeFalsy();
+    expect(text()).toContain("La correction en cours est abandonnée.");
+  });
+
+  // And the same slide on the SUCCESS path, which needs no refusal at all: an
+  // act closes its OWN editor and not whichever one is open, so a removal
+  // landing under an editor opened meanwhile left it standing — over a list
+  // that had just lost a line, hence over a different note, with the
+  // volunteer's words still in it.
+  it("keeps an editor on its own line when a removal lands under it", async () => {
+    let release: () => void = () => {};
+    const rewritten: string[] = [];
+    const onDeleteNote = async (n: Note) => {
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      setLignes(LIGNES.filter((x) => x.note !== n.note));
+    };
+    const onEditNote = async (n: Note) => {
+      rewritten.push(n.note);
+    };
+    await act(() => {
+      root.render(
+        <Registre onDeleteNote={onDeleteNote} onEditNote={onEditNote} />,
+      );
+    });
+    await click("Supprimer la note 4 du 2026-01-01T10:00");
+    await click("Confirmer");
+    await click("Modifier la note 2 du 2026-01-03T10:00");
+    const box = noteEditor();
+    if (!box) throw new Error("no editor is open");
+    await type(box, "corrigé pour milieu 1");
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await click("Enregistrer la note");
+    await flush();
+
+    expect(
+      rewritten,
+      "the correction was written into a line nobody was correcting",
+    ).toEqual(["milieu 1"]);
+  });
+});

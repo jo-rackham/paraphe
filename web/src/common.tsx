@@ -1331,12 +1331,18 @@ export function Fiche({
   // status, correcting a note, removing one — and they are not « enregistré »
   // alike.
   const [saved, setSaved] = useState("");
-  // The one history line being acted on, `<verb>:<key>`. Held HERE and not in
+  // The one history line being acted on, and the act. Held HERE and not in
   // each row: two rows in edit mode at once is two drafts and one open editor,
   // and in browser mode a deletion shifts the reverse-index keys of every line
   // NEWER than it — React then remounts them, and an editor open on one of
   // those loses what was typed into it.
-  const [activeNote, setActiveNote] = useState<string | null>(null);
+  //
+  // The LINE and not its key — see `sameLine`, which is where that was paid
+  // for.
+  const [activeNote, setActiveNote] = useState<{
+    verb: "edit" | "delete";
+    line: Note;
+  } | null>(null);
   // ONE EDITOR, ONE DRAFT — and abandoning it is SAID.
   //
   // Kept per line and keyed like the rows, it inherited the rows' own
@@ -1553,25 +1559,51 @@ export function Fiche({
     kind.current !== act;
 
   /**
-   * A history line's identity for this render: its own id where the server
+   * A history line's REACT key for this render: its own id where the server
    * gives one, its POSITION where it does not — browser mode names a note by
-   * where it sits. Written once, because `activeNote` and the React key are
-   * two readings of the same thing and a second spelling is a second bug.
+   * where it sits. Unique within the list by construction, which two notes of
+   * the same minute and the same outcome are not, and React calls duplicate
+   * keys unsupported.
+   *
+   * It is NOT what an act is aimed at. See `sameLine`.
    */
   const noteKey = (n: Note, i: number) => String(n.id ?? notes.length - i);
+
+  /**
+   * THE LINE AN ACT IS AIMED AT, WHICH IS NOT THE ROW IT RENDERS UNDER.
+   *
+   * `noteKey` is POSITIONAL in browser mode, where a note has no identifier,
+   * so it RE-BINDS the moment the history changes length — and held as the
+   * aim it re-bound under acts that were already open, in both directions.
+   * On a REFUSAL: the store re-reads the record, the standing « Supprimer
+   * cette note ? » slid one line along, and « Confirmer » then removed a note
+   * nobody had pointed at. On a SUCCESS: a removal landing while an editor
+   * was open on another line moved that editor onto a third one, and
+   * « Enregistrer la note » wrote the volunteer's words into it. Measured,
+   * both, against a register the whole campaign reads.
+   *
+   * So the aim is the LINE, by value, and an act renders under whichever row
+   * IS that line. What is compared is what a CORRECTION does not touch: an id
+   * where the server gives one, otherwise the moment and the outcome. The
+   * text is left out on purpose — a correction another window has just landed
+   * would otherwise take this one's editor away with the words still in it,
+   * which is the one thing a refusal here must not do. Two notes of the same
+   * minute AND the same outcome are indistinguishable, which is the limit
+   * browser mode already states.
+   */
+  const sameLine = (a: Note, b: Note) =>
+    a.id !== undefined || b.id !== undefined
+      ? a.id === b.id
+      : a.ts === b.ts && a.status === b.status;
+
   /** The line whose editor is open, if one is — what an abandoned correction
    *  is compared against. */
-  const editedNote = activeNote?.startsWith("edit:")
-    ? notes.find((n, i) => `edit:${noteKey(n, i)}` === activeNote)
-    : undefined;
+  const editedNote =
+    activeNote?.verb === "edit"
+      ? notes.find((n) => sameLine(activeNote.line, n))
+      : undefined;
 
   const save = async () => {
-    // A REF, not the `saving` state: two clicks in the same tick run two
-    // handlers built by the same render, both read `saving` as false, and both
-    // POST — two identical notes in the team's history for one intention, and
-    // in browser mode two `saveTracking` racing on the same key. `aria-disabled`
-    // greys the button but keeps it live; `useSubmitGuard` is what makes the
-    // second click a no-op. Every other submission in the app already does this.
     // A REF, not the `saving` state: two clicks in the same tick run two
     // handlers built by the same render, both read `saving` as false, and both
     // POST — two identical notes in the team's history for one intention, and
@@ -1856,6 +1888,28 @@ export function Fiche({
       {notes.length > 0 && (
         <div className="carte">
           <h2 style={{ marginTop: 0 }}>Historique</h2>
+          {/* AN ACT WHOSE LINE HAS GONE IS SAID, not simply gone from the
+              screen. A colleague removes the very line an editor is open on
+              — or the store refuses this window because they did — and the
+              act has nowhere left to land: the box disappears and the words
+              typed into it go with it. « La correction en cours a été
+              abandonnée » does not fire, because it is the sentence for
+              opening ANOTHER editor, not for losing this one.
+
+              DERIVED, and that is what makes it safe: `setSaved` here would
+              be a render-phase write, and the render that swaps the card is
+              one React discards — the message would survive onto the next
+              mayor while its output did not. Rendered, it exists exactly on
+              the renders that are committed. */}
+          {activeNote && !notes.some((n) => sameLine(activeNote.line, n)) && (
+            <p>
+              Cette note n'est plus dans l'historique : quelqu'un l'a supprimée
+              depuis.
+              {activeNote.verb === "edit"
+                ? " La correction en cours est abandonnée."
+                : ""}
+            </p>
+          )}
           {/* The history arrives newest first, in both modes: the server
               orders by id DESC, the browser prepends. A plain index would
               shift on every addition; the DISTANCE FROM THE OLDEST end is
@@ -1868,8 +1922,13 @@ export function Fiche({
             // a note by its position).
             const key = noteKey(n, i);
             const rights = noteRights?.(n) ?? { edit: false, delete: false };
-            const editing = activeNote === `edit:${key}`;
-            const confirming = activeNote === `delete:${key}`;
+            // An act shows on the row that IS the line it was aimed at, and
+            // on no other. A line that has gone takes its act with it: there
+            // is nothing left to confirm and nothing left to correct.
+            const aim =
+              activeNote && sameLine(activeNote.line, n) ? activeNote : null;
+            const editing = aim?.verb === "edit";
+            const confirming = aim?.verb === "delete";
             // Every row carries the same two buttons, so their VISIBLE names
             // repeat down the list and a screen reader enumerates them
             // identically.
@@ -1997,8 +2056,8 @@ export function Fiche({
                                 // say so rather than swap the text under the
                                 // volunteer without a word
                                 if (
-                                  activeNote?.startsWith("edit:") &&
-                                  activeNote !== `edit:${key}` &&
+                                  activeNote?.verb === "edit" &&
+                                  !sameLine(activeNote.line, n) &&
                                   noteDraft !== editedNote?.note
                                 ) {
                                   setSaved(
@@ -2006,7 +2065,7 @@ export function Fiche({
                                   );
                                 }
                                 setNoteDraft(n.note);
-                                setActiveNote(`edit:${key}`);
+                                setActiveNote({ verb: "edit", line: n });
                               }}
                             >
                               Modifier
@@ -2017,7 +2076,9 @@ export function Fiche({
                               type="button"
                               className="lien"
                               aria-label={`Supprimer la note ${which}`}
-                              onClick={() => setActiveNote(`delete:${key}`)}
+                              onClick={() =>
+                                setActiveNote({ verb: "delete", line: n })
+                              }
                             >
                               Supprimer
                             </button>

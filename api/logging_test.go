@@ -220,12 +220,16 @@ func TestARelayAnswerInAnyAlphabetIsSafeToRedact(t *testing.T) {
 // The redirection stays — a log.Printf from pgx, or from anything else that
 // knows nothing of this package, still has to land in the same stream — but
 // what THIS package emits says what it is.
-func atWarn(t *testing.T) *bytes.Buffer {
+// The LEVEL is a parameter because two questions are asked of this stream:
+// what survives an operator's `log_level=warn`, and what a route emits at
+// Info. Written twice it would be one helper per level, and the redirection
+// below is the half that would drift.
+func capturingLog(t *testing.T, level slog.Level) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf,
-		&slog.HandlerOptions{Level: slog.LevelWarn})))
+		&slog.HandlerOptions{Level: level})))
 	oldFlags, oldOut := log.Flags(), log.Writer()
 	log.SetFlags(0)
 	log.SetOutput(logWriter{})
@@ -258,7 +262,7 @@ func logLevels(t *testing.T, buf *bytes.Buffer) []string {
 // A panic in a handler answers 500 to the browser. If it says nothing to the
 // log as well, the incident exists nowhere at all.
 func TestAPanicIsLoggedAtWarnLevel(t *testing.T) {
-	buf := atWarn(t)
+	buf := capturingLog(t, slog.LevelWarn)
 	handler := answerOnPanic(http.HandlerFunc(
 		func(http.ResponseWriter, *http.Request) { panic("boom") }))
 
@@ -301,7 +305,7 @@ func TestOpsEventsSurviveTheLevelFilter(t *testing.T) {
 			func() { slog.Warn("lock not released", "lock", 8047) }, "WARN"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			buf := atWarn(t)
+			buf := capturingLog(t, slog.LevelWarn)
 			emit.fn()
 			got := logLevels(t, buf)
 			if len(got) != 1 || !strings.HasPrefix(got[0], emit.want) {
@@ -313,7 +317,7 @@ func TestOpsEventsSurviveTheLevelFilter(t *testing.T) {
 	// …and the ordinary chatter still does not, or the filter would be
 	// pointless
 	t.Run("routine progress stays quiet", func(t *testing.T) {
-		buf := atWarn(t)
+		buf := capturingLog(t, slog.LevelWarn)
 		slog.Info("list unchanged, import skipped", "mayors", 34826)
 		if got := logLevels(t, buf); len(got) != 0 {
 			t.Errorf("level=warn still emitted %v", got)

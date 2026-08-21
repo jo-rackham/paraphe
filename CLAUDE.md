@@ -1441,6 +1441,14 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   puts different ones under somebody else's name, which is « whoever sends it
   is whoever signs it » one register down. A lead gets nothing extra: the same
   narrow line `routeToggleAccount` draws.
+  **The trace is of THAT act, not of every removal a coordination makes.**
+  `note_deleted` fires when the words were somebody else's, and the author
+  comes back WITH the row (`DELETE … RETURNING volunteer`) rather than out of a
+  SELECT beforehand, which would describe a row the DELETE may not remove.
+  Fired on its own notes too — and most of what a coordination removes is its
+  own, a typo it took during a call like everybody else — the line stopped
+  marking anything: the one event worth finding sat in a stream of identical
+  ones, with no author on the record to tell them apart by.
   **REMOVING ROLLS THE CARD BACK TO WHAT THE HISTORY THEN SAYS.** The history
   is the register and `assignments` is its head: the newest remaining note
   decides the status, its date and its `updated_by_team`, and no note left is
@@ -1590,12 +1598,38 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   has none, because the editor it belongs to is on screen. What it costs is
   the rewrite in progress when another line is opened, and that is not
   swallowed: the screen says so, which is the rule the rewritten email already
-  follows one panel up. `noteKey` is the ONE derivation of a line's identity —
-  `activeNote` and the React key are two readings of the same thing, and a
-  second spelling is a second defect.
+  follows one panel up.
   **Assumed**: the draft dies with the card, like the editor it is in. The
   email and the call note survive a tab click through `cardDrafts` because
   they are VISIBLE and pre-filled; a closed editor claims nothing.
+- **AN ACT IS AIMED AT A LINE, NOT AT A POSITION**, and that is `noteKey`'s
+  limit rather than its meaning. It is the REACT key — unique within the list
+  by construction, which two notes of one minute and one outcome are not, and
+  React calls duplicate keys unsupported. Held as the AIM it re-bound the
+  moment the history changed length, in both directions and with no race in
+  either: on a REFUSAL, `reviseNote` re-read the record, the standing
+  « Supprimer cette note ? » slid one line along, and « Confirmer » removed a
+  note nobody had pointed at; on a SUCCESS, a removal landing while an editor
+  was open on another line — which is what « an act closes its OWN editor »
+  leaves standing — moved that editor onto a third line and
+  « Enregistrer la note » wrote the volunteer's words into it. Measured, both.
+  So the aim is the LINE, by value (`sameLine`), and an act renders under
+  whichever row IS that line; a line that has gone takes its act with it,
+  because there is then nothing to confirm and nothing to correct. What is
+  compared is what a CORRECTION does not touch — an id where the server gives
+  one, otherwise the moment and the outcome. **The text is left out on
+  purpose**: a correction another window has just landed would otherwise take
+  this one's editor away with the words still in it, which is the one thing
+  the refusal below must not do. Two notes of the same minute AND the same
+  outcome are indistinguishable, which is the limit browser mode already
+  states.
+  **And a line that has gone taking its act with it is SAID**, because the
+  words typed into that act go with it — a colleague removes the very line an
+  editor is open on and the box simply disappears. « La correction en cours a
+  été abandonnée » does not fire there: that sentence is for opening ANOTHER
+  editor. The new one is DERIVED and rendered, never written to state: a
+  render-phase `setSaved` would survive the render that swaps the card, which
+  React discards, and land on the next mayor with its output nowhere.
 - **A REFUSAL IN BROWSER MODE REFRESHES WHAT THE SCREEN HOLDS.** That mode
   reads its store ONCE, at load, so « rouvrez la fiche » sent the volunteer to
   the list and back to exactly what they had, and the second attempt was
@@ -1650,6 +1684,15 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   and `deleteNote` made to date the card NOW both left all nineteen tests
   green. `db.test.ts` fakes Date alone — fake-indexeddb runs on real timers —
   and gives each note its own minute.
+  **AND `shortTimestamp()` HAS THE SAME GRANULARITY, so the lesson was learned
+  on one side of the wire and not the other.** A Go test that writes a note,
+  corrects it and asserts inside one minute carries the same string in `ts`, in
+  the window it opened and in the one it closed — so `edited_at=ts`, which
+  announces that a correction happened when the CONTACT did, satisfied the
+  bound with all 429 tests green. There is no injectable clock behind
+  `shortTimestamp`, so the note is BACK-DATED before the window opens: the
+  fixture is what makes the mark's value checkable, and « modifiée le » is a
+  date the whole campaign reads.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit
