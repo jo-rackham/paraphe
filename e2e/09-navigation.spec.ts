@@ -93,26 +93,27 @@ test.describe
     // The nav tabs are LINKS carrying each view's address: a plain click
     // stays a view change with no reload, and a modified click is the
     // browser's — which only a real browser can prove, because opening a
-    // tab is not an event a unit test can observe.
+    // tab is not an event a unit test can observe. Driven on the
+    // account-less build: the nav is the same component in every mode, and
+    // this way the journey spends nothing from the shared sign-in budget.
     test("ctrl+clic opens a tab in a new one, plain click stays here", async ({
       page,
       context,
     }) => {
-      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      await page.goto(`${ORIGIN}/navigateur/`);
+      await expect(
+        page.getByRole("link", { name: "Guide", exact: true }),
+      ).toBeVisible({ timeout: 20_000 });
       const opened = context.waitForEvent("page");
       await page
-        .getByRole("link", { name: "Les maires", exact: true })
+        .getByRole("link", { name: "Guide", exact: true })
         .click({ modifiers: ["ControlOrMeta"] });
       const other = await opened;
-      await expect(other).toHaveURL(/\/maires$/);
-      await expect(
-        other.getByRole("heading", { name: "Les maires" }),
-      ).toBeVisible();
+      await expect(other).toHaveURL(/\/navigateur\/guide$/);
       await other.close();
       // …and the first tab never moved: the modified click was the
       // browser's alone
-      await expect(page.getByRole("heading", { name: "Guide" })).toBeVisible();
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(/\/navigateur\/$/);
     });
 
     test("an address nobody serves lands on a screen, never on a blank page", async ({
