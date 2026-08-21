@@ -1582,6 +1582,71 @@ describe("an act is aimed at a line, not at a position", () => {
     ).not.toBe("BODY");
   });
 
+  // ONE SENTENCE PER EVENT. The refusal that comes with the removal — « une
+  // autre fenêtre l'a modifiée. Annulez pour voir son texte. » — is false when
+  // the line was REMOVED, and it names a control that is no longer on screen.
+  // Left standing beside the true one, two live regions read two contradictory
+  // sentences one after the other.
+  it("does not leave a refusal standing beside the line that has gone", async () => {
+    const REFUS =
+      "Cette note a changé depuis son affichage — une autre fenêtre l'a " +
+      "modifiée. Annulez pour voir son texte.";
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[ligne("la seule", "2026-01-04T10:00")]}
+          onDeleteNote={async () => {
+            // the store re-reads and re-raises, as browser mode does
+            setLignes([]);
+            throw new Error(REFUS);
+          }}
+        />,
+      );
+    });
+    await click("Supprimer la note 1 du 2026-01-04T10:00");
+    await click("Confirmer");
+    await flush();
+
+    expect(text()).toContain("n'est plus dans l'historique");
+    expect(
+      text(),
+      "the refusal points at an Annuler that is gone",
+    ).not.toContain("Annulez pour voir son texte");
+  });
+
+  // AND THE FOCUS IS CAUGHT EVEN WHEN IT DID NOT FALL. Browser mode keys a row
+  // by its POSITION, so React reuses the row's DOM when a line vanishes: the
+  // focused « Enregistrer la note » became « Modifier » under the very same
+  // element, and a keyboard user's next Enter opened an editor on somebody
+  // else's line. `document.activeElement` never reached <body>, so the rescue
+  // that watches for that saw nothing.
+  it("catches the focus when the row it was in was reused", async () => {
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[
+            ligne("la plus récente", "2026-01-07T10:00"),
+            ligne("la plus ancienne", "2026-01-06T10:00"),
+          ]}
+          onEditNote={async () => {}}
+        />,
+      );
+    });
+    await click("Modifier la note 2 du 2026-01-06T10:00");
+    button("Enregistrer la note").focus();
+    expect(document.activeElement?.textContent).toBe("Enregistrer la note");
+
+    // the other window removes that line: the surviving row inherits its key
+    await act(async () => {
+      setLignes([ligne("la plus récente", "2026-01-07T10:00")]);
+    });
+    expect(
+      document.activeElement?.textContent,
+      "the keyboard was left on a control the removal had renamed",
+    ).not.toBe("Modifier");
+    expect(document.activeElement?.id).toBe("contenu");
+  });
+
   // `sameLine` is NOT an identity — it leaves the text out, so an afternoon
   // of « à rappeler » produces lines that answer to it alike. Matched row by
   // row, the aim opened an editor on every one of them, sharing one draft.
@@ -1608,6 +1673,120 @@ describe("an act is aimed at a line, not at a position", () => {
     expect(open, "one aim, two editors, one draft between them").toHaveLength(
       1,
     );
+  });
+
+  // …AND ON THE ONE THE VOLUNTEER CLICKED. Counting the editors is not enough:
+  // resolved by the fallback alone, the aim lands on the FIRST line answering
+  // to the minute and the outcome — which in browser mode is the POSITION the
+  // store writes at. The editor then looks right and corrects the line above.
+  it("opens it on the line that was clicked, not on the first that resembles it", async () => {
+    const at: number[] = [];
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[
+            ligne(
+              "le secrétariat rappelle",
+              "2026-01-06T17:00",
+              "to_call_back",
+            ),
+            ligne("personne au bout", "2026-01-06T17:00", "to_call_back"),
+          ]}
+          onEditNote={async (_n, i) => {
+            at.push(i);
+          }}
+        />,
+      );
+    });
+    await click("Modifier la note 2 du 2026-01-06T17:00");
+    await click("Enregistrer la note");
+    await flush();
+    expect(
+      at,
+      "the correction was written at the other line's position",
+    ).toEqual([1]);
+  });
+
+  // A CHOICE MADE WHILE THE REQUEST WAS IN FLIGHT WINS OVER THE ONE BEING
+  // HANDED BACK. The pick is restored through the SETTER for that reason, and
+  // handing the captured value back instead reads identically in every test
+  // that does not choose DURING the flight.
+  it("hands the pick back without overwriting one made since", async () => {
+    let refuse!: (e: Error) => void;
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[ligne("la seule", "2026-01-04T10:00")]}
+          onDeleteNote={() =>
+            new Promise<void>((_ok, ko) => {
+              refuse = ko;
+            })
+          }
+        />,
+      );
+    });
+    const select = () => container.querySelector("select") as HTMLSelectElement;
+    const choose = (value: string) =>
+      act(async () => {
+        select().value = value;
+        select().dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+    await choose("refused");
+    await click("Supprimer la note 1 du 2026-01-04T10:00");
+    await click("Confirmer");
+    // the removal is out, and the volunteer chooses something else meanwhile
+    await choose("email_sent");
+    await act(async () => {
+      refuse(new Error("refusé"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(
+      select().value,
+      "the pick handed back overwrote the one made while the request was out",
+    ).toBe("email_sent");
+  });
+
+  // AN EDITOR MUST NOT CLOSE BECAUSE THE CAMPAIGN CHANGED. The block that
+  // clears everything a card owns is guarded on WHO and not on the render:
+  // the email's basis moves whenever the campaign's texts or its logo do, and
+  // a correction in progress has nothing to do with either.
+  it("keeps an open editor when the campaign changes under it", async () => {
+    function Campagne() {
+      const [cfg, setCfg] = useState(EMPTY_CFG);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => setCfg({ ...EMPTY_CFG, candidat: "Ariane Fictive" })}
+          >
+            changer la campagne
+          </button>
+          <Fiche
+            mayor={MAYOR}
+            cfg={cfg}
+            notes={[{ ...MINE, mine: true }]}
+            noteRights={() => ({ edit: true, delete: true })}
+            onEditNote={async () => {}}
+            onBack={() => {}}
+            onStatus={() => {}}
+          />
+        </>
+      );
+    }
+    await act(() => {
+      root.render(<Campagne />);
+    });
+    await click("Modifier la note 1 du 2026-01-02T10:00");
+    const box = noteEditor();
+    if (!box) throw new Error("no editor is open");
+    await type(box, "corrigé pendant que la campagne bouge");
+
+    await click("changer la campagne");
+    expect(
+      noteEditor()?.value,
+      "the correction closed because the campaign moved under it",
+    ).toBe("corrigé pendant que la campagne bouge");
   });
 
   // AND WHAT GOES OUT IS WHAT THE VOLUNTEER READ. The fallback that keeps an

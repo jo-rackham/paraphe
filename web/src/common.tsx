@@ -1652,20 +1652,53 @@ export function Fiche({
           ? " La correction en cours est abandonnée."
           : "")
       : "";
-  // The control they were holding died WITH the row, and no click ran, so
-  // `holdFocusThrough` never armed: a keyboard user was left on <body>, at the
-  // top of a screen with a list of 34 826 mayors behind it.
-  const caught = useRef(false);
+  /** The history block, for the focus rescue below. */
+  const historique = useRef<HTMLDivElement>(null);
+  /** Whether the act in flight lost the line it was about — see the effect
+   *  below and the catch in `onNote`. */
+  const lostItsLine = useRef(false);
+  /**
+   * AND WHAT AN ACT LEAVES BEHIND WHEN ITS LINE GOES IS CLEARED HERE, IN AN
+   * EFFECT — which is the one place a write is safe. An effect runs after a
+   * COMMITTED render, so the render that swaps the card, which React discards,
+   * never reaches it.
+   *
+   * ONE SENTENCE PER EVENT. Rendered beside the history AND left standing, it
+   * sat next to the refusal that came with it — « une autre fenêtre l'a
+   * modifiée. Annulez pour voir son texte. » — which is false when the line
+   * was REMOVED and names a control that is no longer on screen. Two live
+   * regions, two contradictory sentences, read one after the other. The
+   * refusal goes, this one is said in the region that already carries what an
+   * act did, and the act itself is cleared: an aim with no line is not a state
+   * to keep, and keeping it masked every error that followed.
+   */
   useEffect(() => {
-    if (!stranded) {
-      caught.current = false;
-      return;
-    }
-    if (caught.current) return;
-    caught.current = true;
+    if (!stranded) return;
+    setSaved(stranded);
+    setStatusError(null);
+    setActiveNote(null);
+    setNoteDraft("");
+    // …and the act that is still in flight will report a refusal about this
+    // very line, in words written for a line that is STILL THERE — « une autre
+    // fenêtre l'a modifiée. Annulez pour voir son texte. » names an editor
+    // that has just gone. It lands AFTER this effect, so clearing the slot
+    // here does not reach it; what reaches it is knowing that its line went.
+    lostItsLine.current = true;
+    // The control they were holding died WITH the row, and no click ran, so
+    // `holdFocusThrough` never armed: a keyboard user was left on <body>, at
+    // the top of a screen with a list of 34 826 mayors behind it.
+    //
+    // …or WORSE than <body>, and that is why the history block counts too:
+    // browser mode keys a row by its POSITION, so React reuses the row's DOM
+    // when a line vanishes — the focused « Enregistrer la note » became
+    // « Modifier » under the same element, and focus never fell anywhere. Any
+    // focus still inside this block is on a control the removal has just
+    // renamed. Outside it, the volunteer moved on themselves, and it is not
+    // ours to take.
     const now = document.activeElement;
-    // focus moved on to something real in the meantime: not ours to take
-    if (!now || now === document.body) focusContenu();
+    if (!now || now === document.body || historique.current?.contains(now)) {
+      focusContenu();
+    }
   });
 
   const save = async () => {
@@ -1728,6 +1761,7 @@ export function Fiche({
     if (noteSubmitting()) return;
     setStatusError(null);
     setSaved("");
+    lostItsLine.current = false;
     // THE PICK IS DROPPED WHERE THE CARD MOVES BACKWARDS, and only there.
     //
     // Removing a note rolls the card back to what the history then says, and
@@ -1777,8 +1811,13 @@ export function Fiche({
       setSaved(done);
     } catch (e) {
       if (superseded(revisions, mine)) return;
+      // A refusal is not a roll-back, whatever became of the line.
       setPicked((since) => since ?? dropped);
-      setStatusError(e instanceof Error ? e.message : String(e));
+      // ONE SENTENCE PER EVENT: the line going is the true one, and it has
+      // already been said. This refusal describes a line that is still there.
+      if (!lostItsLine.current) {
+        setStatusError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       if (!superseded(revisions, mine)) {
         noteSubmitted();
@@ -1950,11 +1989,8 @@ export function Fiche({
         </>
       )}
 
-      {/* In the SHELL and not in the card below: see `stranded`. No `onClose`,
-          so the region holds no interactive control. */}
-      <Alerte message={stranded ? { tone: "erreur", text: stranded } : null} />
       {notes.length > 0 && (
-        <div className="carte">
+        <div className="carte" ref={historique}>
           <h2 style={{ marginTop: 0 }}>Historique</h2>
           {/* The history arrives newest first, in both modes: the server
               orders by id DESC, the browser prepends. A plain index would

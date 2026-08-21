@@ -671,9 +671,17 @@ func (s *Server) routeDeleteNote(w http.ResponseWriter, r *http.Request) {
 			" AND insee_code="+req.p(insee)+mine+
 			" RETURNING volunteer", req.args...).Scan(&author)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// ONE SENTENCE, and now it is true of BOTH — which is the reason it
+		// was one in the first place. « une note se retire par la personne
+		// qui l'a écrite » is a sentence about RIGHTS, and it was read by
+		// somebody removing their own note that a colleague had taken away a
+		// moment earlier: an author told they may not be the author doubts
+		// their session. The correction next door splits 403 from 404 because
+		// there the reader has the line in front of them with its author
+		// beside it; here they may have nothing at all.
 		errorJSON(w, http.StatusNotFound,
-			"Aucune note à supprimer ici : une note se retire par la personne "+
-				"qui l'a écrite, ou par la coordination.")
+			"Aucune note à supprimer ici : elle a pu être retirée depuis, ou "+
+				"elle n'est pas de vous.")
 		return
 	}
 	if err != nil {

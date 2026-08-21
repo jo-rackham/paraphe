@@ -249,9 +249,17 @@ test.describe
       // has gone
       await page.getByRole("button", removeOlder).click();
       await page.getByRole("button", { name: "Confirmer" }).click();
+      // ONE SENTENCE, and it is the true one. The store's refusal is written
+      // for a line that is still there — « une autre fenêtre l'a modifiée.
+      // Annulez pour voir son texte. » — and it names an Annuler that went
+      // with the question.
+      await expect(
+        page.getByText(/n'est plus dans l'historique/),
+      ).toBeVisible();
       await expect(
         page.getByText(/a changé depuis son affichage/),
-      ).toBeVisible();
+        "a refusal about a line that is still there stayed beside the one saying it has gone",
+      ).toHaveCount(0);
       await expect(
         page.getByRole("button", { name: "Confirmer" }),
         "the question outlived the line it was asked about",

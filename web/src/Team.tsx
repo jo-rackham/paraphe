@@ -177,6 +177,36 @@ export default function Team({ config }: { config: ServerConfig }) {
   // requests; and `onCardUpdated` replaces `chosen` after a status write,
   // which must not read as a new card to fetch.
   const loading = useRef<string | null>(null);
+  /**
+   * THE ANSWER THAT LANDS LAST IS NOT THE ONE THAT KNOWS MOST.
+   *
+   * Every write on a card answers with the card, re-read inside its own
+   * transaction — so each answer is a true snapshot of a DIFFERENT moment.
+   * Three of them now exist on one screen (a status, a correction, a
+   * removal), and whichever landed last wrote `chosen`. Measured on a rural
+   * connection: a correction delayed two seconds, « A signé » recorded while
+   * it was out, and the correction's answer — taken before the status
+   * existed — put the screen back to a history without it. The server had
+   * the signature; the volunteer was looking at a card that said it had
+   * never been written, and their next move is to record it again or to ring
+   * the mayor back.
+   *
+   * So an answer is shown only if nothing has been ASKED since. A card being
+   * fetched counts: a write answering after the volunteer has moved to
+   * another mayor would otherwise put the previous one back on screen, which
+   * is « A's commune under B's address » one level up.
+   */
+  const writes = useRef(0);
+  // STABLE, because the card-loading effect asks for one: recreated at every
+  // render it would be a dependency that changes at every render, and the
+  // effect would refetch the card for ever. It closes over a ref and a state
+  // setter, which are both stable by construction.
+  const showsCard = useCallback(() => {
+    const mine = ++writes.current;
+    return (fresh: API.Card) => {
+      if (writes.current === mine) setChosen(fresh);
+    };
+  }, []);
   useEffect(() => {
     if (!me || !routedCard) {
       loading.current = null;
@@ -196,9 +226,10 @@ export default function Team({ config }: { config: ServerConfig }) {
     // load, which this screen already accepts.
     setChosen(null);
     let alive = true;
+    const show = showsCard();
     API.card(routedCard)
       .then((c) => {
-        if (alive) setChosen(c);
+        if (alive) show(c);
       })
       .catch((e) => {
         if (!alive) return;
@@ -212,7 +243,7 @@ export default function Team({ config }: { config: ServerConfig }) {
     return () => {
       alive = false;
     };
-  }, [me, routedCard, report]);
+  }, [me, routedCard, report, showsCard]);
 
   // Session expired server-side: back to the form, saying so.
   useEffect(() => {
@@ -394,16 +425,17 @@ export default function Team({ config }: { config: ServerConfig }) {
             delete: !!n.mine || account.role === "coordination",
           })}
           onEditNote={async (n, _i, text) => {
-            setChosen(
-              await API.editNote(chosen.mayor.insee_code, noteId(n), text),
-            );
+            const show = showsCard();
+            show(await API.editNote(chosen.mayor.insee_code, noteId(n), text));
           }}
           onDeleteNote={async (n) => {
-            setChosen(await API.deleteNote(chosen.mayor.insee_code, noteId(n)));
+            const show = showsCard();
+            show(await API.deleteNote(chosen.mayor.insee_code, noteId(n)));
           }}
           onBack={() => setTab("maires")}
           header={<ReserveePar mayor={chosen.mayor} me={account} />}
           onStatus={async (status: string, note: string) => {
+            const show = showsCard();
             const fresh = await API.setStatus(
               chosen.mayor.insee_code,
               status,
@@ -415,7 +447,7 @@ export default function Team({ config }: { config: ServerConfig }) {
               // read.
               chosen.mayor.status ?? "to_contact",
             );
-            setChosen(fresh);
+            show(fresh);
           }}
         />
       )}

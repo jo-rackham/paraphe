@@ -100,4 +100,54 @@ test.describe
       await expect(page.getByText("rappeler lundi")).toHaveCount(0);
       await expect(page.getByText("courriel parti ce matin")).toBeVisible();
     });
+
+    // THE ANSWER THAT LANDS LAST IS NOT THE ONE THAT KNOWS MOST.
+    //
+    // Every write answers with the card, re-read inside its own transaction,
+    // so each answer is a true snapshot of a DIFFERENT moment — and three of
+    // them now live on one screen. On a rural connection the correction takes
+    // a second or two, and a volunteer still on the telephone records what
+    // the mayor has just said; the correction's answer, taken before that
+    // status existed, then put the screen back to a history without it. The
+    // server had the signature and the volunteer was looking at a card saying
+    // it had never been written.
+    test("a slow correction does not hide the status written while it was out", async ({
+      page,
+    }) => {
+      await signIn(page, ORIGIN, COORDINATION.email, COORDINATION.password);
+      await openTab(page, "Mon tableau");
+      await page.locator("table button.lien").first().click();
+      const note = page.getByRole("textbox", { name: "Note", exact: true });
+
+      await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
+      await note.fill("premier contact");
+      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await expect(note).toHaveValue("");
+
+      // what a weak connection does to ONE of the two writes
+      await page.route("**/api/mayors/*/notes/*", async (r) => {
+        await new Promise((res) => setTimeout(res, 2000));
+        await r.continue();
+      });
+      await page.getByRole("button", { name: "Modifier la note 1 du" }).click();
+      await page.getByLabel("Texte de la note").fill("premier contact, ok");
+      await page.getByRole("button", { name: "Enregistrer la note" }).click();
+
+      // …and while it is out, the mayor says yes
+      await page
+        .getByLabel("Statut")
+        .selectOption({ label: "A signé (publié par le CC)" });
+      await note.fill("dit avoir signé");
+      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await expect(note).toHaveValue("");
+      await expect(page.getByText("dit avoir signé")).toBeVisible();
+
+      // the correction lands last, and its answer knows nothing of it
+      await expect(page.getByText("premier contact, ok")).toBeVisible();
+      await expect(
+        page.getByText("dit avoir signé"),
+        "the signature disappeared from a card the server has recorded it on",
+      ).toBeVisible();
+      await expect(page.getByLabel("Statut")).toHaveValue("signed");
+    });
   });

@@ -1433,8 +1433,13 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   sentence for them, and a note they can READ answers 403 and says it is not
   theirs. That is not the account routes' rule loosened — there, existence is
   the secret; here the line is in front of them with its author's name beside
-  it. The removal's own refusal stays one sentence, because « aucune note à
-  supprimer ici » is true of both.
+  it. The removal's own refusal stays ONE sentence — and the whole of it is
+  true of both, which is what the reason demanded and what it did not say.
+  « une note se retire par la personne qui l'a écrite » is a sentence about
+  RIGHTS, and it was read by somebody removing their own note that a colleague
+  had taken away a moment earlier: an author told they may not be the author
+  doubts their session, which is the exact failure the split next door exists
+  to end.
   **Rewriting is the AUTHOR's, and the coordination is not an exception to
   it.** It removes words a campaign must not carry — a note whose author's
   access has since been closed would otherwise stay for ever — and it never
@@ -1653,13 +1658,32 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   appears together with its text announces nothing, so the one person the
   sentence exists for heard silence; and a card holding ONE note is the
   ordinary shape of a mayor contacted once, so removing that note took the
-  card, the sentence and the editor away together. It goes through an
-  `Alerte` — ONE node, spoken and shown alike, in the tree from the first
-  render — standing above the card rather than inside it.
+  card, the sentence and the editor away together. It is written from an
+  EFFECT — the one place a write is safe, since an effect runs only after a
+  render that COMMITTED — into the region that already carries what an act
+  did, and the act itself is cleared with it: an aim with no line is not a
+  state to keep.
+  **ONE SENTENCE PER EVENT.** A second region beside it was tried and it says
+  the wrong thing: the store's refusal is written for a line that is STILL
+  THERE — « une autre fenêtre l'a modifiée. Annulez pour voir son texte. » —
+  so beside the true sentence it named an editor that had just gone, and a
+  screen reader read the two one after the other. Clearing that slot from the
+  effect does not reach it either: the refusal lands AFTER, because it is the
+  act's own report. What reaches it is knowing that its line went
+  (`lostItsLine`), and the refusal is then not said at all. **The pick is
+  still handed back** — a refusal is not a roll-back, whatever became of the
+  line.
   **And the focus is CAUGHT**, because the control the volunteer was holding
   died WITH the row and no click ran: `holdFocusThrough` arms on an act, and
-  there is no act here. Only when focus actually fell to `<body>`; moved on to
-  something real, it is not ours to take.
+  there is no act here.
+  **Or WORSE than died**, and that half was found a round later: `noteKey` is
+  positional in browser mode, so React REUSES the row's DOM when a line
+  vanishes — the focused « Enregistrer la note » became « Modifier » under the
+  very same element, focus never fell anywhere, and the next Enter opened an
+  editor on somebody else's line. So the history block counts as well as
+  `<body>`: any focus still inside it is on a control the removal has just
+  renamed. Outside it, the volunteer moved on themselves, and it is not ours
+  to take.
 - **A REFUSAL IN BROWSER MODE REFRESHES WHAT THE SCREEN HOLDS.** That mode
   reads its store ONCE, at load, so « rouvrez la fiche » sent the volunteer to
   the list and back to exactly what they had, and the second attempt was
@@ -1723,6 +1747,22 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   `shortTimestamp`, so the note is BACK-DATED before the window opens: the
   fixture is what makes the mark's value checkable, and « modifiée le » is a
   date the whole campaign reads.
+- **THE ANSWER THAT LANDS LAST IS NOT THE ONE THAT KNOWS MOST.** Every write
+  on a card answers WITH the card, re-read inside its own transaction, so each
+  answer is a true snapshot of a DIFFERENT moment. One screen now holds three
+  of them — a status, a correction, a removal — and whichever landed last
+  wrote `chosen`. Measured on a rural connection: a correction delayed two
+  seconds, « A signé » recorded while it was out, and the correction's answer,
+  taken before that status existed, put the screen back to a history without
+  it. The server had the signature; the volunteer was looking at a card saying
+  it had never been written, and their next move is to record it again or to
+  ring the mayor back. An answer is shown only if nothing has been ASKED since
+  (`showsCard`), and a card being FETCHED counts — a write answering after the
+  volunteer moved to another mayor would otherwise put the previous one back
+  on screen, which is « A's commune under B's address » one level up.
+  **Assumed**: it orders by what was asked, not by what committed, which no
+  client can know. The case it does not cover is a later request committing
+  first, which for one volunteer clicking in sequence is the order they see.
 - **An empty assignment round does not mean the pool is empty.** Every
   volunteer aims at the best-scored cards, so the loser of a race sees its
   whole snapshot taken. Hence the bounded loop (8 rounds) and an explicit
