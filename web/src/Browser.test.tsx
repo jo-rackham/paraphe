@@ -417,13 +417,14 @@ describe("the offer banner, rendered", () => {
       },
     );
 
-    // THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN — for what
-    // the adoption wrote and nobody retouched since. A coordination that
-    // rewrites its letter after volunteers adopted must reach them, or the
-    // campaign speaks with two voices again, one update behind: reported
-    // from production as « le template custom devrait aussi être autochargé
-    // dans la version navigateur ». What the volunteer touched is theirs,
-    // and nothing overwrites it.
+    // THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN. Its texts
+    // are a LAYER under the volunteer's overlay — local → campaign → image,
+    // the resolution team mode already lives by — refreshed from the origin
+    // at every load: a coordination that rewrites its letter reaches every
+    // browser that did not rewrite that file, and a volunteer's own rewrite
+    // masks exactly the file it rewrote, nothing more. Reported from
+    // production as « le template custom devrait aussi être autochargé dans
+    // la version navigateur (overridable localement) ».
     describe("following the campaign as it edits its texts", () => {
       const TPL_V1 = { "email_decouverte.txt": "OBJET: v1\n\nDécouverte v1." };
       const TPL_V2 = { "email_decouverte.txt": "OBJET: v2\n\nDécouverte v2." };
@@ -437,41 +438,63 @@ describe("the offer banner, rendered", () => {
       const seven = () =>
         Object.fromEntries(ADOPTED_KEYS.map((k) => [k, OFFERED[k]]));
 
-      // The store of every browser from BEFORE the snapshot existed: the
-      // campaign adopted, no overlay, no snapshot. This is the exact state
-      // the production report was filed from.
-      it("adopts the texts a campaign wrote after this browser adopted it", async () => {
+      // THE ADOPTION ITSELF writes the layer and leaves the overlay empty.
+      // Merged into the overlay instead — which is what it used to do — the
+      // texts read as the volunteer's own writing, and the campaign's next
+      // correction never reaches this browser again.
+      it("adopts the campaign's texts as a layer, never into the overlay", async () => {
+        await servedByCampaign(OFFERED, TPL_V1);
+        await until(
+          () => text().includes("repris depuis son site"),
+          "the campaign lands",
+        );
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V1);
+        expect(await DB.readSetting("modeles", {})).toEqual({});
+      });
+
+      // The store of every browser from BEFORE the layer existed: the
+      // campaign adopted, nothing else. This is the exact state the
+      // production report was filed from — the layer fills itself in.
+      it("adopts into the layer the texts a campaign wrote after adoption", async () => {
         await DB.writeSetting("campagne", asAdopted);
         await servedByCampaign(OFFERED, TPL_V1);
         await until(
           () => text().includes("mis à jour depuis son site"),
           "the refresh says where the texts came from",
         );
-        expect(await DB.readSetting("modeles", {})).toEqual(TPL_V1);
-        // and the snapshot now exists, so the next edit follows too
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V1);
+        // the volunteer's own overlay stays empty: the campaign's texts are
+        // INHERITED, never copied into it — a copy would freeze them
+        expect(await DB.readSetting("modeles", {})).toEqual({});
+        // and the snapshot is armed, so a field edit follows too
         expect(
           await DB.readSetting<Record<string, unknown>>("adoption", {}),
-        ).toMatchObject({ slug: "sienne", templates: TPL_V1 });
+        ).toMatchObject({ slug: "sienne" });
       });
 
-      it("keeps the templates the volunteer rewrote", async () => {
-        const mine = { "email_decouverte.txt": "OBJET: à moi\n\nMon texte." };
+      // FILE BY FILE: the volunteer's rewrite masks its own file and
+      // nothing more — the layer under it still follows the campaign.
+      it("keeps the volunteer's overlay and refreshes the layer under it", async () => {
+        const mine = { "courrier.txt": "Ma lettre à moi.\n" };
         await DB.writeSetting("campagne", asAdopted);
         await DB.writeSetting("modeles", mine);
         await servedByCampaign(OFFERED, TPL_V2);
-        await until(() => text().includes("Bourg-Réel"), "the app opens");
-        await flush();
-        await flush();
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the layer refreshes under the overlay",
+        );
         expect(await DB.readSetting("modeles", {})).toEqual(mine);
-        expect(text()).not.toContain("mis à jour depuis son site");
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V2);
       });
 
-      // The snapshot is what tells a campaign's rewrite from a volunteer's:
-      // the store still holds byte for byte what the adoption wrote, so the
-      // next version may replace it.
-      it("follows a rewrite while the store holds what adoption wrote", async () => {
+      // MIGRATION, once: before the layer existed, adopting MERGED the
+      // campaign's texts into the local overlay. An overlay that is byte
+      // for byte what the old snapshot copied was never the volunteer's
+      // writing — it moves under the layer, where it inherits again.
+      it("migrates an overlay that was only ever the campaign's copy", async () => {
         await DB.writeSetting("campagne", asAdopted);
         await DB.writeSetting("modeles", TPL_V1);
+        // the OLD snapshot format, templates included: what v0.17.0 wrote
         await DB.writeSetting("adoption", {
           slug: "sienne",
           campaign: seven(),
@@ -482,17 +505,37 @@ describe("the offer banner, rendered", () => {
           () => text().includes("mis à jour depuis son site"),
           "the rewrite lands",
         );
-        expect(await DB.readSetting("modeles", {})).toEqual(TPL_V2);
+        expect(await DB.readSetting("modeles", {})).toEqual({});
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V2);
       });
 
-      // …and the campaign's nine follow by the same rule: intact since the
-      // adoption means the coordination's correction reaches this browser.
+      // WHAT THE MAYOR RECEIVES is the resolved set: the campaign's layer
+      // under the volunteer's overlay. A layer that reached the store but
+      // not the card would be the two-voices defect one screen later.
+      it("renders a card from the campaign's layer", async () => {
+        await DB.writeSetting("campagne", asAdopted);
+        await servedByCampaign(OFFERED, {
+          "courrier.txt": "Lettre suivie de la campagne.\n",
+        });
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the layer lands",
+        );
+        await click("Bourg-Réel");
+        await until(
+          () => text().includes("Lettre suivie de la campagne"),
+          "the card renders the campaign's layer",
+        );
+      });
+
+      // …and the campaign's nine follow by the snapshot, as before: intact
+      // since the adoption means the coordination's correction reaches this
+      // browser. The fields have no layering — a form is one block.
       it("follows a corrected campaign field the volunteer never touched", async () => {
         await DB.writeSetting("campagne", asAdopted);
         await DB.writeSetting("adoption", {
           slug: "sienne",
           campaign: seven(),
-          templates: {},
         });
         const corrected = { ...OFFERED, contact_email: "corrige@sienne.fr" };
         await servedByCampaign(corrected, {});
@@ -507,6 +550,10 @@ describe("the offer banner, rendered", () => {
         expect(stored.contact_email).toBe("corrige@sienne.fr");
       });
 
+      // Fields the volunteer rewrote: this browser stopped being the
+      // campaign's own version, and NOTHING follows — not even the layer,
+      // which would put a campaign's texts under a configuration that no
+      // longer names it.
       it("leaves a campaign the volunteer edited entirely alone", async () => {
         await DB.writeSetting("campagne", {
           ...asAdopted,
@@ -515,7 +562,6 @@ describe("the offer banner, rendered", () => {
         await DB.writeSetting("adoption", {
           slug: "sienne",
           campaign: seven(),
-          templates: {},
         });
         await servedByCampaign(OFFERED, TPL_V1);
         await until(() => text().includes("Bourg-Réel"), "the app opens");
@@ -527,6 +573,7 @@ describe("the offer banner, rendered", () => {
         );
         expect(stored.candidat).toBe("Le Mien");
         expect(await DB.readSetting("modeles", {})).toEqual({});
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual({});
         expect(text()).not.toContain("mis à jour depuis son site");
       });
     });
@@ -704,7 +751,10 @@ describe("the offer banner, rendered", () => {
     await renderWithOffer();
     await click("Ma campagne");
     await click("Reprendre cette campagne");
-    await until(() => text().includes("reprise"), "the adoption lands");
+    await until(
+      () => text().includes("reprise. Elle reste"),
+      "the adoption lands",
+    );
     expect(
       firstCampaignField().value,
       "the open form must show the adopted campaign, or « Enregistrer » " +
@@ -954,7 +1004,10 @@ describe("unsent work on a card", () => {
     await click("Bourg-Réel");
     await type(emailBody(), "Texte fondé sur les valeurs de gabarit.");
     await click("Reprendre cette campagne");
-    await until(() => text().includes("reprise"), "the adoption lands");
+    await until(
+      () => text().includes("reprise. Elle reste"),
+      "the adoption lands",
+    );
     // the kept draft is written under « Prénom NOM »: restoring it after
     // adoption would re-arm the very mailto the round-12 fix disarms
     expect(emailBody().value).toContain(OFFERED.candidat);
@@ -1046,7 +1099,10 @@ describe("the draft in « Ma campagne »", () => {
     await renderWithOffer();
     await click("Bourg-Réel"); // the banner renders above the open card too
     await click("Reprendre cette campagne");
-    await until(() => text().includes("reprise"), "the adoption lands");
+    await until(
+      () => text().includes("reprise. Elle reste"),
+      "the adoption lands",
+    );
     // subject/body are controlled state reset per mayor: keyed on the
     // mayor alone, the mailto stayed armed with « Prénom NOM » while the
     // letter already shows the real candidate — and the warning is gone

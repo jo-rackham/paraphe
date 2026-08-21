@@ -152,10 +152,19 @@ test.describe
       expect(letter).not.toMatch(/\{[^}]+\}/);
 
       // …and the volunteer can read and change them, which is what the
-      // adoption screen promises
+      // adoption screen promises. The campaign's text is the PLACEHOLDER of
+      // an empty box, exactly as team mode shows an inherited text: filled
+      // in as the value it would be a frozen copy, and the campaign's next
+      // correction would stop reaching this browser.
       await page.getByRole("button", { name: "Ma campagne" }).click();
       await choose(page, "courrier.txt");
-      await expect(box(page)).toHaveValue(OWN_LETTER);
+      await expect(box(page)).toHaveValue("");
+      expect(await box(page).getAttribute("placeholder")).toContain(
+        "Notre texte à nous",
+      );
+      await expect(
+        editor(page).getByText("vide : suit le texte de la campagne"),
+      ).toBeVisible();
     });
 
     // « Revenir au texte fourni » puts the campaign back on the image's text

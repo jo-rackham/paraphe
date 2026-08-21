@@ -97,7 +97,17 @@ export function ModelesMessages({
   const [refus, setRefus] = useState("");
   const [busy, done] = useSubmitGuard();
 
-  const source = niveau === "team" ? "de la campagne" : "fourni";
+  // The words naming what an empty box falls back to. Team mode inherits
+  // the campaign's layer wholesale; the account-less version inherits the
+  // adopted campaign's where it wrote one and the image's where it did not,
+  // so there the word follows the FILE on screen — « revenir au texte de la
+  // campagne » on a file the campaign never rewrote would promise a text
+  // that does not exist.
+  const source =
+    niveau === "team" ||
+    (niveau === "navigateur" && (herites[choisi] ?? "").trim() !== "")
+      ? "de la campagne"
+      : "fourni";
   const hérité = herites[choisi] ?? M.SHIPPED_TEMPLATES[choisi] ?? "";
   const propre = brouillon[choisi] ?? "";
   const modifié = CHANNELS.some(
@@ -121,12 +131,21 @@ export function ModelesMessages({
       setRefus("");
       onEnregistre(stored);
       const n = Object.keys(stored).length;
+      // what an emptied set follows: the campaign's texts where it wrote
+      // one, the shipped ones where it did not — said in one clause where
+      // both apply, because this sentence speaks about all six at once
+      const suivent =
+        niveau === "team"
+          ? "le texte de la campagne"
+          : niveau === "navigateur" && Object.keys(herites).length > 0
+            ? "ceux de la campagne reprise, puis ceux fournis"
+            : "le texte fourni";
       onMessage({
         tone: "ok",
         text:
           n === 0
             ? `Modèles enregistrés : aucun texte personnalisé, tous suivent ` +
-              `le texte ${source}.`
+              `${suivent}.`
             : `Modèles enregistrés (${n} texte${n > 1 ? "s" : ""} ` +
               `personnalisé${n > 1 ? "s" : ""}).`,
       });
@@ -157,10 +176,10 @@ export function ModelesMessages({
             "ceux fournis avec l'application — y compris quand une nouvelle " +
             "version les améliore. Chaque équipe peut les réécrire à son tour."}
         {niveau === "navigateur" &&
-          "Les textes que vous envoyez. Laissés vides, ils suivent ceux " +
-            "fournis avec l'application. Reprendre une campagne remplace ces " +
-            "textes par les siens, comme elle remplace les autres champs. " +
-            "Tout reste dans ce navigateur."}
+          "Les textes que vous envoyez. Laissés vides, ils suivent ceux de " +
+            "la campagne reprise — y compris quand elle les corrige ensuite " +
+            "— puis ceux fournis avec l'application. Vos réécritures restent " +
+            "dans ce navigateur."}
       </p>
       <p>
         <label htmlFor="modele-choisi">Modèle</label>

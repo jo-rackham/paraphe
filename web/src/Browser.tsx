@@ -99,15 +99,21 @@ export default function Browser() {
   // carries it because it walks the settings.
   const [logo, setLogo] = useState("");
   const [personalNote, setPersonalNote] = useState("");
-  // THE CAMPAIGN'S OWN TEXTS, over the six the image carries. Adopted with
-  // the rest and stored like the rest — a new key in the existing `settings`
-  // store, so no VERSION bump and the export carries it, exactly as the logo
-  // beside it does.
+  // THIS VOLUNTEER'S OWN overlay — only what they rewrote themselves, and
+  // nothing a campaign handed over. Stored under `modeles`, a key in the
+  // existing `settings` store, so no VERSION bump and the export carries it.
+  const [templates, setTemplates] = useState<M.Templates>({});
+  // THE CAMPAIGN'S LAYER, under the volunteer's: local → campaign → image,
+  // the exact resolution team mode already lives by. It is a CACHE of what
+  // the adopted campaign says (`modeles_campagne`), refreshed whenever the
+  // origin answers — so a coordination's correction reaches every browser
+  // that did not rewrite that file — and standing at its last known state on
+  // a static publication, offline, or after an adoption by link.
   //
-  // Without them a campaign that had rewritten its letter spoke with two
+  // Without it a campaign that had rewritten its letter spoke with two
   // voices: one to the volunteers with an account, one to the volunteers
   // without, and nothing on either screen saying which.
-  const [templates, setTemplates] = useState<M.Templates>({});
+  const [campaignTemplates, setCampaignTemplates] = useState<M.Templates>({});
   // OPT-IN, so `false` until this volunteer says otherwise. The email used to
   // ask for a telephone exchange and the letter to announce a call whatever
   // the campaign actually did — a promise to elected officials made by a tool
@@ -214,22 +220,17 @@ export default function Browser() {
   }, []);
 
   /**
-   * Takes a campaign into this browser: the nine values, and the mark that
-   * goes with them.
+   * The nine fields and the mark, written as an adoption writes them — and
+   * by the refresh that keeps them following the campaign, which must not
+   * touch the template overlay. May throw; `adopt` owns the sentence.
    *
-   * ONE writer for the two doors — the campaign this origin is, taken as
-   * the default, and the campaign a link offered and the volunteer
-   * accepted. They differ in whether anything was asked, never in what is
-   * written, and written twice they would differ in the logo, which is the
-   * half that is easy to forget.
-   *
-   * The logo is downloaded ONCE, here, and kept as a data URI: this mode
-   * makes no request afterwards, and holding the campaign's URL would put a
-   * call to the instance in every page load — exactly what « aucune donnée
-   * ne quitte ce navigateur » promises does not happen. A failure costs the
+   * The logo is downloaded HERE and kept as a data URI: this mode makes no
+   * request afterwards, and holding the campaign's URL would put a call to
+   * the instance in every page load — exactly what « aucune donnée ne
+   * quitte ce navigateur » promises does not happen. A failure costs the
    * picture and nothing else, so it does not undo the adoption.
    */
-  const adopt = useCallback(async (taken: Offer, current: Campaign) => {
+  const adoptFields = useCallback(async (taken: Offer, current: Campaign) => {
     // WHO SIGNS DOES NOT TRAVEL. Seven of the nine describe the candidate and
     // how to reach the campaign, and they exist to be handed over; the other
     // two name a PERSON. Adopted with the rest, every message this volunteer
@@ -238,80 +239,104 @@ export default function Browser() {
     // mode never showed it: there, each account supplies its own.
     const campaign = { ...taken.campaign };
     for (const k of M.PERSONAL_CAMPAIGN_KEYS) campaign[k] = current[k] ?? "";
-    // a rejected write (quota, private window, blocked base) must be SAID:
-    // without the catch this returns having done nothing at all
-    try {
-      await DB.writeSetting("campagne", campaign);
-      setCfg(campaign);
-      setDraft(campaign);
-      // In the SAME act as the nine values, because they are the same
-      // decision: whoever adopts this campaign writes what this campaign
-      // writes. An overlay it has rewritten nothing of is `{}`, which is the
-      // shipped texts — so this line is also what CLEARS a previous
-      // campaign's texts when another is adopted over it.
-      await DB.writeSetting("modeles", taken.templates);
-      setTemplates(taken.templates);
-      // WHAT THIS ADOPTION WROTE, remembered. It is the reference the next
-      // load compares the store against: still byte-for-byte what the
-      // campaign said means the volunteer made none of it their own, and the
-      // campaign's own browser version may follow the campaign as it edits
-      // its texts. Written by BOTH doors — a snapshot from a ?org= link names
-      // its own slug, so an origin serving a different campaign matches
-      // nothing and refreshes nothing.
-      await DB.writeSetting("adoption", {
-        slug: taken.slug,
-        campaign: Object.fromEntries(
-          ADOPTED_KEYS.map((k) => [k, taken.campaign[k] ?? ""]),
-        ),
-        templates: taken.templates,
-      });
-      if (taken.logo) {
-        try {
-          const inlined = await inlineLogo(taken.logo);
-          await DB.writeSetting("logo", inlined);
-          setLogo(inlined);
-        } catch {
-          setLogo("");
-        }
+    await DB.writeSetting("campagne", campaign);
+    setCfg(campaign);
+    setDraft(campaign);
+    // WHAT THIS ADOPTION WROTE, remembered — the reference that lets the
+    // FIELDS follow the campaign: still byte-for-byte what the adoption
+    // wrote means the volunteer typed none of it, and the campaign's next
+    // correction may land. The templates need no snapshot any more: the
+    // campaign's texts live in their own LAYER, which follows on its own,
+    // and the local overlay is only ever the volunteer's writing.
+    await DB.writeSetting("adoption", {
+      slug: taken.slug,
+      campaign: Object.fromEntries(
+        ADOPTED_KEYS.map((k) => [k, taken.campaign[k] ?? ""]),
+      ),
+    });
+    if (taken.logo) {
+      try {
+        const inlined = await inlineLogo(taken.logo);
+        await DB.writeSetting("logo", inlined);
+        setLogo(inlined);
+      } catch {
+        setLogo("");
       }
-      return true;
-    } catch (e) {
-      setMessage({
-        tone: "erreur",
-        text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
-      });
-      return false;
     }
   }, []);
 
+  /**
+   * Takes a campaign into this browser: the nine values, the mark, and the
+   * campaign's texts as a LAYER of their own.
+   *
+   * ONE writer for the two doors — the campaign this origin is, taken as
+   * the default, and the campaign a link offered and the volunteer
+   * accepted. They differ in whether anything was asked, never in what is
+   * written, and written twice they would differ in the logo, which is the
+   * half that is easy to forget.
+   */
+  const adopt = useCallback(
+    async (taken: Offer, current: Campaign) => {
+      // a rejected write (quota, private window, blocked base) must be SAID:
+      // without the catch this returns having done nothing at all
+      try {
+        await adoptFields(taken, current);
+        // THE CAMPAIGN'S TEXTS ARE A LAYER, never merged into the local
+        // overlay: local → campaign → image, the exact resolution team mode
+        // already lives by, so an empty local file INHERITS the campaign's
+        // as it changes. Adopting also clears the local overlay — the screen
+        // says a campaign replaces these texts, and what is local is only
+        // ever this volunteer's own writing.
+        await DB.writeSetting("modeles_campagne", taken.templates);
+        setCampaignTemplates(taken.templates);
+        await DB.writeSetting("modeles", {});
+        setTemplates({});
+        return true;
+      } catch (e) {
+        setMessage({
+          tone: "erreur",
+          text: `Reprise impossible : ${e instanceof Error ? e.message : String(e)}`,
+        });
+        return false;
+      }
+    },
+    [adoptFields],
+  );
+
   useEffect(() => {
     (async () => {
-      const [m, s, c, a, g, l, tel, mod, adopRaw] = await Promise.all([
-        DB.loadMayors(),
-        DB.loadTracking(),
-        DB.readSetting<Campaign>("campagne", EMPTY_CFG),
-        DB.readSetting<string>("argument", ""),
-        DB.readSetting<unknown>("logo", ""),
-        DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
-        // opt-in: a database written before this setting existed answers
-        // false, which is the answer that promises nothing
-        DB.readSetting<boolean>("appel_telephonique", false),
-        // absent in a database written before this existed: `{}` is the
-        // shipped texts, which is what those volunteers were already reading.
-        // Read back through the SAME filter as the wire (`offeredTemplates`):
-        // a restored backup, another tab or an older version can have written
-        // anything here, and a stored overlay is judged like an offered one.
-        DB.readSetting<unknown>("modeles", {}),
-        // what the last adoption wrote — the reference that tells « still
-        // the campaign's » from « made their own »; judged by `readAdoption`
-        DB.readSetting<unknown>("adoption", null),
-      ]);
+      const [m, s, c, a, g, l, tel, mod, adopRaw, layerRaw] = await Promise.all(
+        [
+          DB.loadMayors(),
+          DB.loadTracking(),
+          DB.readSetting<Campaign>("campagne", EMPTY_CFG),
+          DB.readSetting<string>("argument", ""),
+          DB.readSetting<unknown>("logo", ""),
+          DB.readSetting<ListKey | "personnel" | "demo" | null>("liste", null),
+          // opt-in: a database written before this setting existed answers
+          // false, which is the answer that promises nothing
+          DB.readSetting<boolean>("appel_telephonique", false),
+          // absent in a database written before this existed: `{}` is the
+          // shipped texts, which is what those volunteers were already
+          // reading. Read back through the SAME filter as the wire
+          // (`offeredTemplates`): a restored backup, another tab or an older
+          // version can have written anything here, and a stored overlay is
+          // judged like an offered one.
+          DB.readSetting<unknown>("modeles", {}),
+          // what the last adoption wrote — the reference that lets the nine
+          // FIELDS follow the campaign; judged by `readAdoption`
+          DB.readSetting<unknown>("adoption", null),
+          // the campaign's own layer, as last seen from its site
+          DB.readSetting<unknown>("modeles_campagne", {}),
+        ],
+      );
       setMayors(m);
       setTracking(s);
       setCfg(c);
       setPersonalNote(a);
       setAppelTelephonique(tel === true);
       setTemplates(offeredTemplates(mod));
+      setCampaignTemplates(offeredTemplates(layerRaw));
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
@@ -345,32 +370,37 @@ export default function Browser() {
       // because the answer decides whether there is anything to follow.
       const fresh = untouchedCampaign(c);
       const localTpl = offeredTemplates(mod);
-      const noLocalTpl = Object.keys(localTpl).length === 0;
+      const cachedTpl = offeredTemplates(layerRaw);
       const adoption = readAdoption(adopRaw);
+      // Asked UNCONDITIONALLY: the campaign's layer is live, and which
+      // browsers may follow is decided by the ANSWER, not by guessing from
+      // the store — a browser adopted before the layer or the snapshot
+      // existed carries nothing that says so. It is the one request that
+      // names nothing, to the origin that already served this page; on an
+      // apex, a static host or a captive portal it answers « no campaign
+      // here », which is silence.
       let own: Offer | null = null;
-      if (fresh || adoption !== null || noLocalTpl) {
-        try {
-          own = await ownCampaign();
-        } catch (e) {
-          // The campaign that served this page ANSWERED, and this build
-          // could not take what it said. Absence is silent — an apex, a
-          // static host — but an answer refused is not: silence here left
-          // « Prénom NOM » on screen looking exactly like a tool that had
-          // failed to substitute anything. Not fatal, so it is a sentence
-          // and a way to act rather than the error boundary. Two sentences,
-          // because the situations differ: on a fresh campaign nothing was
-          // filled in; on a followed one, what is here stands.
-          const why = e instanceof Error ? e.message : String(e);
-          setOfferError(
-            fresh
-              ? "Les textes de cette campagne n'ont pas pu être repris " +
-                  `automatiquement. ${why} Vous pouvez les saisir ` +
-                  "vous-même dans « Ma campagne »."
-              : "Les textes de cette campagne n'ont pas pu être vérifiés " +
-                  `depuis son site. ${why} Ceux enregistrés dans ce ` +
-                  "navigateur restent en vigueur.",
-          );
-        }
+      try {
+        own = await ownCampaign();
+      } catch (e) {
+        // The campaign that served this page ANSWERED, and this build
+        // could not take what it said. Absence is silent — an apex, a
+        // static host — but an answer refused is not: silence here left
+        // « Prénom NOM » on screen looking exactly like a tool that had
+        // failed to substitute anything. Not fatal, so it is a sentence
+        // and a way to act rather than the error boundary. Two sentences,
+        // because the situations differ: on a fresh campaign nothing was
+        // filled in; on a followed one, what is here stands.
+        const why = e instanceof Error ? e.message : String(e);
+        setOfferError(
+          fresh
+            ? "Les textes de cette campagne n'ont pas pu être repris " +
+                `automatiquement. ${why} Vous pouvez les saisir ` +
+                "vous-même dans « Ma campagne »."
+            : "Les textes de cette campagne n'ont pas pu être vérifiés " +
+                `depuis son site. ${why} Ceux enregistrés dans ce ` +
+                "navigateur restent en vigueur.",
+        );
       }
       if (own && (!slug || slug === own.slug)) {
         if (fresh) {
@@ -383,38 +413,77 @@ export default function Browser() {
           }
           return;
         }
-        // THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN — for what
-        // the adoption wrote and nobody retouched since. A coordination that
-        // rewrites its letter after a volunteer adopted must reach that
-        // volunteer, or the campaign speaks with two voices again, one
-        // update behind. What the volunteer touched is theirs, and nothing
-        // overwrites it: the snapshot the adoption left is what tells the
-        // two apart. A store with NO overlay is followable on its face —
-        // browsers from before the snapshot existed hold exactly that, and
-        // an empty overlay was nobody's writing.
+        // THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN.
+        //
+        // The campaign's texts are a LAYER under the volunteer's overlay —
+        // local → campaign → image, the resolution team mode already lives
+        // by — so following it is refreshing a CACHE, file by file: a
+        // coordination that rewrites its letter reaches every browser that
+        // did not rewrite that file, and a volunteer's own rewrite masks
+        // exactly the file it rewrote, nothing more. The FIELDS have no
+        // layering; they still follow by the snapshot the adoption left —
+        // byte for byte what it wrote means the volunteer typed none of it.
         const snapshot =
           adoption !== null && adoption.slug === own.slug ? adoption : null;
         const fieldsUntouched =
           sameAdoptedFields(c, own.campaign) ||
           (snapshot !== null && sameAdoptedFields(c, snapshot.campaign));
-        const templatesUntouched =
-          noLocalTpl ||
-          (snapshot !== null && sameTemplates(localTpl, snapshot.templates));
-        const upToDate =
-          sameAdoptedFields(c, own.campaign) &&
-          sameTemplates(localTpl, own.templates);
-        if (fieldsUntouched && templatesUntouched && !upToDate) {
-          if (await adopt(own, c)) {
-            setAdopted(
-              `Les textes de la campagne « ${own.name} » ont été mis à ` +
-                "jour depuis son site. Ils restent dans ce navigateur, et " +
-                "vous pouvez les modifier dans « Ma campagne ».",
-            );
+        if (fieldsUntouched) {
+          try {
+            let followed = false;
+            // MIGRATION, once: before the layer existed, adopting MERGED the
+            // campaign's texts into the local overlay. An overlay that is
+            // byte for byte what the campaign says (or what the old
+            // snapshot copied) was never the volunteer's writing — it moves
+            // under the layer, where it goes back to inheriting.
+            if (
+              Object.keys(cachedTpl).length === 0 &&
+              Object.keys(localTpl).length > 0 &&
+              (sameTemplates(localTpl, own.templates) ||
+                (snapshot !== null &&
+                  sameTemplates(localTpl, snapshot.templates)))
+            ) {
+              await DB.writeSetting("modeles", {});
+              setTemplates({});
+            }
+            if (!sameTemplates(cachedTpl, own.templates)) {
+              await DB.writeSetting("modeles_campagne", own.templates);
+              setCampaignTemplates(own.templates);
+              followed = true;
+            }
+            if (!sameAdoptedFields(c, own.campaign)) {
+              // reachable only through the snapshot branch above: the
+              // campaign corrected a field the volunteer never touched
+              await adoptFields(own, c);
+              followed = true;
+            } else {
+              // arm the snapshot for the day the campaign edits a field: a
+              // browser from before it existed has none, and without one
+              // that first edit would read as the volunteer's
+              await DB.writeSetting("adoption", {
+                slug: own.slug,
+                campaign: Object.fromEntries(
+                  ADOPTED_KEYS.map((k) => [k, own.campaign[k] ?? ""]),
+                ),
+              });
+            }
+            if (followed) {
+              setAdopted(
+                `Les textes de la campagne « ${own.name} » ont été mis à ` +
+                  "jour depuis son site. Ils restent dans ce navigateur, " +
+                  "et vous pouvez les modifier dans « Ma campagne ».",
+              );
+            }
+          } catch (e) {
+            // a rejected write must be said, like the adoption's own
+            setMessage({
+              tone: "erreur",
+              text: `Mise à jour impossible : ${e instanceof Error ? e.message : String(e)}`,
+            });
           }
           return;
         }
-        if (upToDate) return;
-        // past here the campaign in this browser is the volunteer's own
+        // past here the campaign's nine fields are the volunteer's own
         // writing, and a ?org= link is answered exactly as before
       }
       // Offered ONLY on a campaign nobody has touched. "Not complete" was
@@ -451,7 +520,7 @@ export default function Browser() {
       });
       setReady(true);
     });
-  }, [fetchList, adopt]);
+  }, [fetchList, adopt, adoptFields]);
 
   const unfilled = useMemo(() => M.unfilledKeys(cfg), [cfg]);
   // What is missing about the CAMPAIGN, as opposed to about the person
@@ -597,7 +666,7 @@ export default function Browser() {
       const report = await DB.importAll(JSON.parse(await file.text()), {
         merge,
       });
-      const [m, s, c, a, g, l, tel, mod] = await Promise.all([
+      const [m, s, c, a, g, l, tel, mod, layerRaw] = await Promise.all([
         DB.loadMayors(),
         DB.loadTracking(),
         DB.readSetting<Campaign>("campagne", EMPTY_CFG),
@@ -618,6 +687,8 @@ export default function Browser() {
         // a restored backup, another tab or an older version can have written
         // anything here, and a stored overlay is judged like an offered one.
         DB.readSetting<unknown>("modeles", {}),
+        // the campaign's layer travels in the backup like the overlay above
+        DB.readSetting<unknown>("modeles_campagne", {}),
       ]);
       setMayors(m);
       setTracking(s);
@@ -625,6 +696,7 @@ export default function Browser() {
       setPersonalNote(a);
       setAppelTelephonique(tel === true);
       setTemplates(offeredTemplates(mod));
+      setCampaignTemplates(offeredTemplates(layerRaw));
       // checked on the way OUT too: a database written before this
       // guard existed, or by another tab, is not this code's doing
       setLogo(DB.usableLogo(g) ? g : "");
@@ -923,9 +995,11 @@ export default function Browser() {
                   cfg={cfg}
                   personalNote={personalNote}
                   phoneOutreach={appelTelephonique}
-                  // the campaign's own texts, over the image's. One layer and
-                  // not two: this mode has no team.
-                  templates={[templates]}
+                  // the campaign's layer, then this volunteer's own overlay,
+                  // over the image's — the resolution team mode already
+                  // lives by, one layer renamed: this mode has no team, it
+                  // has a volunteer.
+                  templates={[campaignTemplates, templates]}
                   drafts={cardDrafts}
                   status={tracking[chosen.insee_code as string]?.status}
                   notes={(
@@ -974,10 +1048,11 @@ export default function Browser() {
                     setLogo("");
                     setDraft(EMPTY_CFG);
                     setNoteDraft("");
-                    // the store is cleared above; without this the screen
+                    // the store is cleared above; without these the screen
                     // kept rendering the erased campaign's texts until the
                     // next reload
                     setTemplates({});
+                    setCampaignTemplates({});
                     // the drafts carry notes about named mayors: erased means erased
                     cardDrafts.current = {};
                     setLoadedList(null);
@@ -996,6 +1071,7 @@ export default function Browser() {
                   dirty={dirty}
                   logo={logo}
                   templates={templates}
+                  campaignTemplates={campaignTemplates}
                   onMessage={setMessage}
                   // REFUSED BEFORE IT IS STORED, by the engine itself. There
                   // is no server here to reproduce its rules, so the rules are
@@ -1009,8 +1085,15 @@ export default function Browser() {
                     for (const [file, text] of Object.entries(next)) {
                       if (text.trim() !== "") stored[file] = text;
                     }
+                    // judged as it will RENDER: the volunteer's overlay over
+                    // the campaign's layer over the image's, because that is
+                    // the set the card resolves
                     const why = M.invalidTemplate(
-                      M.mergeTemplates(M.SHIPPED_TEMPLATES, stored),
+                      M.mergeTemplates(
+                        M.SHIPPED_TEMPLATES,
+                        campaignTemplates,
+                        stored,
+                      ),
                     );
                     if (why) throw new Error(why);
                     await DB.writeSetting("modeles", stored);

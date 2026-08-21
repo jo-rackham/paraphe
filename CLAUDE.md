@@ -1009,33 +1009,38 @@ campaign → image** by `mergeTemplates`.
   to the volunteers with an account, one to the volunteers without, and
   nothing on either screen saying which. Only the CAMPAIGN's layer travels: a
   team's overlay is its team's, and that mode has no team.
-  **ONE overlay there, not two.** In team mode the campaign's layer is LIVE —
-  a coordination corrects its letter and every team that did not rewrite it
-  gets the correction — so the two are kept apart and the inherited one is
-  only ever a placeholder. In browser mode adopting COPIES the texts, exactly
-  as it copies the nine fields, and what the volunteer touches is theirs.
-  Showing them as the value is the honest reading.
-  **AND THE CAMPAIGN'S OWN BROWSER VERSION FOLLOWS ITS CAMPAIGN**, for what
-  the adoption wrote and nobody retouched since. A coordination that rewrote
-  its letter AFTER volunteers adopted did not reach them — the campaign spoke
-  with two voices again, one update behind, reported from production as « le
-  template custom devrait aussi être autochargé dans la version navigateur ».
-  `adopt` therefore leaves a SNAPSHOT (`adoption` in settings: slug, the
-  seven adopted keys, the templates) and the next load asks the origin again
-  when the store is still followable: fields byte-for-byte what the adoption
-  wrote (or what the origin says today), templates equal to the snapshot's —
-  or EMPTY, which is followable on its face: every browser from before the
-  snapshot existed holds exactly that, and an empty overlay was nobody's
-  writing. Anything the volunteer touched stops the refresh for its half and
-  says nothing — it is theirs. The refresh is announced in the provenance
-  slot (« mis à jour depuis son site »); a refusal on that path says the
-  local texts stand, not that nothing was filled in. WHO SIGNS still does
-  not travel, and signing for oneself does not count as touching: the
-  comparison reads the seven adopted keys only. Assumed: a logo alone
-  changing does not trigger a refresh (its key is content-addressed, there
-  is nothing to compare without downloading), and a volunteer who emptied
-  their overlay ON PURPOSE after adopting reads as followable — the cheaper
-  mistake, since what returns is what the campaign sends.
+  **TWO LAYERS THERE TOO — the volunteer's over the campaign's**, the exact
+  resolution team mode lives by with one layer renamed: local → campaign →
+  image, resolved by the same `mergeTemplates`. The first shape MERGED the
+  adopted texts into the local overlay and followed them by byte-comparison
+  against a snapshot; one rewritten file then froze all six, and the model
+  disagreed with the rest of the product. The campaign's texts live in a
+  layer of their own now (`modeles_campagne`, a CACHE of what the campaign's
+  site says), the local overlay (`modeles`) is only ever the volunteer's own
+  writing, and the editor shows the campaign's text as the PLACEHOLDER of an
+  empty box — a live inheritance, per file: « revenir au texte de la
+  campagne » is emptying the box, exactly as a team does.
+  **THE LAYER FOLLOWS ITS CAMPAIGN.** Every load asks the origin
+  (`ownCampaign`, unconditionally — which browsers may follow is decided by
+  the ANSWER, not by guessing from the store), and while the nine fields are
+  still what the adoption wrote, the layer is refreshed to what the campaign
+  says today: a coordination's correction reaches every browser that did not
+  rewrite that file, and a volunteer's rewrite masks exactly the file it
+  rewrote, nothing more. Fields the volunteer edited stop everything —
+  a campaign's texts must not sit under a configuration that no longer names
+  it. The FIELDS themselves still follow by the snapshot the adoption leaves
+  (`adoption`: slug + the seven adopted keys — a form is one block, with no
+  useful per-key inheritance). WHO SIGNS still does not travel, and signing
+  for oneself does not count as touching. The refresh is announced in the
+  provenance slot (« mis à jour depuis son site »); a refusal on that path
+  says the local texts stand, not that nothing was filled in. MIGRATION,
+  once: a local overlay that is byte for byte what the campaign says — or
+  what the v0.17.0 snapshot copied — was never the volunteer's writing, and
+  moves under the layer, where it inherits again. Assumed: a logo alone
+  changing does not trigger a refresh (its key is content-addressed; nothing
+  to compare without downloading), the layer refresh announces itself even
+  when a local overlay masks every changed file, and offline or on a static
+  publication the layer stands at its last known state.
   **Bounded on the way in** (`offeredTemplates`), and that bound is the one
   thing there that is not cosmetic: this mode stores what it adopts and
   promises to hold only what its owner put there, so a campaign answering with

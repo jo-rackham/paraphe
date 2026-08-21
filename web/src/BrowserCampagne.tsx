@@ -25,18 +25,17 @@ interface CampaignTabProps {
   appelTelephonique: boolean;
   onAppelTelephonique: (yes: boolean) => void;
   /**
-   * The message templates this browser holds, over the six the image carries.
-   *
-   * ONE overlay and not two, unlike team mode. There the campaign's layer is
-   * LIVE — a coordination corrects its letter and every team that did not
-   * rewrite it gets the correction — so the two are kept apart and the
-   * inherited one is only ever a placeholder. Here nothing is live by
-   * promise: adopting a campaign COPIES its texts, exactly as it copies its
-   * nine fields, and after that they are this browser's. Showing them as the
-   * value is the honest reading, and pretending they are inherited would
-   * promise an update that can never arrive.
+   * This volunteer's OWN overlay — only what they rewrote themselves.
    */
   templates: Templates;
+  /**
+   * The adopted campaign's layer, under the volunteer's: the same two-layer
+   * screen as team mode, one layer renamed. The campaign's text is the
+   * PLACEHOLDER of an empty box, never its value — filled in, it would be a
+   * frozen copy, and the campaign's next correction would stop arriving.
+   * Empty for a browser that never adopted, and the image's texts then show.
+   */
+  campaignTemplates: Templates;
   onTemplates: (templates: Templates) => Promise<Templates>;
   onMessage: (m: Message) => void;
   onSave: (
@@ -58,6 +57,7 @@ export function CampaignTab({
   appelTelephonique,
   onAppelTelephonique,
   templates,
+  campaignTemplates,
   onTemplates,
   onMessage,
   onSave,
@@ -122,16 +122,17 @@ export function CampaignTab({
         </span>
       </div>
       {/* The same editor the account version uses, one level down: here the
-          texts inherited are the adopted campaign's, and the save is an
-          IndexedDB write rather than a route. Its own card and its own save
-          button, like the logo above — six long texts have no business
-          riding on the button that stores nine short fields. */}
+          inherited layer is the adopted campaign's — LIVE, refreshed from
+          its site — and the save is an IndexedDB write rather than a route.
+          Its own card and its own save button, like the logo above — six
+          long texts have no business riding on the button that stores nine
+          short fields. */}
       <ModelesMessages
         niveau="navigateur"
         propres={templates}
-        // the IMAGE's: there is no live layer between this browser and a
-        // campaign, so an empty box falls back to the shipped text
-        herites={{}}
+        // the adopted campaign's layer; an empty box falls back to it, then
+        // to the shipped text — the exact inheritance team mode shows
+        herites={campaignTemplates}
         onSave={onTemplates}
         onEnregistre={() => {}}
         onError={(e) => onErreur(e instanceof Error ? e.message : String(e))}
