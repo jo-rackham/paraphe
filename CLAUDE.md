@@ -990,6 +990,20 @@ campaign → image** by `mergeTemplates`.
   (`app.appel_telephonique` against `orgs.phone_outreach`) and is the same
   here. A campaign that customises its templates in the app and then runs
   `task messages` gets the image's.
+- **TWO CHANNELS ARE NAMED « EMAIL », AND BOTH SCREENS MUST SAY WHICH.** The
+  rank chooses the file, 29 807 mayors of 34 826 are `no_signal`, and the
+  editor is unmounted by every tab click. Reset to the first of its list, it
+  showed a volunteer who had customised the DISCOVERY email an empty box
+  under the other one; they read the default placeholder as their work lost,
+  retyped their text into that wrong file, and the card kept rendering the
+  first version — three symptoms, reported as data loss, with nothing lost:
+  both texts were stored, each on its file. Reproduced end to end before it
+  was closed from both sides: the editor now OPENS on the first customised
+  template, and each card panel names the template it renders in the
+  editor's own words — label, audience, and the selector's « (personnalisé) »
+  marker. The words are `CHANNELS` in `web/src/messages.ts`, ONE list read
+  by both screens, because two lists is how they stopped naming the same
+  template.
 - **THE ACCOUNT-LESS VERSION ADOPTS THEM TOO**, through both doors, because a
   campaign that had rewritten its letter otherwise spoke with two voices — one
   to the volunteers with an account, one to the volunteers without, and

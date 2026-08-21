@@ -258,6 +258,76 @@ it("takes the stored overlay from the answer, not from what it sent", async () =
   expect(seen).toEqual([{}]);
 });
 
+// TWO CHANNELS ARE NAMED « EMAIL », AND THE SELECTOR USED TO FORGET WHICH.
+// This editor is unmounted by every tab click; reset to the first of the
+// list, a volunteer who had customised the discovery email came back to an
+// empty box under the other one, read the default placeholder as their work
+// lost, retyped their text INTO that wrong file — and the card kept
+// rendering the first version. Reproduced end to end before this opened on
+// the customised file instead.
+it("opens on the first customised template, not on the first of the list", async () => {
+  await editor("campaign", {
+    "email_decouverte.txt": "OBJET: s\n\nNotre texte découverte.",
+  });
+  const select = container.querySelector("#modele-choisi") as HTMLSelectElement;
+  expect(select.value).toBe("email_decouverte.txt");
+  // the box shows the customised text, never an empty box under another file
+  expect(box().value).toContain("Notre texte découverte.");
+});
+
+it("opens on the first of the list when nothing is customised", async () => {
+  await editor("campaign", {});
+  const select = container.querySelector("#modele-choisi") as HTMLSelectElement;
+  expect(select.value).toBe("email.txt");
+});
+
+// THE CARD NAMES THE TEMPLATE IT RENDERS, in the editor's own words — label,
+// audience, and the selector's « (personnalisé) » marker. The rank chooses
+// the file, and a card that named neither Email is how a volunteer rewrote
+// the wrong one.
+it("names on the card the template each panel renders", async () => {
+  const cfg = teamConfig().campaign;
+  const render = async (mayor: Mayor, templates: (Templates | undefined)[]) => {
+    await act(async () => {
+      root.render(
+        <Fiche
+          mayor={mayor}
+          cfg={cfg}
+          templates={templates}
+          onBack={() => {}}
+          onStatus={() => {}}
+        />,
+      );
+    });
+    await flush();
+    return container.textContent ?? "";
+  };
+
+  // an endorser's card: the thank-you files, none customised
+  const thanked = await render(ENDORSER, [{}]);
+  expect(thanked).toContain("Modèle : Email — maire qui a déjà parrainé");
+  expect(thanked).toContain("Modèle : Courrier — maire qui a déjà parrainé");
+  expect(thanked).toContain(
+    "Modèle : Script téléphone — maire qui a déjà parrainé",
+  );
+  expect(thanked).not.toContain("(personnalisé)");
+
+  // a discovery card whose email the campaign rewrote: the discovery files,
+  // and the selector's own marker on the one a layer covers
+  const discovered = await render({ ...ENDORSER, rank: "no_signal" }, [
+    { "email_decouverte.txt": "OBJET: s\n\nNotre texte découverte." },
+  ]);
+  expect(discovered).toContain(
+    "Modèle : Email — maire sans parrainage connu (personnalisé)",
+  );
+  expect(discovered).toContain(
+    "Modèle : Courrier — maire sans parrainage connu",
+  );
+  expect(discovered).not.toContain(
+    "Courrier — maire sans parrainage connu (personnalisé)",
+  );
+});
+
 // The card is what a mayor actually receives, and it renders from the layers
 // in order: the team's over the campaign's over the image's.
 it("renders a card from the team's text, then the campaign's, then the image's", async () => {

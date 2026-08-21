@@ -13,38 +13,10 @@ import type { Message, Templates } from "./types.ts";
 // PLACEHOLDER of an empty box, never its value, and « revenir au texte … »
 // empties it rather than pasting anything back.
 
-const CHANNELS: { file: string; label: string; audience: string }[] = [
-  {
-    file: "email.txt",
-    label: "Email",
-    audience: "maire qui a déjà parrainé",
-  },
-  {
-    file: "email_decouverte.txt",
-    label: "Email",
-    audience: "maire sans parrainage connu",
-  },
-  {
-    file: "courrier.txt",
-    label: "Courrier",
-    audience: "maire qui a déjà parrainé",
-  },
-  {
-    file: "courrier_decouverte.txt",
-    label: "Courrier",
-    audience: "maire sans parrainage connu",
-  },
-  {
-    file: "telephone.txt",
-    label: "Script téléphone",
-    audience: "maire qui a déjà parrainé",
-  },
-  {
-    file: "telephone_decouverte.txt",
-    label: "Script téléphone",
-    audience: "maire sans parrainage connu",
-  },
-];
+// The six channels come from `messages.ts`, where the card reads the same
+// words: two lists were how the editor and the card stopped naming the same
+// template.
+const CHANNELS = M.CHANNELS;
 
 // -- The email subject, a field of its own -----------------------------------
 //
@@ -104,7 +76,17 @@ export function ModelesMessages({
   onError: (e: unknown) => void;
   onMessage: (m: Message) => void;
 }) {
-  const [choisi, setChoisi] = useState(CHANNELS[0].file);
+  // OPENS ON THE FIRST CUSTOMISED TEMPLATE, not on the first of the list.
+  // This editor is unmounted by every tab click, so « the selector went back
+  // to the first Email » is what a volunteer sees on their return — and with
+  // two channels named « Email », an empty box under the wrong one reads as
+  // work lost. They then retype their text INTO that wrong file, and the
+  // card keeps rendering the first version. Measured, end to end.
+  const [choisi, setChoisi] = useState(
+    () =>
+      CHANNELS.find((c) => (propres[c.file] ?? "").trim() !== "")?.file ??
+      CHANNELS[0].file,
+  );
   const [brouillon, setBrouillon] = useState<Templates>(propres);
   const [envoi, setEnvoi] = useState(false);
   // The refusal, IN THIS CARD, beside the button that was pressed. The

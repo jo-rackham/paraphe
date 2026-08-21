@@ -1397,6 +1397,22 @@ export function Fiche({
   // the SAME normalisation as the engine: the screen announced a
   // "discovery message" while the send button carries a thank-you
   const rank = M.rank(mayor);
+  // WHICH TEMPLATE this panel renders, in the editor's own words. The rank
+  // chooses the file and two channels are named « Email », so a card that
+  // named neither is how a volunteer rewrote the wrong one: back on the
+  // editor, its selector reset to the first, they read the empty box as work
+  // lost, retyped their text into the other file, and this card kept
+  // rendering the first version. « (personnalisé) » is the selector's own
+  // marker, so the two screens point at each other.
+  const templateNamed = (base: string): string => {
+    const file = M.channelFile(base, rank);
+    const channel = M.CHANNELS.find((c) => c.file === file);
+    const custom = M.customized(file, templates ?? []);
+    return (
+      `Modèle : ${channel?.label ?? base} — ${channel?.audience ?? file}` +
+      (custom ? " (personnalisé)" : "")
+    );
+  };
 
   // The email fields are CONTROLLED, and reset when the card changes — or
   // the CAMPAIGN does. Uncontrolled, the "Copier" button read the edited
@@ -1892,6 +1908,7 @@ export function Fiche({
               <Emoji>✉️ </Emoji>Email
             </summary>
             <div className="dedans">
+              <p className="gris">{templateNamed("email")}</p>
               {regenerated && (
                 <p className="alerte">
                   <strong>Message régénéré.</strong> La campagne ou les
@@ -1962,6 +1979,7 @@ export function Fiche({
               <Emoji>📮 </Emoji>Courrier
             </summary>
             <div className="dedans">
+              <p className="gris">{templateNamed("courrier")}</p>
               {badAddress && (
                 <p className="alerte">Adresse inutilisable : {badAddress}.</p>
               )}
@@ -1983,6 +2001,7 @@ export function Fiche({
               <Emoji>☎️ </Emoji>Téléphone
             </summary>
             <div className="dedans">
+              <p className="gris">{templateNamed("telephone")}</p>
               <pre>{rendered!.phone}</pre>
             </div>
           </details>
