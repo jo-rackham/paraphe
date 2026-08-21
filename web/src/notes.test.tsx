@@ -1304,6 +1304,52 @@ describe("a pick belongs to the mayor it was made on", () => {
       "Enregistré.",
     );
   });
+
+  // AND THE NOTE CONTROLS ARE RELEASED LIKE THE SAVE BUTTON, which is the
+  // same rule one panel down and was carried by nothing: removing either half
+  // of it from the reset block left all 335 tests green. Two mayors are two
+  // requests, so a note act still out on the previous card must not hold this
+  // card's buttons — the guard armed with nothing to release it, and a
+  // « Suppression… » on a card nobody has acted on.
+  it("frees the note controls when the card changes under an act", async () => {
+    const asked: string[] = [];
+    const onDeleteNote = async (n: Note) => {
+      asked.push(n.note);
+      // the first never lands: the volunteer moves on while it is out
+      if (asked.length === 1) await new Promise<void>(() => {});
+    };
+    await act(() => {
+      root.render(
+        <DeuxFiches
+          filed={[]}
+          notes={[{ ...MINE, mine: true }]}
+          wiring={{
+            noteRights: () => ({ edit: true, delete: true }),
+            onDeleteNote,
+          }}
+        />,
+      );
+    });
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    await click("Confirmer");
+
+    await click("fiche suivante");
+    await click("Supprimer la note 1 du 2026-01-02T10:00");
+    const asking = [...container.querySelectorAll("button")].find((b) =>
+      /Confirmer|Suppression…/.test(b.textContent ?? ""),
+    );
+    expect(
+      asking?.textContent,
+      "the next card's button is busy with the previous card's request",
+    ).toBe("Confirmer");
+
+    await click("Confirmer");
+    await flush();
+    expect(
+      asked,
+      "the guard the previous card armed swallowed this card's removal",
+    ).toHaveLength(2);
+  });
 });
 
 describe("what a card renders without the wiring", () => {
