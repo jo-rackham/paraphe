@@ -1387,9 +1387,9 @@ describe("what a card renders without the wiring", () => {
 // that were already open, in both directions. Neither of these needs a race:
 // the history moves because THIS screen moved it.
 describe("an act is aimed at a line, not at a position", () => {
-  const ligne = (note: string, ts: string): Note => ({
+  const ligne = (note: string, ts: string, status = "to_contact"): Note => ({
     volunteer: "Alice",
-    status: "to_contact",
+    status,
     note,
     ts,
     mine: true,
@@ -1405,8 +1405,11 @@ describe("an act is aimed at a line, not at a position", () => {
 
   let setLignes: (n: Note[]) => void = () => {};
 
-  function Registre(wiring: Wiring) {
-    const [notes, setNotes] = useState<Note[]>(LIGNES);
+  function Registre({
+    depart = LIGNES,
+    ...wiring
+  }: Wiring & { depart?: Note[] }) {
+    const [notes, setNotes] = useState<Note[]>(depart);
     setLignes = setNotes;
     return (
       <Fiche
@@ -1516,5 +1519,133 @@ describe("an act is aimed at a line, not at a position", () => {
       rewritten,
       "the correction was written into a line nobody was correcting",
     ).toEqual(["milieu 1"]);
+  });
+
+  // …AND IT IS SAID WHERE SOMETHING IS LISTENING. Written inside the history
+  // card, the sentence went with it: a card holding ONE note is the ordinary
+  // shape of a mayor contacted once, and `notes.length > 0` took the card,
+  // the sentence and the editor away together.
+  it("says so even when the line was the only one", async () => {
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[ligne("la seule", "2026-01-04T10:00")]}
+          onEditNote={async () => {}}
+        />,
+      );
+    });
+    await click("Modifier la note 1 du 2026-01-04T10:00");
+    await act(async () => {
+      setLignes([]);
+    });
+    expect(text()).toContain("n'est plus dans l'historique");
+  });
+
+  // The region PRE-EXISTS and only its text changes — a region inserted
+  // together with its text is announced by some screen readers and dropped by
+  // others, which is the whole doctrine. And the control the volunteer was
+  // holding died WITH the row, from outside, so no click ran and
+  // `holdFocusThrough` never armed.
+  it("announces it in a region that was already there, and catches the focus", async () => {
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[ligne("la seule", "2026-01-04T10:00")]}
+          onEditNote={async () => {}}
+        />,
+      );
+    });
+    const regions = () => [
+      ...container.querySelectorAll('[role="alert"],[role="status"]'),
+    ];
+    const before = regions();
+    expect(before.length, "no live region to speak into").toBeGreaterThan(0);
+    expect(before.map((r) => r.textContent).join("")).toBe("");
+
+    await click("Modifier la note 1 du 2026-01-04T10:00");
+    button("Enregistrer la note").focus();
+    await act(async () => {
+      setLignes([]);
+    });
+
+    const spoken = regions().filter((r) =>
+      r.textContent?.includes("n'est plus dans l'historique"),
+    );
+    expect(spoken, "the sentence reaches no live region").toHaveLength(1);
+    expect(
+      before.includes(spoken[0]),
+      "the region was inserted together with its text",
+    ).toBe(true);
+    expect(
+      document.activeElement?.tagName,
+      "the keyboard was left on <body>",
+    ).not.toBe("BODY");
+  });
+
+  // `sameLine` is NOT an identity — it leaves the text out, so an afternoon
+  // of « à rappeler » produces lines that answer to it alike. Matched row by
+  // row, the aim opened an editor on every one of them, sharing one draft.
+  it("opens one editor when two lines share a minute and an outcome", async () => {
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[
+            ligne(
+              "le secrétariat rappelle",
+              "2026-01-06T17:00",
+              "to_call_back",
+            ),
+            ligne("personne au bout", "2026-01-06T17:00", "to_call_back"),
+          ]}
+          onEditNote={async () => {}}
+        />,
+      );
+    });
+    await click("Modifier la note 2 du 2026-01-06T17:00");
+    const open = [...container.querySelectorAll("label")].filter((l) =>
+      l.textContent?.startsWith("Texte de la note"),
+    );
+    expect(open, "one aim, two editors, one draft between them").toHaveLength(
+      1,
+    );
+  });
+
+  // AND WHAT GOES OUT IS WHAT THE VOLUNTEER READ. The fallback that keeps an
+  // editor over a line another window has corrected also matches a line that
+  // merely INHERITED the minute and the outcome — a colleague removed the
+  // aimed one and recorded their own contact in the same minute. Sending the
+  // row's current note as `seen` made the store accept it, and the
+  // colleague's words were replaced by a correction written for somebody
+  // else's call.
+  it("sends the line the volunteer read, not the one that took its place", async () => {
+    const sent: string[] = [];
+    await act(() => {
+      root.render(
+        <Registre
+          depart={[ligne("original", "2026-01-05T10:00", "to_call_back")]}
+          onEditNote={async (n) => {
+            sent.push(n.note);
+          }}
+        />,
+      );
+    });
+    await click("Modifier la note 1 du 2026-01-05T10:00");
+    const box = noteEditor();
+    if (!box) throw new Error("no editor is open");
+    await type(box, "je corrige l'original");
+
+    // the other window removes that line and records ANOTHER contact, in the
+    // same minute and with the same outcome
+    await act(async () => {
+      setLignes([
+        ligne("mot nouveau du collègue", "2026-01-05T10:00", "to_call_back"),
+      ]);
+    });
+    await click("Enregistrer la note");
+    await flush();
+    expect(
+      sent,
+      "the store was handed the line now on screen, so it could not refuse",
+    ).toEqual(["original"]);
   });
 });

@@ -1596,12 +1596,77 @@ export function Fiche({
       ? a.id === b.id
       : a.ts === b.ts && a.status === b.status;
 
+  /**
+   * WHERE THE AIM SITS NOW — resolved ONCE, so at most ONE row carries an act.
+   *
+   * `sameLine` is not an identity and cannot be one: it leaves the text out,
+   * so two lines of the same minute and the same outcome answer to it, and an
+   * afternoon of « à rappeler » produces those. Matched row by row, the aim
+   * opened an editor on BOTH of them, sharing one draft, and « Enregistrer la
+   * note » wrote it into whichever was uppermost. That is the defect the
+   * positional key did not have, and it arrived with the fix for the one it
+   * did.
+   *
+   * So the aim is resolved against the whole list, and it prefers the line it
+   * was TAKEN on — same text as well — falling back to a same-minute,
+   * same-outcome line only when no such line is left. That fallback is what
+   * keeps an editor open over a line another window has just corrected, which
+   * is the case `sameLine` exists for.
+   */
+  const aimedAt = (() => {
+    if (!activeNote) return -1;
+    const exact = notes.findIndex(
+      (n) => sameLine(activeNote.line, n) && n.note === activeNote.line.note,
+    );
+    return exact >= 0
+      ? exact
+      : notes.findIndex((n) => sameLine(activeNote.line, n));
+  })();
   /** The line whose editor is open, if one is — what an abandoned correction
    *  is compared against. */
-  const editedNote =
-    activeNote?.verb === "edit"
-      ? notes.find((n) => sameLine(activeNote.line, n))
-      : undefined;
+  const editedNote = activeNote?.verb === "edit" ? notes[aimedAt] : undefined;
+
+  /**
+   * AN ACT WHOSE LINE HAS GONE IS SAID, and said where something is LISTENING.
+   *
+   * A colleague removes the very line an editor is open on — or the store
+   * refuses this window because they did — and the box disappears with the
+   * words typed into it. « La correction en cours a été abandonnée » does not
+   * fire: that sentence is for opening ANOTHER editor.
+   *
+   * DERIVED, never written to state. `setSaved` here would be a render-phase
+   * write, and the render that swaps the card is one React DISCARDS — its
+   * output goes, the state update stays, and the sentence lands on the next
+   * mayor. Through `Alerte` and not a paragraph of its own, because a region
+   * that appears together with its text announces nothing: it is ONE node,
+   * spoken and shown alike, and it lives in the SHELL rather than in the
+   * history card — a card with one note is the ordinary shape of a mayor
+   * contacted once, and removing that note took the card away, the sentence
+   * with it.
+   */
+  const stranded =
+    activeNote && aimedAt < 0
+      ? "Cette note n'est plus dans l'historique : quelqu'un l'a supprimée" +
+        " depuis." +
+        (activeNote.verb === "edit"
+          ? " La correction en cours est abandonnée."
+          : "")
+      : "";
+  // The control they were holding died WITH the row, and no click ran, so
+  // `holdFocusThrough` never armed: a keyboard user was left on <body>, at the
+  // top of a screen with a list of 34 826 mayors behind it.
+  const caught = useRef(false);
+  useEffect(() => {
+    if (!stranded) {
+      caught.current = false;
+      return;
+    }
+    if (caught.current) return;
+    caught.current = true;
+    const now = document.activeElement;
+    // focus moved on to something real in the meantime: not ours to take
+    if (!now || now === document.body) focusContenu();
+  });
 
   const save = async () => {
     // A REF, not the `saving` state: two clicks in the same tick run two
@@ -1885,31 +1950,12 @@ export function Fiche({
         </>
       )}
 
+      {/* In the SHELL and not in the card below: see `stranded`. No `onClose`,
+          so the region holds no interactive control. */}
+      <Alerte message={stranded ? { tone: "erreur", text: stranded } : null} />
       {notes.length > 0 && (
         <div className="carte">
           <h2 style={{ marginTop: 0 }}>Historique</h2>
-          {/* AN ACT WHOSE LINE HAS GONE IS SAID, not simply gone from the
-              screen. A colleague removes the very line an editor is open on
-              — or the store refuses this window because they did — and the
-              act has nowhere left to land: the box disappears and the words
-              typed into it go with it. « La correction en cours a été
-              abandonnée » does not fire, because it is the sentence for
-              opening ANOTHER editor, not for losing this one.
-
-              DERIVED, and that is what makes it safe: `setSaved` here would
-              be a render-phase write, and the render that swaps the card is
-              one React discards — the message would survive onto the next
-              mayor while its output did not. Rendered, it exists exactly on
-              the renders that are committed. */}
-          {activeNote && !notes.some((n) => sameLine(activeNote.line, n)) && (
-            <p>
-              Cette note n'est plus dans l'historique : quelqu'un l'a supprimée
-              depuis.
-              {activeNote.verb === "edit"
-                ? " La correction en cours est abandonnée."
-                : ""}
-            </p>
-          )}
           {/* The history arrives newest first, in both modes: the server
               orders by id DESC, the browser prepends. A plain index would
               shift on every addition; the DISTANCE FROM THE OLDEST end is
@@ -1925,8 +1971,7 @@ export function Fiche({
             // An act shows on the row that IS the line it was aimed at, and
             // on no other. A line that has gone takes its act with it: there
             // is nothing left to confirm and nothing left to correct.
-            const aim =
-              activeNote && sameLine(activeNote.line, n) ? activeNote : null;
+            const aim = i === aimedAt ? activeNote : null;
             const editing = aim?.verb === "edit";
             const confirming = aim?.verb === "delete";
             // Every row carries the same two buttons, so their VISIBLE names
@@ -1964,7 +2009,13 @@ export function Fiche({
                         onClick={() =>
                           onNote(
                             () =>
-                              onEditNote?.(n, i, noteDraft) ??
+                              // WHAT THE VOLUNTEER SAW, not what the row
+                              // carries now — see `aimedAt`. Browser mode
+                              // sends this as its `seen` and the team's id
+                              // comes off it, so an act whose line has been
+                              // replaced under it is REFUSED by the store
+                              // rather than landing on words nobody read.
+                              onEditNote?.(aim.line, i, noteDraft) ??
                               Promise.resolve(),
                             "Note modifiée.",
                           )
@@ -2018,7 +2069,9 @@ export function Fiche({
                           aria-disabled={notesBusy || undefined}
                           onClick={() =>
                             onNote(
-                              () => onDeleteNote?.(n, i) ?? Promise.resolve(),
+                              () =>
+                                onDeleteNote?.(aim.line, i) ??
+                                Promise.resolve(),
                               "Note supprimée.",
                               // the one act that moves the card BACKWARDS
                               { rollsBack: true },

@@ -1620,16 +1620,46 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   one, otherwise the moment and the outcome. **The text is left out on
   purpose**: a correction another window has just landed would otherwise take
   this one's editor away with the words still in it, which is the one thing
-  the refusal below must not do. Two notes of the same minute AND the same
-  outcome are indistinguishable, which is the limit browser mode already
-  states.
+  the refusal below must not do.
+  **AND `sameLine` IS NOT AN IDENTITY**, which is what the round after found:
+  leaving the text out means two lines answer to it alike — an afternoon of
+  « à rappeler » produces those — and a line that never existed before can
+  INHERIT it, a colleague having removed the aimed one and recorded their own
+  contact in the same minute. Matched row by row it opened an editor on every
+  match, sharing one draft; matched against a line that had merely inherited
+  the minute, « Enregistrer la note » replaced somebody else's words with a
+  correction written for another call. So it is resolved ONCE against the
+  whole list (`aimedAt`), preferring the line the act was TAKEN on — text and
+  all — and falling back to a same-minute, same-outcome line only when no such
+  line is left; that fallback is the concurrent-correction case and nothing
+  else.
+  **AND WHAT GOES OUT IS WHAT THE VOLUNTEER READ.** The act carries the line
+  it was AIMED at, not the row it happens to render over: browser mode sends
+  it as its `seen` — where a note is named by position PLUS content — and team
+  mode takes the id off it. An inherited line is then REFUSED by the store
+  instead of being written into, which is the difference between a fallback
+  that keeps an editor open and one that hands it a stranger.
+  Two notes of the same minute, the same outcome AND the same text remain
+  indistinguishable, which is the limit browser mode already states.
   **And a line that has gone taking its act with it is SAID**, because the
   words typed into that act go with it — a colleague removes the very line an
   editor is open on and the box simply disappears. « La correction en cours a
   été abandonnée » does not fire there: that sentence is for opening ANOTHER
-  editor. The new one is DERIVED and rendered, never written to state: a
-  render-phase `setSaved` would survive the render that swaps the card, which
-  React discards, and land on the next mayor with its output nowhere.
+  editor. The new one is DERIVED, never written to state: a render-phase
+  `setSaved` would survive the render that swaps the card, which React
+  discards, and land on the next mayor with its output nowhere.
+  **Said where something is LISTENING, and in the SHELL.** Written as a
+  paragraph of its own inside the history card it did neither: a region that
+  appears together with its text announces nothing, so the one person the
+  sentence exists for heard silence; and a card holding ONE note is the
+  ordinary shape of a mayor contacted once, so removing that note took the
+  card, the sentence and the editor away together. It goes through an
+  `Alerte` — ONE node, spoken and shown alike, in the tree from the first
+  render — standing above the card rather than inside it.
+  **And the focus is CAUGHT**, because the control the volunteer was holding
+  died WITH the row and no click ran: `holdFocusThrough` arms on an act, and
+  there is no act here. Only when focus actually fell to `<body>`; moved on to
+  something real, it is not ours to take.
 - **A REFUSAL IN BROWSER MODE REFRESHES WHAT THE SCREEN HOLDS.** That mode
   reads its store ONCE, at load, so « rouvrez la fiche » sent the volunteer to
   the list and back to exactly what they had, and the second attempt was
