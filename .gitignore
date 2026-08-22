@@ -52,3 +52,4 @@ __pycache__/
 # binaires compilés de l'API
 api/paraphe-api
 api/api
+.artifacts
