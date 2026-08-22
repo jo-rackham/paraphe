@@ -366,6 +366,30 @@ describe("a campaign offered by ?org=", () => {
     ).resolves.toMatch(/^data:image\/png;base64,/);
   });
 
+  // THE SAME OBJECT IS FETCHED TWO WAYS, and only one of them is CORS. An
+  // `<img>` on the sign-in page sends no `Origin` and gets a response with no
+  // `Access-Control-Allow-Origin`; this call is CORS and needs one. The store
+  // answers each correctly, declares `Vary: Origin` on neither, and marks the
+  // object immutable for a year — so whichever landed first served both, and
+  // a volunteer who had seen the sign-in page adopted the campaign WITHOUT
+  // ITS MARK, in the console alone. Measured on production, through both
+  // doors, with the store's own CORS rule already in place.
+  it("consults no cache, because the same object is also fetched without CORS", async () => {
+    const png = Uint8Array.from(atob("iVBORw0KGgo="), (c) => c.charCodeAt(0));
+    const spy = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob([png], { type: "image/png" }),
+    }));
+    vi.stubGlobal("fetch", spy);
+    await inlineLogo("https://media.exemple.fr/logos/c/abc.png");
+    expect(
+      spy.mock.calls[0][1],
+      "a cached response to a non-CORS request carries no " +
+        "Access-Control-Allow-Origin, and the browser refuses it here",
+    ).toMatchObject({ cache: "no-store", mode: "cors", credentials: "omit" });
+  });
+
   it("treats a campaign with no logo as ordinary", async () => {
     answer(null);
     const offer = await fetchCampaign("camille2027");

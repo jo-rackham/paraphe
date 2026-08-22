@@ -105,7 +105,25 @@ export function offeredTemplates(value: unknown): Templates {
  * hundred megabytes must not fill this browser's storage.
  */
 export async function inlineLogo(url: string): Promise<string> {
-  const response = await fetch(url, { credentials: "omit", mode: "cors" });
+  // `no-store`, AND IT IS NOT CAUTION. The same object is fetched two ways:
+  // by an `<img>` on the sign-in page, which sends no `Origin` and gets a
+  // response with no `Access-Control-Allow-Origin`, and by THIS call, which
+  // is CORS and needs one. The store answers each correctly and declares
+  // `Vary: Origin` on neither, while marking the object `immutable` for a
+  // year — so whichever request lands first fills the cache for both, and a
+  // volunteer who saw the sign-in page before opening this version got the
+  // `<img>` response handed to this fetch and the browser refused it. The
+  // campaign was then adopted WITHOUT ITS MARK, in the console alone,
+  // because a missing logo costs the picture and nothing else. Measured on
+  // production, in both doors, with the fix for the store's CORS already in
+  // place: that fix is necessary and this is what makes it reachable.
+  // Consulting no cache costs one round trip on an object of 64 KiB at most,
+  // once, at the moment somebody pressed a button.
+  const response = await fetch(url, {
+    credentials: "omit",
+    mode: "cors",
+    cache: "no-store",
+  });
   if (!response.ok) {
     throw new Error(`Le logo n'a pas répondu (HTTP ${response.status}).`);
   }
