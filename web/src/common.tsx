@@ -1051,6 +1051,24 @@ export function PiedDePage({
   );
 }
 
+/**
+ * The waiting state, ONE shape everywhere: the sentence for assistive
+ * technology — mounted WITH its text, the assumed exception the live-region
+ * doctrine records for transient loading — and the indeterminate gauge for
+ * eyes, reusing the download bar's own animation, which the reduced-motion
+ * rule already stills. A bare paragraph read as a tool that had hung.
+ */
+export function Chargement({ quoi = "Chargement…" }: { quoi?: string }) {
+  return (
+    <div className="attente">
+      <p role="status">{quoi}</p>
+      <div className="jauge" aria-hidden="true">
+        <div className="barre indeterminee" />
+      </div>
+    </div>
+  );
+}
+
 export function Alerte({
   message,
   onClose,
@@ -1337,17 +1355,25 @@ export function Fiche({
   const mine = cardWho(mayor);
   const status = picked?.who === mine ? picked.value : carried;
   const setStatus = (value: string) => setPicked({ who: mine, value });
+  // A pick the card does not already carry. Re-selecting the value the card
+  // holds changes nothing, and saving it appended a duplicate line saying
+  // nothing — the register entry the gate in `save` refuses.
+  const changed = status !== carried;
   const [statusError, setStatusError] = useState<string | null>(null);
   // `saving` is the STATE the button reads (aria-disabled, label); `submitting`
   // is the re-entry guard the handler reads. They are two different things, and
   // this card is the last submission in the app that conflated them — see save.
   const [submitting, submitted] = useSubmitGuard();
   const [saving, setSaving] = useState(false);
-  // What the sr-only region beside the button says. A STRING and not a
-  // boolean, because it is now the outcome of three acts — recording a
-  // status, correcting a note, removing one — and they are not « enregistré »
-  // alike.
+  // What the region beside the button says. A STRING and not a boolean,
+  // because it is the outcome of three acts — recording a status, correcting
+  // a note, removing one — and they are not « enregistré » alike.
   const [saved, setSaved] = useState("");
+  // What « Copier » did. Its own slot, beside its own button: the sticky
+  // bar's region is the record's, and a copy that silently failed —
+  // clipboard permissions exist — left a volunteer pasting nothing into
+  // their mailer with the screen saying nothing at all.
+  const [copied, setCopied] = useState<Message | null>(null);
   // The one history line being acted on, and the act. Held HERE and not in
   // each row: two rows in edit mode at once is two drafts and one open editor,
   // and in browser mode a deletion shifts the reverse-index keys of every line
@@ -1505,6 +1531,7 @@ export function Fiche({
       // somebody else, is read as this card's.
       setStatusError(null);
       setSaved("");
+      setCopied(null);
       // The CONTROLS are this card's too. A save still in flight on the
       // previous one left this button reading « Enregistrement… » and its
       // re-entry guard armed, so a click here was swallowed in silence — and
@@ -1742,14 +1769,38 @@ export function Fiche({
     // greys the button but keeps it live; `useSubmitGuard` is what makes the
     // second click a no-op. Every other submission in the app already does this.
     if (submitting()) return;
+    // NOTHING TO SAVE IS SAID, NOT WRITTEN. Pressed with no new status and
+    // no note, this button used to append a line to the history — the same
+    // status, an empty note — a register entry nobody meant, on a record the
+    // whole campaign reads. The guard releases before returning, or the
+    // button refuses every click after this one.
+    if (!changed && note.trim() === "") {
+      submitted();
+      setSaved("");
+      setStatusError(
+        "Rien à enregistrer : choisissez un autre statut, ou écrivez une note.",
+      );
+      return;
+    }
     setStatusError(null);
     setSaved("");
     setSaving(true);
+    // WHAT the press files, named: three intentions share this button — a
+    // status, a note, both — and « Enregistré. » named none of them, which
+    // is how a note-only save read as a status nobody had checked.
+    const did =
+      changed && note.trim() !== ""
+        ? "Statut et note enregistrés."
+        : changed
+          ? "Statut enregistré."
+          : "Note ajoutée.";
     // see `superseded`: what this writes at the end is written only if
     // nothing has followed it — another act, or leaving the card
     const act = begin(saves);
     try {
-      await onStatus(status, note);
+      // a note of nothing but spaces is no note: filed as "", or the
+      // history grows blank lines. Real notes travel untouched.
+      await onStatus(status, note.trim() === "" ? "" : note);
       if (superseded(saves, act)) return;
       // WHAT IS CLEARED IS WHAT WAS SENT, and typing supersedes nothing —
       // which is why the counter cannot be the whole answer. On a weak
@@ -1759,7 +1810,7 @@ export function Fiche({
       // between. Compared through the SETTER, so what is read is the field as
       // it stands and not as this closure remembers it.
       setNote((typed) => (typed === note ? "" : typed));
-      setSaved("Enregistré.");
+      setSaved(did);
     } catch (e) {
       if (superseded(saves, act)) return;
       setStatusError(e instanceof Error ? e.message : String(e));
@@ -1871,7 +1922,11 @@ export function Fiche({
         {mayor.title} {mayor.first_name} {mayor.last_name}
       </h1>
       <p>
-        <strong>{mayor.commune}</strong> ({mayor.department})
+        <strong>{mayor.commune}</strong> ({mayor.department}){" "}
+        {/* the RECORDED state, at a glance — before this chip the only place
+            it showed was the select at the bottom of the card, and a pick
+            pending there hides it entirely */}
+        <Chip status={carried} />
       </p>
       {header}
 
@@ -1969,12 +2024,38 @@ export function Fiche({
               <p>
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${subject}\n\n${body}`);
+                  onClick={async () => {
+                    // clipboard access can be REFUSED — a permissions
+                    // policy, an embedded browser — and unawaited, the
+                    // refusal was silent: the volunteer pasted nothing into
+                    // their mailer with the screen saying nothing at all
+                    try {
+                      await navigator.clipboard.writeText(
+                        `${subject}\n\n${body}`,
+                      );
+                      setCopied({ tone: "ok", text: "Copié." });
+                    } catch {
+                      setCopied({
+                        tone: "erreur",
+                        text:
+                          "Impossible de copier ici — sélectionnez le texte " +
+                          "à la main.",
+                      });
+                    }
                   }}
                 >
                   <Emoji>📋 </Emoji>Copier
                 </button>{" "}
+                {/* pre-exists, text-change only: a region inserted with its
+                    text is a region nothing announces */}
+                <span
+                  role="status"
+                  className={
+                    copied?.tone === "erreur" ? "retour-refus" : "confirmation"
+                  }
+                >
+                  {copied?.text ?? ""}
+                </span>{" "}
                 {valid.length > 0 && (
                   <a
                     className="bouton secondaire"
@@ -2074,7 +2155,17 @@ export function Fiche({
                         onChange={(e) => setNoteDraft(e.target.value)}
                       />
                     </label>
-                    <p>
+                    {/* KEYED, like the two <p> of the other branch: aligned
+                        by position, React REUSES the DOM node across the
+                        swap — « Modifier » (yellow link, no background)
+                        became « Enregistrer la note » (dark on yellow) in
+                        the SAME element, and the shared 150 ms colour
+                        transition then animated the morph. An axe scan
+                        racing those milliseconds measured the blend and
+                        blamed the button, a different ratio each run. A key
+                        makes the swap a REPLACEMENT, and a fresh node paints
+                        its first frame with no transition at all. */}
+                    <p key="editeur">
                       <button
                         type="button"
                         aria-disabled={notesBusy || undefined}
@@ -2134,7 +2225,7 @@ export function Fiche({
                          act removes a line from a register the whole campaign
                          reads, and a browser dialogue is one no test can drive
                          and jsdom does not implement. */
-                      <p className="note-actions">
+                      <p key="confirmer" className="note-actions">
                         <strong>Supprimer cette note ?</strong>{" "}
                         <button
                           type="button"
@@ -2170,7 +2261,7 @@ export function Fiche({
                       </p>
                     ) : (
                       (rights.edit || rights.delete) && (
-                        <p className="note-actions">
+                        <p key="actions" className="note-actions">
                           {rights.edit && onEditNote && (
                             <button
                               type="button"
@@ -2247,17 +2338,29 @@ export function Fiche({
             />
           </label>
           {/* aria-disabled, never disabled: `disabled` on the focused
-              button drops keyboard focus to <body> in every browser */}
+              button drops keyboard focus to <body> in every browser.
+              The LABEL is the intention: three acts share this button —
+              status, note, both — and one word for the three is how a
+              volunteer adding a note wondered what would happen to the
+              status beside it. */}
           <button
             type="button"
             onClick={save}
             aria-disabled={saving || undefined}
           >
-            {saving ? "Enregistrement…" : "Enregistrer"}
+            {saving
+              ? "Enregistrement…"
+              : changed && note.trim() !== ""
+                ? "Enregistrer statut et note"
+                : changed
+                  ? "Enregistrer le statut"
+                  : note.trim() !== ""
+                    ? "Ajouter la note"
+                    : "Enregistrer"}
           </button>{" "}
           {/* always in the tree: a live region announces reliably only when
               its CONTENT changes, not when it appears with it */}
-          <span role="status" className="gris">
+          <span role="status" className={saved ? "confirmation" : "gris"}>
             {saved}
           </span>
         </div>

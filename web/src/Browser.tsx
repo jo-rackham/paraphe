@@ -8,6 +8,7 @@ import { Proposition } from "./BrowserProposition.tsx";
 import {
   Alerte,
   type CardDraft,
+  Chargement,
   EMPTY_CFG,
   Fiche,
   focusContenu,
@@ -851,7 +852,7 @@ export default function Browser() {
               : ""}
           </span>
           {!ready ? (
-            <p role="status">Chargement…</p>
+            <Chargement />
           ) : (
             <>
               {/* A ?org= link SAYS a campaign is on offer; it does not go and

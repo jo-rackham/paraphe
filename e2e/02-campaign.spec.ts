@@ -99,7 +99,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("écrit ce matin, réponse promise");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page.locator(".barre-statut").getByRole("button").click();
 
       await expect(
         page.getByRole("heading", { name: "Historique" }),

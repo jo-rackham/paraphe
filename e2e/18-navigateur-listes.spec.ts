@@ -25,9 +25,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("noté avant le changement de liste");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(
         page.getByText("noté avant le changement de liste"),
       ).toBeVisible();

@@ -41,7 +41,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("courriel parti ce matin");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("courriel parti ce matin")).toBeVisible();
       // …and the SAVE is finished, which the history appearing does not say:
       // the line is drawn from state written INSIDE the awaited call, while
@@ -61,7 +61,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("aple lundi");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("aple lundi")).toBeVisible();
       await expect(
         page.getByRole("textbox", { name: "Note", exact: true }),
@@ -121,7 +121,7 @@ test.describe
 
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
       await note.fill("premier contact");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(note).toHaveValue("");
 
       // what a weak connection does to ONE of the two writes
@@ -138,7 +138,7 @@ test.describe
         .getByLabel("Statut")
         .selectOption({ label: "A signé (publié par le CC)" });
       await note.fill("dit avoir signé");
-      await page.getByRole("button", { name: "Enregistrer" }).click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(note).toHaveValue("");
       await expect(page.getByText("dit avoir signé")).toBeVisible();
 

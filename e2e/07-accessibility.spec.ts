@@ -26,10 +26,19 @@ async function checkA11y(page: Page, screen: string) {
   const { violations } = await new AxeBuilder({ page })
     .withTags(TAGS)
     .analyze();
+  // The check's DATA rides in the message (fg/bg/ratio for a contrast
+  // finding): a bare selector sent one hunt through computed styles that
+  // were already correct again by the time anyone looked — the measured
+  // colours are what named a 150 ms transition racing the scan.
   const readable = violations.map(
     (v) =>
       `${screen} — ${v.id} (${v.impact}): ${v.help}\n` +
-      v.nodes.map((n) => `    ${n.target.join(" ")}`).join("\n"),
+      v.nodes
+        .map(
+          (n) =>
+            `    ${n.target.join(" ")} :: ${JSON.stringify(n.any[0]?.data)}`,
+        )
+        .join("\n"),
   );
   expect(readable).toEqual([]);
 
@@ -97,9 +106,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("noté pour le scan");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("noté pour le scan")).toBeVisible();
       await checkA11y(page, "browser:fiche avec historique");
 
@@ -218,7 +225,11 @@ test.describe
     });
 
     test.describe(() => {
-      test.use({ colorScheme: "dark" });
+      // reducedMotion re-affirmed BESIDE the scheme: the style sampling
+      // that diagnosed the button morph saw live 150 ms transitions in this
+      // describe while the config-level reduce should have stilled them —
+      // whatever the merge rule, stating both here costs nothing
+      test.use({ colorScheme: "dark", reducedMotion: "reduce" });
       test("browser mode in dark: the hand-defined palette holds", async ({
         page,
       }) => {
@@ -236,9 +247,7 @@ test.describe
         await page
           .getByRole("textbox", { name: "Note", exact: true })
           .fill("noté pour le scan");
-        await page
-          .getByRole("button", { name: "Enregistrer", exact: true })
-          .click();
+        await page.locator(".barre-statut").getByRole("button").click();
         await expect(page.getByText("noté pour le scan")).toBeVisible();
         await page
           .getByRole("button", { name: "Modifier la note 1 du" })
@@ -365,7 +374,11 @@ test.describe
     // all THREE modes — browser mode alone left the two screens a volunteer
     // spends the campaign on unscanned in the dark.
     test.describe(() => {
-      test.use({ colorScheme: "dark" });
+      // reducedMotion re-affirmed BESIDE the scheme: the style sampling
+      // that diagnosed the button morph saw live 150 ms transitions in this
+      // describe while the config-level reduce should have stilled them —
+      // whatever the merge rule, stating both here costs nothing
+      test.use({ colorScheme: "dark", reducedMotion: "reduce" });
 
       test("team mode in dark", async ({ page }) => {
         const origin = campaignOrigin(FIRST_CAMPAIGN);

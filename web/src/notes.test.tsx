@@ -114,6 +114,24 @@ const click = (label: string) =>
     button(label).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
+/** The bar's own save, found by its PLACE: the label names the act now —
+ *  statut, note, both — and moves with the intention. */
+const saveButton = () =>
+  container.querySelector<HTMLButtonElement>(".barre-statut button")!;
+const clickSave = () =>
+  act(async () => {
+    saveButton().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+/** Picks a status in the bar's select. The save button refuses a press with
+ *  nothing to file, so a test that wants a request in flight declares its
+ *  intention first. */
+const pick = (value: string) =>
+  act(async () => {
+    const s = container.querySelector("select")!;
+    s.value = value;
+    s.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
 const noteEditor = () =>
   [...container.querySelectorAll("label")]
     .find((l) => l.textContent?.startsWith("Texte de la note"))
@@ -275,7 +293,7 @@ describe("correcting a line", () => {
     await flush();
 
     expect(select().value).toBe("to_call_back");
-    await click("Enregistrer");
+    await clickSave();
     await flush();
     expect(filed).toEqual(["to_call_back"]);
   });
@@ -500,7 +518,7 @@ describe("removing a line", () => {
       s.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(select().value).toBe("to_call_back");
-    await click("Enregistrer");
+    await clickSave();
     await flush();
     expect(select().value).toBe("to_call_back");
 
@@ -545,7 +563,7 @@ describe("removing a line", () => {
       select().value,
       "the card stood still and the choice was taken anyway",
     ).toBe("email_sent");
-    await click("Enregistrer");
+    await clickSave();
     await flush();
     expect(filed).toEqual(["email_sent"]);
   });
@@ -637,7 +655,14 @@ describe("a pick belongs to the mayor it was made on", () => {
       "the next mayor's card shows a status nobody chose for them",
     ).toBe("to_contact");
 
-    await click("Enregistrer");
+    // a virgin press files nothing any more, so the act here is a NOTE —
+    // which also pins that a note alone files under the CARD's status,
+    // never under a pick from another card
+    const noteField = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith("Note"))!
+      .querySelector("textarea")!;
+    await type(noteField, "sans toucher au statut");
+    await clickSave();
     await flush();
     expect(filed).toEqual(["01002:to_contact"]);
   });
@@ -722,7 +747,8 @@ describe("a pick belongs to the mayor it was made on", () => {
         <DeuxFiches filed={filed} wiring={{ onStatus: () => inFlight }} />,
       );
     });
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
 
     await click("fiche suivante");
     const field = [...container.querySelectorAll("label")]
@@ -792,7 +818,8 @@ describe("a pick belongs to the mayor it was made on", () => {
         <DeuxFiches filed={filed} wiring={{ onStatus: () => inFlight }} />,
       );
     });
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
     await click("fiche suivante");
 
     // found by its place, not by its label — the label IS what is wrong
@@ -803,6 +830,7 @@ describe("a pick belongs to the mayor it was made on", () => {
       save.textContent,
       "the next card's button is busy with the previous card's request",
     ).toBe("Enregistrer");
+    await pick("to_call_back");
     await act(async () => {
       save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -835,7 +863,7 @@ describe("a pick belongs to the mayor it was made on", () => {
         .find((l) => l.textContent?.startsWith("Note"))!
         .querySelector("textarea")!;
     await type(field(), "premier passage");
-    await click("Enregistrer");
+    await clickSave();
 
     await click("fiche suivante");
     await click("fiche précédente");
@@ -874,9 +902,11 @@ describe("a pick belongs to the mayor it was made on", () => {
         />,
       );
     });
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
     await click("fiche suivante");
-    await click("Enregistrer");
+    await pick("to_call_back");
+    await clickSave();
     expect(filed).toHaveLength(2);
 
     // the first card's request lands; the second is still out
@@ -917,7 +947,8 @@ describe("a pick belongs to the mayor it was made on", () => {
       onEditNote: async () => {},
       onStatus: () => inFlight,
     });
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
 
     await click("Modifier la note 1 du 2026-01-02T10:00");
     await type(noteEditor()!, "corrigée pendant ce temps");
@@ -932,7 +963,11 @@ describe("a pick belongs to the mayor it was made on", () => {
     const save = container.querySelector<HTMLButtonElement>(
       ".barre-statut button",
     )!;
-    expect(save.textContent, "the save never came back").toBe("Enregistrer");
+    // « Enregistrer le statut » and not « Enregistrement… »: the pick still
+    // stands (this harness never refreshes the card), and the label names it
+    expect(save.textContent, "the save never came back").toBe(
+      "Enregistrer le statut",
+    );
   });
 
   // The same the other way round: the correction lands, and the editor it
@@ -952,7 +987,8 @@ describe("a pick belongs to the mayor it was made on", () => {
     await type(noteEditor()!, "corrigée");
     await click("Enregistrer la note");
 
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
     await flush();
     await act(async () => {
       release();
@@ -988,7 +1024,13 @@ describe("a pick belongs to the mayor it was made on", () => {
     await click("Supprimer la note 1 du 2026-01-02T10:00");
     await click("Confirmer");
 
-    await click("Enregistrer");
+    // the removal just DROPPED the pick, so a bare press has nothing to
+    // file: the overlapping save is a note, which touches no pick
+    const field = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith("Note"))!
+      .querySelector("textarea")!;
+    await type(field, "pendant la suppression");
+    await clickSave();
     await flush();
     await act(async () => {
       refuse(new Error("Aucune note à supprimer ici."));
@@ -1024,7 +1066,7 @@ describe("a pick belongs to the mayor it was made on", () => {
         .find((l) => l.textContent?.startsWith("Note"))!
         .querySelector("textarea")!;
     await type(field(), "premier envoi");
-    await click("Enregistrer");
+    await clickSave();
 
     // still on the phone, still writing
     await type(field(), "premier envoi — puis rappel à 15 h");
@@ -1281,7 +1323,7 @@ describe("a pick belongs to the mayor it was made on", () => {
       select().value,
       "the choice made during the removal was dropped in silence",
     ).toBe("refused");
-    await click("Enregistrer");
+    await clickSave();
     await flush();
     expect(filed).toEqual(["refused"]);
   });
@@ -1295,13 +1337,14 @@ describe("a pick belongs to the mayor it was made on", () => {
     await act(() => {
       root.render(<DeuxFiches filed={filed} />);
     });
-    await click("Enregistrer");
+    await pick("email_sent");
+    await clickSave();
     await flush();
-    expect(text()).toContain("Enregistré.");
+    expect(text()).toContain("Statut enregistré.");
 
     await click("fiche suivante");
     expect(text(), "the confirmation followed the volunteer").not.toContain(
-      "Enregistré.",
+      "Statut enregistré.",
     );
   });
 

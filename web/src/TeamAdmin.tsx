@@ -3,6 +3,7 @@ import * as API from "./api.ts";
 import {
   ChampLogo,
   ChampsCampagne,
+  Chargement,
   campaignLabel,
   focusContenu,
   gestionLabel,
@@ -594,7 +595,7 @@ export function GestionEquipe({
     reload();
   }, [reload]);
 
-  if (!data) return <p role="status">Chargement…</p>;
+  if (!data) return <Chargement />;
   const coordination = me.account.role === "coordination";
 
   const createAccount = async (e: React.FormEvent) => {

@@ -3,6 +3,7 @@ import * as API from "./api.ts";
 import { FormulaireConnexion } from "./Connexion.tsx";
 import {
   Alerte,
+  Chargement,
   CompteurResultats,
   httpUrl,
   Marque,
@@ -149,7 +150,7 @@ export default function Instance({ config }: { config: InstanceConfig }) {
       <RenderGuard>
         <main id="contenu" tabIndex={-1}>
           <Alerte message={message} onClose={() => setMessage(null)} />
-          {!ready && <p role="status">Chargement…</p>}
+          {!ready && <Chargement />}
           {ready && me && <Moderation onMessage={setMessage} />}
           {ready && !me && view === "accueil" && (
             <Accueil config={config} onDemande={() => setView("demande")} />

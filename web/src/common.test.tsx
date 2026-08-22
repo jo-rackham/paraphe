@@ -322,6 +322,13 @@ describe("Fiche", () => {
         />,
       );
     });
+    // a pick first: a press with nothing to file is refused before the
+    // guard this test is about even runs
+    await act(async () => {
+      const s = container.querySelector("select")!;
+      s.value = "email_sent";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     const save = [...container.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("Enregistrer"),
     );
@@ -331,5 +338,107 @@ describe("Fiche", () => {
       save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(onStatus).toHaveBeenCalledTimes(1);
+  });
+
+  // NOTHING TO SAVE IS SAID, NOT WRITTEN: pressed with no new status and no
+  // note, this button used to append a line to the history — same status,
+  // empty note — a register entry nobody meant, on a record the whole
+  // campaign reads.
+  it("refuses a press with nothing to file, out loud, and recovers", async () => {
+    const onStatus = vi.fn(async () => {});
+    await act(async () => {
+      root.render(
+        <Fiche
+          mayor={SENDABLE}
+          cfg={EMPTY_CFG}
+          onBack={() => {}}
+          onStatus={onStatus}
+        />,
+      );
+    });
+    const save = () =>
+      container.querySelector<HTMLButtonElement>(".barre-statut button")!;
+    expect(save().textContent).toBe("Enregistrer");
+    await act(async () => {
+      save().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Rien à enregistrer");
+
+    // …and the guard was RELEASED on the way out: a refusal that kept it
+    // armed would swallow every press after this one
+    await act(async () => {
+      const s = container.querySelector("select")!;
+      s.value = "email_sent";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      save().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStatus).toHaveBeenCalledWith("email_sent", "");
+    // the refusal leaves with the act that answers it
+    expect(container.textContent).not.toContain("Rien à enregistrer");
+    expect(container.textContent).toContain("Statut enregistré.");
+  });
+
+  // The label NAMES the act — statut, note, both — and a note alone files
+  // under the CARD's status: adding an observation must not silently commit
+  // a status nobody confirmed.
+  it("files a note alone under the card's own status, and says so", async () => {
+    const onStatus = vi.fn(async () => {});
+    await act(async () => {
+      root.render(
+        <Fiche
+          mayor={SENDABLE}
+          cfg={EMPTY_CFG}
+          status="email_sent"
+          onBack={() => {}}
+          onStatus={onStatus}
+        />,
+      );
+    });
+    const save = () =>
+      container.querySelector<HTMLButtonElement>(".barre-statut button")!;
+    const note = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith("Note"))!
+      .querySelector("textarea")!;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      set?.call(note, "le secrétariat rappelle jeudi");
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(save().textContent).toBe("Ajouter la note");
+
+    await act(async () => {
+      save().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStatus).toHaveBeenCalledWith(
+      "email_sent",
+      "le secrétariat rappelle jeudi",
+    );
+    expect(container.textContent).toContain("Note ajoutée.");
+
+    // with a PICK as well, the label says both and the confirmation names
+    // both
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      set?.call(note, "a promis de signer");
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+      const s = container.querySelector("select")!;
+      s.value = "promised";
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(save().textContent).toBe("Enregistrer statut et note");
+    await act(async () => {
+      save().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStatus).toHaveBeenLastCalledWith("promised", "a promis de signer");
+    expect(container.textContent).toContain("Statut et note enregistrés.");
   });
 });

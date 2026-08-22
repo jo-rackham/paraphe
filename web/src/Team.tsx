@@ -10,6 +10,7 @@ import { FormulaireConnexion } from "./Connexion.tsx";
 import {
   Alerte,
   type CardDraft,
+  Chargement,
   Fiche,
   Guide,
   gestionLabel,
@@ -351,7 +352,7 @@ export default function Team({ config }: { config: ServerConfig }) {
     // first message they will carry
     return (
       <Coquille cfg={cfg}>
-        <p role="status">Chargement…</p>
+        <Chargement />
       </Coquille>
     );
   if (!me) {

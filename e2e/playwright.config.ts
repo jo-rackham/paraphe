@@ -30,6 +30,14 @@ export default defineConfig({
     baseURL: API_ORIGIN,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // The interface moves now (arrival slides, hover eases). Reduce is the
+    // suite's posture: it exercises the one experience no test covered —
+    // what a user who asked for reduced motion gets — and it keeps the CSS
+    // reduced-motion block honest, since a rule that escapes it shows here.
+    // It is NOT what fixed the scan race the axe sweep once caught: that
+    // was React morphing one button into another through a shared colour
+    // transition, keyed apart at the source (see Fiche's history rows).
+    reducedMotion: "reduce",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

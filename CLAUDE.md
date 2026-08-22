@@ -1463,6 +1463,38 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   state its writer READ, and a card somebody has moved since is a 409 rather
   than a silent overwrite. That refuses nobody a mayor; it refuses writing
   over an answer nobody saw.
+  **The save button NAMES its act, and a press with nothing to file is
+  refused out loud.** One button files three intentions — a status, a note,
+  both — and one word for the three (« Enregistrer ») is how adding a note
+  read as touching the status beside it. The label derives from the pick and
+  the field (« Enregistrer le statut », « Ajouter la note », « Enregistrer
+  statut et note »), the confirmation names the same act, and a note alone
+  files under the CARD's carried status — never under a pick, so an
+  observation cannot silently commit an outcome nobody confirmed. The empty
+  press used to APPEND a line — same status, empty note — to a register the
+  whole campaign reads; it now says « Rien à enregistrer » and releases its
+  guard on the way out. The server write is byte-identical in every branch
+  that still writes: the decoupling is the screen's. Tests press the bar's
+  ONE button through `.barre-statut`, because the label is the moving part.
+  A `Chip` beside the commune shows the RECORDED status at a glance — the
+  select at the bottom was the only place it showed, and a pending pick
+  hides even that. « Copier » answers (« Copié. », or a refusal): clipboard
+  access can be denied, and unawaited it failed in silence.
+  **Motion never blends what axe reads.** The arrival animation is a slide
+  with NO opacity ramp, and opacity is not in the shared transition list —
+  aria-disabled flips it on every busy button, and whoever measures contrast
+  mid-ease reads a blend. **The morph is the trap the transitions made
+  new**: two branches whose buttons align by position share ONE DOM node —
+  React reuses it — so « Modifier » (yellow link, no background) BECAME
+  « Enregistrer la note » in place, and the shared colour transition
+  animated the swap; the axe sweep, racing those 150 ms, measured the blend
+  and blamed the button with a different ratio each run. The history row's
+  three `<p>` are KEYED apart for that reason: a replacement paints its
+  first frame with no transition at all. Diagnosed by sampling computed
+  styles DURING the scan — at rest every value was correct — and the a11y
+  helper now prints axe's own fg/bg/ratio with each finding. The suite runs
+  `reducedMotion: "reduce"`: the one experience nothing exercised, and the
+  guard that keeps the CSS reduced-motion block honest.
   **The write lock outlived the wall by one round, and the screen is what
   caught it.** Removing the team wall from the READS left
   `assignments.volunteer IS NULL OR assignments.volunteer=$n` standing in the

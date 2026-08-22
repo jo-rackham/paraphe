@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Mode } from "./api.ts";
 import * as API from "./api.ts";
 import Browser from "./Browser.tsx";
-import { useViewFocus } from "./common.tsx";
+import { Chargement, useViewFocus } from "./common.tsx";
 import Instance from "./Instance.tsx";
 import Team from "./Team.tsx";
 
@@ -69,7 +69,7 @@ export default function App() {
           <span role="alert">{outage ? outage.message : ""}</span>
         </p>
         {mode === null ? (
-          <p role="status">Chargement…</p>
+          <Chargement />
         ) : (
           <>
             {/* above all no fallback to browser mode: the work would go

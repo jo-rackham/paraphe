@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as API from "./api.ts";
 import {
+  Chargement,
   focusContenu,
   holdFocusThrough,
   label,
@@ -206,7 +207,7 @@ export function Moderation({ onMessage }: { onMessage: (m: Message) => void }) {
     await load();
   };
 
-  if (!queue) return <p role="status">Chargement…</p>;
+  if (!queue) return <Chargement />;
   const pending = queue.requests.filter((d) => d.state === "pending");
   const decided = queue.requests.filter((d) => d.state !== "pending");
 

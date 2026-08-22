@@ -56,9 +56,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("noté hors ligne");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("noté hors ligne")).toBeVisible();
 
       // the arrow is decorative (aria-hidden): not part of the button's name
@@ -87,9 +85,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("courriel parti");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("courriel parti")).toBeVisible();
       // …and the SAVE is finished, which the history appearing does not say:
       // the line is drawn from state written inside the awaited call, while
@@ -103,9 +99,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("aple lundi");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("aple lundi")).toBeVisible();
       await expect(
         page.getByRole("textbox", { name: "Note", exact: true }),
@@ -154,9 +148,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("écrit dans la première fenêtre");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(
         page.getByText("écrit dans la première fenêtre"),
       ).toBeVisible();
@@ -220,15 +212,11 @@ test.describe
 
       await page.getByLabel("Statut").selectOption({ label: "Email envoyé" });
       await note.fill("la plus ancienne");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(note).toHaveValue("");
       await page.getByLabel("Statut").selectOption({ label: "À rappeler" });
       await note.fill("la plus récente");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(note).toHaveValue("");
       const card = page.url();
 
@@ -358,9 +346,7 @@ test.describe
       await page
         .getByRole("textbox", { name: "Note", exact: true })
         .fill("avant la sauvegarde");
-      await page
-        .getByRole("button", { name: "Enregistrer", exact: true })
-        .click();
+      await page.locator(".barre-statut").getByRole("button").click();
       await expect(page.getByText("avant la sauvegarde")).toBeVisible();
 
       // Self-contained on purpose: Playwright hands each test a fresh

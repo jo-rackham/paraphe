@@ -44,6 +44,9 @@
   /* cards float a hair off the page in light; in dark the border alone
      carries the edge — there, the shadow colour goes transparent */
   --ombre: light-dark(rgba(20, 18, 16, .06), transparent);
+  /* the outcome of an act, said in text beside its control: the status
+     palette's own green, at text-contrast strength in both schemes */
+  --ok-txt: light-dark(#15803d, #4ade80);
   /* status dots, one hue per state, stepped per scheme */
   --pastille-gris: light-dark(#64748b, #94a3b8);
   --pastille-bleu: light-dark(#2563eb, #60a5fa);
@@ -206,6 +209,9 @@ button, .bouton { background: var(--accent); color: var(--accent-txt); border: 0
   border-radius: .45rem; font-size: 1rem; font-weight: 600; cursor: pointer;
   text-decoration: none; display: inline-block; }
 button:hover, .bouton:hover { background: var(--jaune-vif); }
+/* a hair of lift under the pointer — never on .lien, which reads as text */
+button:not(.lien):not(:disabled):not([aria-disabled="true"]):hover,
+.bouton:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, .14); }
 /* the press: the bottom border is the button's thickness, and clicking
    compresses it — total height stays, the top edge dips one pixel */
 button:not(.lien):active:not(:disabled), .bouton:active {
@@ -223,6 +229,9 @@ input[type=text], input[type=password], input[type=email], select, textarea {
   color: var(--texte); }
 input:focus, select:focus, textarea:focus {
   outline: 3px solid var(--focus); outline-offset: 1px; }
+/* the border firms up under the pointer: a field is where you can type */
+input:hover:not(:focus), select:hover:not(:focus),
+textarea:hover:not(:focus) { border-color: var(--texte-sec); }
 /* currentColor: the text already contrasts with its background, wherever
    the control sits — dark header, yellow button, link in a paragraph */
 button:focus-visible, a:focus-visible, summary:focus-visible {
@@ -236,10 +245,24 @@ details { border: 1px solid var(--trait); border-radius: .6rem;
           background: var(--carte); margin: .7rem 0;
           box-shadow: 0 1px 2px var(--ombre); }
 details summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600;
-                  border-radius: .6rem; }
+                  border-radius: .6rem;
+                  display: flex; align-items: center; gap: .55rem;
+                  /* the default marker goes; the chevron below says the
+                     state and TURNS, which the triangle never did */
+                  list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+/* content: "" — a pseudo-element with text would enter the accessible name;
+   the expanded state itself is the element's own, announced natively */
+details summary::before { content: ""; flex: none; width: .42em;
+  height: .42em; margin-top: -.15em;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform .18s ease; }
+details[open] summary::before { transform: rotate(45deg); margin-top: -.3em; }
 details summary:hover { background: var(--fond); }
 details[open] summary { border-radius: .6rem .6rem 0 0; }
 details .dedans { padding: 0 1rem 1rem; }
+/* the content eases in on open — colours and opacity only, no layout */
+details[open] .dedans { animation: apparition .18s ease-out; }
 .gris { color: var(--texte-sec); font-size: .9rem; }
 /* deactivated account row: muted to the secondary grey, which still reads
    4.5:1 — the state itself is written out, never carried by the fade */
@@ -288,6 +311,10 @@ html { scroll-padding-bottom: 8rem; }
 /* on a phone the bar stays compact: status and save on one line, the note
    on two lines below — a FIXED height, because growing it on focus shifted
    fifty pixels of layout under the very finger that just tapped it */
+/* The save button NAMES the act (statut / note / both), so its label moves
+   while typing: a reserved width keeps the bar from jumping under the very
+   keystroke that changes it. */
+.barre-statut .champs > button { min-width: 13.5rem; text-align: center; }
 @media (max-width: 640px) {
   .barre-statut { padding-left: .6rem; padding-right: .6rem; }
   .barre-statut .champs { gap: .3rem .6rem; }
@@ -295,6 +322,12 @@ html { scroll-padding-bottom: 8rem; }
   .barre-statut label:first-child { flex: 1; }
   .barre-statut .note { flex-basis: 100%; order: 3; }
   .barre-statut textarea { height: 3.4rem; }
+  /* fields first, the act last — and full width, so the moving label has
+     room instead of reflowing the row */
+  .barre-statut .champs > button { flex-basis: 100%; order: 4;
+    min-width: 0; }
+  /* the outcome reads under the act that produced it */
+  .barre-statut .champs > span[role="status"] { order: 5; }
 }
 .note-item { border-left: 3px solid var(--jaune); padding: .2rem .8rem;
              margin: .5rem 0; }
@@ -413,3 +446,46 @@ footer .officiel { margin-top: .8rem; font-size: .8rem; }
 button:disabled, .bouton:disabled,
 button[aria-disabled="true"], .bouton[aria-disabled="true"] {
   opacity: .5; cursor: progress; }
+
+/* ---- Retours d'action ---------------------------------------------------
+   The outcome of an act, beside the control that did it: readable at a
+   glance, never grey-on-grey. Text colours clear 4.5:1 on the card in both
+   schemes (the green is the status palette's own, the red the alert's). */
+.confirmation { color: var(--ok-txt); font-weight: 600; font-size: .9rem; }
+.retour-refus { color: var(--alerte-erreur-trait); font-weight: 600;
+                font-size: .9rem; }
+
+/* The waiting state (Chargement): sentence plus indeterminate gauge. */
+.attente { max-width: 20rem; margin: 1.4rem 0; }
+.attente p { margin: 0 0 .35rem; color: var(--texte-sec); }
+
+/* ---- Mouvement ----------------------------------------------------------
+   One shared timing for the whole surface: hover, focus fills, chips,
+   collapsibles. Colours and shadows only — layout never animates, so
+   nothing shifts under a finger. */
+/* opacity is NOT in the list: aria-disabled flips it .5↔1 on every busy
+   button, and an easing opacity is a text mid-blend for whoever measures
+   contrast at that instant — the busy grey-out simply snaps */
+button, .bouton, a, summary, select, input, textarea, .chip, .lien,
+header .theme, tbody tr td {
+  transition: background-color .15s ease, border-color .15s ease,
+    color .15s ease, box-shadow .15s ease; }
+/* a message arriving slides in a hair — the region pre-exists, only its
+   class and text change, and assistive technology reads the text either
+   way */
+.alerte { animation: apparition .18s ease-out; }
+.confirmation:not(:empty), .retour-refus:not(:empty) {
+  animation: apparition .18s ease-out; display: inline-block; }
+/* movement only, NO fade: axe computes colour contrast through a running
+   opacity animation, and the scans race the very messages they audit — a
+   mid-fade alert read as low-contrast, intermittently. The slide carries
+   the arrival on its own. */
+@keyframes apparition {
+  from { transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+}

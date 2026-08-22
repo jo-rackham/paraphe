@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import * as API from "./api.ts";
-import { Chip, Emoji, TableMaires, useSubmitGuard } from "./common.tsx";
+import {
+  Chargement,
+  Chip,
+  Emoji,
+  TableMaires,
+  useSubmitGuard,
+} from "./common.tsx";
 import { LigneCarte } from "./LigneCarte.tsx";
 import type {
   Dashboard as DashboardData,
@@ -68,7 +74,7 @@ export function Tableau({ cfg, me, onError, onOpen, onMessage }: TableauProps) {
     reload();
   }, [reload]);
 
-  if (!data) return <p role="status">Chargement…</p>;
+  if (!data) return <Chargement />;
 
   const take = async () => {
     if (busy()) return; // a REF: state is a render behind

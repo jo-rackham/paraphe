@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as API from "./api.ts";
-import { CompteurResultats, STATUSES, TableMaires } from "./common.tsx";
+import {
+  Chargement,
+  CompteurResultats,
+  STATUSES,
+  TableMaires,
+} from "./common.tsx";
 import { LigneCarte } from "./LigneCarte.tsx";
 import * as M from "./messages.ts";
 import type { Facets, MayorCard } from "./types.ts";
@@ -185,11 +190,7 @@ export function ListeServeur({
           ))}
         </TableMaires>
         <div ref={sentinel} />
-        {loading && (
-          <p className="gris" role="status" style={{ textAlign: "center" }}>
-            Chargement…
-          </p>
-        )}
+        {loading && <Chargement />}
         {/*
           The role sits on a span holding the TEXT alone, as everywhere
           else: an interactive control inside a live region is re-read on
