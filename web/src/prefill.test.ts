@@ -256,7 +256,7 @@ describe("what counts as a campaign", () => {
   it.each([
     ["a single key", { candidat: "Camille Réel" }],
     ["a value that is not a string", { ...whole(), signataire: { evil: 1 } }],
-    ["an empty value", { ...whole(), contact_email: "   " }],
+    ["an empty required value", { ...whole(), candidat: "   " }],
   ])("refuses %s", async (_case, campaign) => {
     withDomain("paraphe.fr");
     vi.stubGlobal("fetch", () =>
@@ -282,7 +282,7 @@ describe("what counts as a campaign", () => {
   // filled nothing, leaving « Prénom NOM » on screen under a « campagne non
   // configurée » banner — on a campaign whose team version substitutes
   // correctly.
-  it.each(["contact_tel", "site", "ville_envoi"])(
+  it.each(["contact_email", "contact_tel", "site", "ville_envoi"])(
     "accepts a campaign that left %s empty, as the API does",
     async (key) => {
       withDomain("paraphe.fr");

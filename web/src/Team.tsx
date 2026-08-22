@@ -716,15 +716,15 @@ function Connexion({
               discovered by paying for it. */}
           {cfg.unfilled?.length > 0 ? (
             <p>
-              Cette campagne n'a pas encore rempli ses textes : la version
-              navigateur s'ouvrira avec des valeurs d'exemple, à vous de les
-              renseigner. <strong>N'envoyez rien</strong> avant.
+              Cette campagne n'a pas encore renseigné toutes ses informations :
+              la version navigateur s'ouvrira avec des valeurs d'exemple, à vous
+              de les renseigner. <strong>N'envoyez rien</strong> avant.
             </p>
           ) : (
             <p>
-              Les textes de cette campagne — candidat, contacts, signature — y
-              sont déjà remplis, repris de cette page. Tout reste sur votre
-              poste.
+              Les informations de cette campagne — candidat, contacts, signature
+              — y sont déjà remplies, reprises de cette page. Tout reste sur
+              votre poste.
             </p>
           )}
           <p>

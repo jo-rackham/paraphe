@@ -48,7 +48,8 @@ var CampaignEnv = map[string]string{
 // noyau/campaign-optional.json is the referee both languages answer to, and
 // it carries the reasoning; noyau/messages.ts holds the other copy.
 var optionalCampaignKeys = map[string]bool{
-	"contact_tel": true, "site": true, "ville_envoi": true,
+	"contact_email": true, "contact_tel": true, "site": true,
+	"ville_envoi": true,
 }
 
 // Values of the shipped template: letting them through would send

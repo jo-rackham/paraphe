@@ -952,8 +952,8 @@ export default function Browser() {
                     </>
                   ) : (
                     <>
-                      <strong>Signez de votre nom.</strong> Les textes de la
-                      campagne sont là, mais c'est <strong>vous</strong> qui
+                      <strong>Signez de votre nom.</strong> Les informations de
+                      la campagne sont là, mais c'est <strong>vous</strong> qui
                       envoyez : renseignez votre nom et votre qualité dans « Ma
                       campagne ». Sans cela les messages partiraient sous un nom
                       d'exemple.

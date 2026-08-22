@@ -658,14 +658,22 @@ One instance can host several campaigns, one per subdomain.
   `PARAPHE_CANDIDATE` would undo the edit silently, which is the failure the
   campaign keys and the batch size beside them already describe.
 - **Not filling a field must not block a campaign; leaving the TEMPLATE in it
-  must.** Three of the nine keys are the campaign's own contact details
-  (`contact_tel`, `site`, `ville_envoi`), and a small team has the right to
-  give a telephone number to nobody, to run without a website, and not to
-  name the town its letters leave from. Empty, they no longer raise the
-  "campaign not configured" banner or stop the mass mailing. Still carrying
+  must.** Four of the nine keys are the campaign's own contact details
+  (`contact_email`, `contact_tel`, `site`, `ville_envoi`), and a small team
+  has the right to give a telephone number to nobody, to publish no contact
+  address, to run without a website, and not to name the town its letters
+  leave from — the four live only in the sign-off line, whose empty parts
+  `render` already drops. Empty, they no longer raise the "campaign not
+  configured" banner or stop the mass mailing. Still carrying
   `06 00 00 00 00` they do, whether optional or not: that number reaches five
   hundred mayors verbatim, which is the exact failure the gate exists for and
-  has nothing to do with declining to give one's own.
+  has nothing to do with declining to give one's own. `contact_email` joined
+  the list late, discovered on production: a campaign that had filled
+  everything but it read « n'a pas encore rempli ses informations » on its
+  own sign-in page, and its browser version pre-filled nothing — over a key
+  whose absence changes not one rendered character. The other five are what
+  the doctrine actually names — the candidate, what is said about them, who
+  signs — and none of them is a contact detail.
   The list is `noyau/campaign-optional.json`, the referee both languages
   answer to — the same dispositif as `campaign-env.json`, because
   `noyau/messages.ts` and `api/config.go` each hold a copy and a copy drifts:

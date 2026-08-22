@@ -273,15 +273,16 @@ func TestOptionalCampaignKeysMatchTheSharedList(t *testing.T) {
 }
 
 // The rule the list exists for, asserted on both halves: a campaign that
-// gives no telephone, no website and no sending town is configured; one that
-// left the shipped template in any of them is NOT, and that is what would
-// reach five hundred mayors verbatim.
+// gives no telephone, no contact address, no website and no sending town is
+// configured; one that left the shipped template in any of them is NOT, and
+// that is what would reach five hundred mayors verbatim.
 func TestAnEmptyOptionalKeyIsFilledButATemplateOneIsNot(t *testing.T) {
 	campaign := map[string]string{}
 	for _, k := range CampaignKeys {
 		campaign[k] = "une valeur réelle"
 	}
-	for _, k := range []string{"contact_tel", "site", "ville_envoi"} {
+	for _, k := range []string{"contact_email", "contact_tel", "site",
+		"ville_envoi"} {
 		campaign[k] = ""
 	}
 	if got := UnfilledKeys(campaign); len(got) != 0 {

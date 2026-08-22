@@ -44,7 +44,12 @@ export const CAMPAIGN_KEYS = [
 // Keys a campaign may leave EMPTY without being told it is unconfigured.
 // noyau/campaign-optional.json is the referee both languages answer to, and
 // it carries the reasoning; api/config.go holds the other copy.
-export const OPTIONAL_CAMPAIGN_KEYS = ["contact_tel", "site", "ville_envoi"];
+export const OPTIONAL_CAMPAIGN_KEYS = [
+  "contact_email",
+  "contact_tel",
+  "site",
+  "ville_envoi",
+];
 
 /**
  * WHO SIGNS is the sender's, not the campaign's — the two keys a campaign

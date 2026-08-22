@@ -103,9 +103,9 @@ describe("the account-less version, offered from a campaign", () => {
   // texts are already there — no step, no confirmation. That version
   // arrives filled in, so a card describing a screen to accept first would
   // be a promise nobody can keep.
-  it("promises a configured campaign that the texts are already in", async () => {
+  it("promises a configured campaign that its details are already in", async () => {
     await signInScreen(OFFERED);
-    expect(container.textContent).toContain("déjà remplis");
+    expect(container.textContent).toContain("déjà remplies");
   });
 
   // A campaign still at its template values pre-fills NOTHING: the API
@@ -115,7 +115,7 @@ describe("the account-less version, offered from a campaign", () => {
   // promise was one its reader discovered by paying for it.
   it("promises the pre-fill only where it will happen", async () => {
     await signInScreen(OFFERED, ["candidat", "signataire"]);
-    expect(container.textContent).not.toContain("déjà remplis");
+    expect(container.textContent).not.toContain("déjà remplies");
     expect(container.textContent).toContain("valeurs d'exemple");
     // …and the door is still open: the tool works, it is the pre-fill that
     // does not

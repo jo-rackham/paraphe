@@ -402,7 +402,7 @@ describe("the offer banner, rendered", () => {
     // version substitutes correctly: « Prénom NOM » on screen under a
     // « Campagne non configurée » banner, which reads as an engine that
     // failed to substitute rather than as two ends disagreeing.
-    it.each(["contact_tel", "site", "ville_envoi"])(
+    it.each(["contact_email", "contact_tel", "site", "ville_envoi"])(
       "takes a campaign that left %s empty, as the API says it may",
       async (key) => {
         await servedByCampaign({ ...OFFERED, [key]: "" });

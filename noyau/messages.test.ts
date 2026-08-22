@@ -486,7 +486,7 @@ describe("what an unconfigured campaign means", () => {
     );
   });
 
-  it("does not block a campaign that gives no telephone, site or town", () => {
+  it("does not block a campaign that gives no telephone, email, site or town", () => {
     const cfg = filled();
     for (const k of OPTIONAL_CAMPAIGN_KEYS) cfg[k] = "";
     expect(unfilledKeys(cfg)).toEqual([]);
@@ -523,6 +523,24 @@ describe("what an unconfigured campaign means", () => {
         expect(text).not.toMatch(/^ *— /m);
         expect(text).not.toMatch(/ — *$/m);
         expect(text).not.toContain(" —  — ");
+      }
+    });
+
+    // A campaign may give NO channel at all — every part of the line empty
+    // is a line nobody wrote, not a row of separators.
+    it("vanishes when every contact is declined", () => {
+      const cfg: Campaign = {
+        ...CFG,
+        contact_tel: "",
+        contact_email: "",
+        site: "",
+      };
+      for (const text of [
+        engine.email(ENDORSER, cfg).body,
+        engine.letter(ENDORSER, cfg),
+      ]) {
+        expect(text).not.toContain("—  —");
+        expect(text).not.toMatch(/^ *—+ *$/m);
       }
     });
 

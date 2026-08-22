@@ -245,7 +245,7 @@ function Accueil({
           </li>
           <li>
             Acceptée, la campagne reçoit son accès de coordination : elle
-            remplit ses textes, ouvre ses équipes locales, et le travail
+            renseigne ses informations, ouvre ses équipes locales, et le travail
             commence.
           </li>
         </ol>
