@@ -2408,13 +2408,28 @@ func TestThePublicCampaignLeaksNothingOperational(t *testing.T) {
 	// by nothing.
 	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
 	s, srv := testServer(t)
-	// a campaign at its template values pre-fills nothing
+	// A campaign at its template values pre-fills NO FIELDS — the block is
+	// omitted, or "Prénom NOM" spreads to volunteers with no way to know.
+	// Its TEXTS still travel: refused wholesale, a campaign that had
+	// rewritten its email but not finished its nine fields served nothing at
+	// all, and its browser version spoke the image's words while the team
+	// version spoke its own.
 	c := clientOn(t, srv, testSlug+".paraphe.test")
 	execAsMaintenance(t, s,
-		`UPDATE orgs SET campaign = campaign || '{"candidat":"Prénom NOM"}'::jsonb`)
-	if code, _ := c.call(http.MethodGet, "/api/campaign/public", nil); code != http.StatusConflict {
-		t.Errorf("an unconfigured campaign answered %d: it would spread "+
-			"\"Prénom NOM\" to volunteers with no way to know", code)
+		`UPDATE orgs SET campaign = campaign || '{"candidat":"Prénom NOM"}'::jsonb,
+		 templates = '{"email.txt":"OBJET: s\n\nCorps."}'::jsonb`)
+	code0, body0 := c.call(http.MethodGet, "/api/campaign/public", nil)
+	if code0 != http.StatusOK {
+		t.Fatalf("an unconfigured campaign answered %d: its texts no longer "+
+			"reach its own browser version", code0)
+	}
+	if _, present := body0["campaign"]; present {
+		t.Errorf("an unconfigured campaign served its fields: it would " +
+			"spread \"Prénom NOM\" to volunteers with no way to know")
+	}
+	if tpl, _ := body0["templates"].(map[string]any); tpl["email.txt"] == nil {
+		t.Errorf("the campaign's own texts are withheld with the fields: %v",
+			body0["templates"])
 	}
 
 	execAsMaintenance(t, s,

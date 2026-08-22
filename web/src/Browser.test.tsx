@@ -440,6 +440,47 @@ describe("the offer banner, rendered", () => {
       const seven = () =>
         Object.fromEntries(ADOPTED_KEYS.map((k) => [k, OFFERED[k]]));
 
+      // A CAMPAIGN STILL AT ITS TEMPLATE VALUES SERVES ITS TEXTS. The old
+      // 409 took them down with the nine fields: a campaign that had
+      // rewritten its email but not finished its configuration served
+      // nothing at all, and its browser version spoke the image's words
+      // while the team version spoke its own — measured on production,
+      // reported three times as « je n'ai toujours pas le template ».
+      it("follows the texts of a campaign whose fields are not filled yet", async () => {
+        window.history.replaceState({}, "", "/");
+        vi.stubGlobal("fetch", (url: string) =>
+          Promise.resolve(
+            String(url).startsWith("/api/campaign/public")
+              ? {
+                  ok: true,
+                  json: () =>
+                    // no `campaign` block: the server omits the nine
+                    Promise.resolve({
+                      slug: "sienne",
+                      name: "Camille Sienne",
+                      templates: TPL_V1,
+                    }),
+                }
+              : { ok: false, status: 404, json: () => Promise.resolve({}) },
+          ),
+        );
+        await act(async () => {
+          root.render(<Browser />);
+        });
+        await until(
+          () => text().includes("mis à jour depuis son site"),
+          "the texts land without the fields",
+        );
+        expect(await DB.readSetting("modeles_campagne", {})).toEqual(TPL_V1);
+        // the nine stay untouched — and the screen still asks for them
+        const stored = await DB.readSetting<Record<string, string>>(
+          "campagne",
+          {},
+        );
+        expect(stored.candidat ?? "").not.toBe(OFFERED.candidat);
+        expect(text()).toContain("Campagne non configurée");
+      });
+
       // THE ADOPTION ITSELF writes the layer and leaves the overlay empty.
       // Merged into the overlay instead — which is what it used to do — the
       // texts read as the volunteer's own writing, and the campaign's next

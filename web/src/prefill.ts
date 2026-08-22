@@ -36,7 +36,15 @@ import type { Campaign, Templates } from "./types.ts";
 export interface Offer {
   slug: string;
   name: string;
-  campaign: Campaign;
+  /**
+   * The nine fields, or NULL for a campaign still at its template values:
+   * the server omits the block rather than spread « Prénom NOM », and the
+   * rest of the offer stands — its texts are the campaign's real ones,
+   * validated at save, with nothing to withhold. The origin door follows
+   * the templates alone; the link door refuses the offer with a sentence,
+   * exactly as the old 409 did.
+   */
+  campaign: Campaign | null;
   /** the campaign's logo, as an absolute URL on the instance's media origin */
   logo: string;
   /**
@@ -46,6 +54,13 @@ export interface Offer {
    */
   templates: Templates;
 }
+
+/**
+ * An offer whose nine fields are present — what the LINK door hands over,
+ * and what adopting the fields requires. The origin door also meets the
+ * other kind, and follows its texts alone.
+ */
+export type ConfiguredOffer = Offer & { campaign: Campaign };
 
 /**
  * The templates an answer offers, and nothing else it happens to carry.
@@ -329,7 +344,7 @@ export function requestedSlug(search: string): string | null {
  * request the browser version makes to somewhere else, and it carries no
  * credentials.
  */
-export async function fetchCampaign(slug: string): Promise<Offer> {
+export async function fetchCampaign(slug: string): Promise<ConfiguredOffer> {
   // Checked HERE, where the host is built, not only in `requestedSlug` where
   // it happens to be checked today. This label is interpolated into a
   // hostname: a slug carrying a `@`, a `/` or a dot names a different
@@ -353,7 +368,17 @@ export async function fetchCampaign(slug: string): Promise<Offer> {
         `La campagne « ${slug} » n'a pas répondu (HTTP ${response.status}).`,
     );
   }
-  return readOffer(await response.json(), slug);
+  const offer = readOffer(await response.json(), slug);
+  // A LINK pre-fills the nine fields, and a campaign still at its template
+  // values has none to offer: the same sentence the server used to answer
+  // with a 409, said by the door that owes its reader one. The ORIGIN door
+  // has no fields to pre-fill either way and takes the texts alone.
+  if (offer.campaign === null) {
+    throw new Error(
+      "Cette campagne n'est pas encore configurée : rien à pré-remplir.",
+    );
+  }
+  return { ...offer, campaign: offer.campaign };
 }
 
 /**
@@ -379,32 +404,51 @@ export function readOffer(body: unknown, slug?: string): Offer {
     templates?: unknown;
   } | null;
   const campaign = answer?.campaign;
-  // Every key present and a STRING is this end's own question: a value that
-  // is not one replaced the whole screen with the error boundary.
-  const typed =
-    campaign &&
-    typeof campaign === "object" &&
-    CAMPAIGN_KEYS.every((k) => typeof campaign[k] === "string");
-  // WHETHER IT IS CONFIGURED is not this end's question to answer its own
-  // way. `unfilledKeys` is the referee both languages read — the API applied
-  // it before answering 200, the banner on this very screen reads it — and
-  // it says an EMPTY key is a choice where `campaign-optional.json` allows
-  // one, while a key still carrying « 06 00 00 00 00 » is not.
-  //
-  // Written here as « every key non-empty », the two ends disagreed about
-  // what a campaign is, and disagreed IN SILENCE: a campaign that had
-  // declined to give a telephone number, a website or a town of posting got
-  // a 200 saying « voici la campagne » and a browser version answering « ça
-  // ne ressemble pas à une campagne ». It pre-filled nothing and said
-  // nothing, so the volunteer read « Prénom NOM » under a « campagne non
-  // configurée » banner — on a campaign whose team version substitutes
-  // correctly.
-  const complete = typed && unfilledKeys(campaign as Campaign).length === 0;
-  if (!complete) {
+  // A campaign block ABSENT is a campaign still at its template values: the
+  // server omits the nine rather than spread « Prénom NOM », and the rest
+  // of the offer stands. Absent is not malformed — PROVIDED the answer
+  // NAMES its campaign, which the server always does: a captive portal's
+  // 200 with arbitrary JSON has no block and no slug either, and reading
+  // it as « not configured yet » would put a false sentence on a screen
+  // the broken-link message owns.
+  if (
+    campaign === undefined &&
+    !(typeof answer?.slug === "string" && validSlug(answer.slug))
+  ) {
     throw new Error(
-      "La réponse ne ressemble pas à une campagne complète. Un intermédiaire " +
-        "s'est peut-être intercalé — ne l'utilisez pas.",
+      "La réponse ne ressemble pas à une campagne complète. Un " +
+        "intermédiaire s'est peut-être intercalé — ne l'utilisez pas.",
     );
+  }
+  if (campaign !== undefined) {
+    // Every key present and a STRING is this end's own question: a value
+    // that is not one replaced the whole screen with the error boundary.
+    const typed =
+      campaign &&
+      typeof campaign === "object" &&
+      CAMPAIGN_KEYS.every((k) => typeof campaign[k] === "string");
+    // WHETHER IT IS CONFIGURED is not this end's question to answer its own
+    // way. `unfilledKeys` is the referee both languages read — the API
+    // applied it before serving the block, the banner on this very screen
+    // reads it — and it says an EMPTY key is a choice where
+    // `campaign-optional.json` allows one, while a key still carrying
+    // « 06 00 00 00 00 » is not.
+    //
+    // Written here as « every key non-empty », the two ends disagreed about
+    // what a campaign is, and disagreed IN SILENCE: a campaign that had
+    // declined to give a telephone number, a website or a town of posting
+    // got a 200 saying « voici la campagne » and a browser version
+    // answering « ça ne ressemble pas à une campagne ». It pre-filled
+    // nothing and said nothing, so the volunteer read « Prénom NOM » under
+    // a « campagne non configurée » banner — on a campaign whose team
+    // version substitutes correctly.
+    const complete = typed && unfilledKeys(campaign as Campaign).length === 0;
+    if (!complete) {
+      throw new Error(
+        "La réponse ne ressemble pas à une campagne complète. Un " +
+          "intermédiaire s'est peut-être intercalé — ne l'utilisez pas.",
+      );
+    }
   }
   // The name this campaign is KNOWN by, and the slug it answers at. Asked
   // through a link the slug is the one asked for, never the one the answer
@@ -428,7 +472,7 @@ export function readOffer(body: unknown, slug?: string): Offer {
   return {
     slug: which,
     name: String(answer?.name ?? which),
-    campaign,
+    campaign: campaign ?? null,
     logo,
     templates: offeredTemplates(answer?.templates),
   };

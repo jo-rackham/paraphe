@@ -15,6 +15,7 @@ import {
   fetchCampaign,
   instanceDomain,
   readAdoption,
+  readOffer,
   requestedSlug,
   sameAdoptedFields,
   sameTemplates,
@@ -196,6 +197,29 @@ describe("fetching the proposed campaign", () => {
     expect(seen, "a forged slug reached the network").toEqual([]);
   });
 
+  // A campaign still at its template values serves its TEXTS — the server
+  // omits the nine rather than spread « Prénom NOM », and refused wholesale
+  // it took the campaign's own templates down with it. The LINK door still
+  // owes its reader the old 409's sentence: a link pre-fills the nine, and
+  // this campaign has none to offer.
+  it("refuses a campaign with no fields yet, in the old sentence", async () => {
+    withDomain("paraphe.fr");
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            slug: "campagne",
+            name: "Camille Réel",
+            templates: { "email.txt": "OBJET: s\n\nCorps." },
+          }),
+      }),
+    );
+    await expect(fetchCampaign("campagne")).rejects.toThrow(
+      /pas encore configurée/,
+    );
+  });
+
   // A captive portal answers 200 with HTML, and adopting that would fill
   // every message with nothing at all
   it("refuses an answer that is not a campaign", async () => {
@@ -301,6 +325,27 @@ describe("when the offer may appear at all", () => {
       ).toBe(false);
     },
   );
+});
+
+// The ORIGIN door's reading of a campaign with no fields yet: the offer
+// stands, campaign null, texts and all — that door has nothing to pre-fill
+// either way. A body with NEITHER block NOR slug stays refused: a captive
+// portal's arbitrary JSON must not read as « not configured yet ».
+describe("an offer whose campaign block is absent", () => {
+  it("carries the texts with campaign null when the body names its slug", () => {
+    const offer = readOffer({
+      slug: "sienne",
+      name: "Camille Sienne",
+      templates: { "email.txt": "OBJET: s\n\nCorps." },
+    });
+    expect(offer.campaign).toBeNull();
+    expect(offer.slug).toBe("sienne");
+    expect(offer.templates).toEqual({ "email.txt": "OBJET: s\n\nCorps." });
+  });
+
+  it("still refuses a body that names nothing", () => {
+    expect(() => readOffer({ hello: "world" })).toThrow(/ne ressemble pas/);
+  });
 });
 
 // WHAT THE LAST ADOPTION WROTE, remembered — the reference that tells

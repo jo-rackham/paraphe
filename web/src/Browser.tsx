@@ -28,6 +28,7 @@ import { DEMO_SET } from "./demo.ts";
 import * as M from "./messages.ts";
 import {
   ADOPTED_KEYS,
+  type ConfiguredOffer,
   fetchCampaign,
   inlineLogo,
   type Offer,
@@ -152,7 +153,7 @@ export default function Browser() {
   // ?org=<slug>: an OFFER, never applied on its own. Adopting a campaign
   // decides what thousands of mayors will read, so it is a decision the
   // volunteer takes with the candidate's name in front of them.
-  const [offer, setOffer] = useState<Offer | null>(null);
+  const [offer, setOffer] = useState<ConfiguredOffer | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   // Where the campaign came from, when it came from this origin. ITS OWN
   // SLOT and not the page's Alerte: the list download is already in flight
@@ -231,40 +232,43 @@ export default function Browser() {
    * quitte ce navigateur » promises does not happen. A failure costs the
    * picture and nothing else, so it does not undo the adoption.
    */
-  const adoptFields = useCallback(async (taken: Offer, current: Campaign) => {
-    // WHO SIGNS DOES NOT TRAVEL. Seven of the nine describe the candidate and
-    // how to reach the campaign, and they exist to be handed over; the other
-    // two name a PERSON. Adopted with the rest, every message this volunteer
-    // produced went out over the coordination's name and role — the person
-    // who happened to fill the form — and nothing on screen said so. Team
-    // mode never showed it: there, each account supplies its own.
-    const campaign = { ...taken.campaign };
-    for (const k of M.PERSONAL_CAMPAIGN_KEYS) campaign[k] = current[k] ?? "";
-    await DB.writeSetting("campagne", campaign);
-    setCfg(campaign);
-    setDraft(campaign);
-    // WHAT THIS ADOPTION WROTE, remembered — the reference that lets the
-    // FIELDS follow the campaign: still byte-for-byte what the adoption
-    // wrote means the volunteer typed none of it, and the campaign's next
-    // correction may land. The templates need no snapshot any more: the
-    // campaign's texts live in their own LAYER, which follows on its own,
-    // and the local overlay is only ever the volunteer's writing.
-    await DB.writeSetting("adoption", {
-      slug: taken.slug,
-      campaign: Object.fromEntries(
-        ADOPTED_KEYS.map((k) => [k, taken.campaign[k] ?? ""]),
-      ),
-    });
-    if (taken.logo) {
-      try {
-        const inlined = await inlineLogo(taken.logo);
-        await DB.writeSetting("logo", inlined);
-        setLogo(inlined);
-      } catch {
-        setLogo("");
+  const adoptFields = useCallback(
+    async (taken: ConfiguredOffer, current: Campaign) => {
+      // WHO SIGNS DOES NOT TRAVEL. Seven of the nine describe the candidate and
+      // how to reach the campaign, and they exist to be handed over; the other
+      // two name a PERSON. Adopted with the rest, every message this volunteer
+      // produced went out over the coordination's name and role — the person
+      // who happened to fill the form — and nothing on screen said so. Team
+      // mode never showed it: there, each account supplies its own.
+      const campaign = { ...taken.campaign };
+      for (const k of M.PERSONAL_CAMPAIGN_KEYS) campaign[k] = current[k] ?? "";
+      await DB.writeSetting("campagne", campaign);
+      setCfg(campaign);
+      setDraft(campaign);
+      // WHAT THIS ADOPTION WROTE, remembered — the reference that lets the
+      // FIELDS follow the campaign: still byte-for-byte what the adoption
+      // wrote means the volunteer typed none of it, and the campaign's next
+      // correction may land. The templates need no snapshot any more: the
+      // campaign's texts live in their own LAYER, which follows on its own,
+      // and the local overlay is only ever the volunteer's writing.
+      await DB.writeSetting("adoption", {
+        slug: taken.slug,
+        campaign: Object.fromEntries(
+          ADOPTED_KEYS.map((k) => [k, taken.campaign[k] ?? ""]),
+        ),
+      });
+      if (taken.logo) {
+        try {
+          const inlined = await inlineLogo(taken.logo);
+          await DB.writeSetting("logo", inlined);
+          setLogo(inlined);
+        } catch {
+          setLogo("");
+        }
       }
-    }
-  }, []);
+    },
+    [],
+  );
 
   /**
    * Takes a campaign into this browser: the nine values, the mark, and the
@@ -277,7 +281,7 @@ export default function Browser() {
    * half that is easy to forget.
    */
   const adopt = useCallback(
-    async (taken: Offer, current: Campaign) => {
+    async (taken: ConfiguredOffer, current: Campaign) => {
       // a rejected write (quota, private window, blocked base) must be SAID:
       // without the catch this returns having done nothing at all
       try {
@@ -404,8 +408,14 @@ export default function Browser() {
         );
       }
       if (own && (!slug || slug === own.slug)) {
-        if (fresh) {
-          if (await adopt(own, c)) {
+        // The nine fields, or NULL for a campaign still at its template
+        // values: the server omits the block rather than spread « Prénom
+        // NOM », and refused wholesale — the old 409 — it took the
+        // campaign's own TEXTS down with it. The layer below follows either
+        // way; only what touches the nine needs the fields.
+        const offered = own.campaign;
+        if (offered !== null && fresh) {
+          if (await adopt({ ...own, campaign: offered }, c)) {
             setAdopted(
               `Les textes de la campagne « ${own.name} » sont repris depuis ` +
                 "son site. Ils restent dans ce navigateur, et vous pouvez " +
@@ -429,8 +439,9 @@ export default function Browser() {
         const snapshot =
           adoption !== null && adoption.slug === own.slug ? adoption : null;
         const fieldsUntouched =
-          sameAdoptedFields(c, own.campaign) ||
-          (snapshot !== null && sameAdoptedFields(c, snapshot.campaign));
+          offered !== null &&
+          (sameAdoptedFields(c, offered) ||
+            (snapshot !== null && sameAdoptedFields(c, snapshot.campaign)));
         try {
           let followed = false;
           // MIGRATION, once: before the layer existed, adopting MERGED the
@@ -453,11 +464,11 @@ export default function Browser() {
             setCampaignTemplates(own.templates);
             followed = true;
           }
-          if (fieldsUntouched) {
-            if (!sameAdoptedFields(c, own.campaign)) {
+          if (offered !== null && fieldsUntouched) {
+            if (!sameAdoptedFields(c, offered)) {
               // reachable only through the snapshot branch above: the
               // campaign corrected a field the volunteer never touched
-              await adoptFields(own, c);
+              await adoptFields({ ...own, campaign: offered }, c);
               followed = true;
             } else {
               // arm the snapshot for the day the campaign edits a field: a
@@ -466,7 +477,7 @@ export default function Browser() {
               await DB.writeSetting("adoption", {
                 slug: own.slug,
                 campaign: Object.fromEntries(
-                  ADOPTED_KEYS.map((k) => [k, own.campaign[k] ?? ""]),
+                  ADOPTED_KEYS.map((k) => [k, offered[k] ?? ""]),
                 ),
               });
             }
@@ -485,7 +496,10 @@ export default function Browser() {
             text: `Mise à jour impossible : ${e instanceof Error ? e.message : String(e)}`,
           });
         }
-        if (fieldsUntouched) return;
+        // A campaign with no fields yet holds the visit here too: there is
+        // nothing a ?org= link naming this same campaign could add, and its
+        // « déjà enregistrée » sentence would be about fields nobody has.
+        if (fieldsUntouched || offered === null) return;
         // past here the campaign's nine fields are the volunteer's own
         // writing, and a ?org= link is answered exactly as before — its
         // sentence speaks about the fields, which is what a link would

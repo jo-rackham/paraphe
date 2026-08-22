@@ -73,4 +73,57 @@ test.describe
       });
       expect(cleared.ok()).toBeTruthy();
     });
+
+    // A CAMPAIGN STILL AT ITS TEMPLATE VALUES SERVES ITS TEXTS. The old 409
+    // took them down with the nine fields: a campaign that had rewritten its
+    // email but not finished its configuration served nothing at all, and
+    // its browser version spoke the image's words while the team version
+    // spoke its own — measured on production, reported three times.
+    test("serves its texts before the nine fields are filled", async ({
+      page,
+      request,
+    }) => {
+      const opened = await request.post(`${ORIGIN}/api/session`, {
+        data: {
+          email: COORDINATION.email,
+          password: COORDINATION.password,
+        },
+      });
+      expect(opened.ok()).toBeTruthy();
+      // one required field back at its template value, and a rewritten text
+      const config = await (await request.get(`${ORIGIN}/api/config`)).json();
+      const fields = config.campaign;
+      const saved = await request.post(`${ORIGIN}/api/campaign`, {
+        data: { campaign: { ...fields, candidat: "Prénom NOM" } },
+      });
+      expect(saved.ok()).toBeTruthy();
+      const wrote = await request.post(`${ORIGIN}/api/campaign/templates`, {
+        data: {
+          templates: {
+            "courrier.txt":
+              "Texte servi avant la configuration, pour {salutation}.\n\n{signataire}\n",
+          },
+        },
+      });
+      expect(wrote.ok()).toBeTruthy();
+
+      // a browser that has never seen the campaign: the fields cannot
+      // pre-fill — « Campagne non configurée » stands — and the TEXTS land
+      await page.goto(`${ORIGIN}/navigateur/`);
+      await expect(page.getByText(/mis à jour depuis son site/)).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByText("Campagne non configurée")).toBeVisible();
+
+      // the campaign goes back as this test found it
+      const restoredFields = await request.post(`${ORIGIN}/api/campaign`, {
+        data: { campaign: fields },
+      });
+      expect(restoredFields.ok()).toBeTruthy();
+      const restoredTpl = await request.post(
+        `${ORIGIN}/api/campaign/templates`,
+        { data: { templates: {} } },
+      );
+      expect(restoredTpl.ok()).toBeTruthy();
+    });
   });

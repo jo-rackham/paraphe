@@ -409,25 +409,6 @@ func (s *Server) routePublicCampaign(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, http.StatusNotFound, "Aucune campagne à cette adresse.")
 		return
 	}
-	// A campaign still at its template values must not pre-fill anything:
-	// it would spread "Prénom NOM" to volunteers who have no way to know.
-	// Which keys are still at their template value is operational detail,
-	// and this body is readable from any origin: the refusal says that
-	// there is nothing to pre-fill, not what is missing.
-	if len(UnfilledKeys(org.Campaign)) > 0 {
-		errorJSON(w, http.StatusConflict,
-			"Cette campagne n'est pas encore configurée : rien à pré-remplir.")
-		return
-	}
-	campaign := map[string]string{}
-	for _, k := range CampaignKeys {
-		campaign[k] = org.Campaign[k]
-	}
-	// The logo travels here too, so a volunteer opening the browser version
-	// with ?org=<slug> gets the campaign's mark along with its nine fields.
-	// That build then downloads it ONCE and keeps a data URI: it promises
-	// that nothing leaves the browser, and a remote URL in its header would
-	// make that false at every load.
 	// THE CAMPAIGN'S OWN TEXTS travel too, so the account-less version writes
 	// what this campaign writes rather than what the image ships. Without
 	// them a campaign that rewrote its letter had two voices — one for the
@@ -444,7 +425,30 @@ func (s *Server) routePublicCampaign(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	replyJSON(w, http.StatusOK, map[string]any{
-		"slug": org.Slug, "name": org.Name, "campaign": campaign,
-		"templates": templates, "logo": s.logoOf(org)})
+	body := map[string]any{
+		"slug": org.Slug, "name": org.Name,
+		"templates": templates, "logo": s.logoOf(org)}
+	// A campaign still at its template values must not pre-fill the NINE:
+	// it would spread "Prénom NOM" to volunteers who have no way to know,
+	// so the `campaign` block is OMITTED — not refused wholesale. Refused
+	// with a 409 it took the campaign's own TEXTS down with it: a campaign
+	// that had rewritten its email but not finished its nine fields served
+	// nothing at all, and its browser version spoke the image's words while
+	// the team version spoke its own — measured on production, reported as
+	// « je n'ai toujours pas par défaut le template que j'ai enregistré ».
+	// Which keys are still at their template value stays unsaid: that is
+	// operational detail, and this body is readable from any origin.
+	// The logo above travels like the texts, whatever the fields say: it is
+	// the campaign's own mark, carrying no template value to spread. The
+	// adopting build downloads it ONCE and keeps a data URI — it promises
+	// that nothing leaves the browser, and a remote URL in its header would
+	// make that false at every load.
+	if len(UnfilledKeys(org.Campaign)) == 0 {
+		campaign := map[string]string{}
+		for _, k := range CampaignKeys {
+			campaign[k] = org.Campaign[k]
+		}
+		body["campaign"] = campaign
+	}
+	replyJSON(w, http.StatusOK, body)
 }

@@ -138,6 +138,19 @@ a train, has a door, and it is on the page they already landed on.
   refusal — the link door owes its reader a sentence, the origin door treats
   it as "there is no campaign here", which is its normal state on an apex, a
   static host or a captive portal.
+  **A CAMPAIGN STILL AT ITS TEMPLATE VALUES SERVES ITS TEXTS.** The server
+  omits the `campaign` block rather than spread « Prénom NOM » — it does not
+  refuse the body wholesale: the old 409 took the campaign's own TEMPLATES
+  down with the nine fields, so a campaign that had rewritten its email but
+  not finished its configuration served nothing at all, and its browser
+  version spoke the image's words while the team version spoke its own —
+  measured on production, reported three times before the block and the
+  refusal were told apart. `Offer.campaign` is null then; the origin door
+  follows the texts alone (it had no fields to pre-fill either way), the
+  link door still owes its reader the old sentence — a link pre-fills the
+  nine, and this campaign has none to offer. A body with NEITHER block NOR
+  slug stays refused: a captive portal's arbitrary JSON must not read as
+  « not configured yet ».
   **What counts as CONFIGURED is not its question to answer its own way.**
   Written as "every key non-empty", it disagreed with the API that had just
   answered 200: three of the nine keys may be EMPTY

@@ -395,7 +395,7 @@ describe("the templates a campaign hands to the browser version", () => {
     const offer = readOffer(answer(templates));
     expect(offer.templates).toEqual({});
     // …and the nine values still came through, which is the point
-    expect(offer.campaign.candidat).toBe("valeur de candidat");
+    expect(offer.campaign?.candidat).toBe("valeur de candidat");
   });
 
   // THE ONE BOUND THAT IS NOT COSMETIC. This mode stores what it adopts and

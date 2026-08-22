@@ -1,6 +1,6 @@
 import { campaignLabel } from "./common.tsx";
 import * as M from "./messages.ts";
-import { instanceDomain, type Offer } from "./prefill.ts";
+import { type ConfiguredOffer, instanceDomain } from "./prefill.ts";
 
 /**
  * The campaign a link proposes, shown before anything is written.
@@ -14,7 +14,7 @@ export function Proposition({
   onAccept,
   onRefuse,
 }: {
-  offer: Offer;
+  offer: ConfiguredOffer;
   onAccept: () => void;
   onRefuse: () => void;
 }) {
