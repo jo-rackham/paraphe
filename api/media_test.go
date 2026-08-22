@@ -238,14 +238,14 @@ func TestAnUnusableEndpointIsRefusedAtStartup(t *testing.T) {
 // constant. A policy that forgets the origin shows as an image that never
 // appears, in the console, and nowhere else.
 func TestTheContentSecurityPolicyNamesTheMediaOrigin(t *testing.T) {
-	plain := contentSecurityPolicy("")
+	plain := contentSecurityPolicy("", "")
 	if !strings.Contains(plain, "img-src 'self' data:;") {
 		t.Errorf("with no object store the policy should be unchanged: %q", plain)
 	}
 	if !strings.Contains(plain, "connect-src 'self';") {
 		t.Errorf("with no object store the policy should be unchanged: %q", plain)
 	}
-	with := contentSecurityPolicy("https://media.paraphe.org")
+	with := contentSecurityPolicy("https://media.paraphe.org", "")
 	if !strings.Contains(with, "img-src 'self' data: https://media.paraphe.org;") {
 		t.Errorf("the media origin is missing from img-src: %q", with)
 	}
@@ -267,6 +267,68 @@ func TestTheContentSecurityPolicyNamesTheMediaOrigin(t *testing.T) {
 	}
 	if strings.Contains(with, "script-src") {
 		t.Errorf("the media origin reached a script directive: %q", with)
+	}
+}
+
+// The OTHER call `connect-src` decides, and the one nothing held: a `?org=`
+// link resolves to `https://<slug>.<base domain>/api/campaign/public`, which
+// is a different origin from the page offering it. Left out of the policy,
+// the browser refused the fetch and the screen said « Ce lien ne propose
+// aucune campagne : Failed to fetch » — on production, in both directions,
+// for a feature that had never worked there. The end-to-end suite builds
+// with PARAPHE_BASE_DOMAIN empty, so it makes no cross-origin fetch and this
+// is exactly what it cannot see.
+func TestTheContentSecurityPolicyReachesTheInstancesOwnCampaigns(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.org")
+	if got := campaignOrigins(); got != "https://*.paraphe.org" {
+		t.Errorf("campaignOrigins() = %q, want the wildcard over the base domain", got)
+	}
+	policy := contentSecurityPolicy(mediaOrigin(), campaignOrigins())
+	if !strings.Contains(policy, "connect-src 'self' https://*.paraphe.org;") {
+		t.Errorf("a ?org= link cannot reach the campaign it names: %q", policy)
+	}
+	// The subdomains are a CONNECT target and nothing else: they are not a
+	// place scripts, images, frames or forms may come from.
+	for _, directive := range []string{"default-src 'self';", "img-src 'self' data:;",
+		"form-action 'self';", "base-uri 'none';", "frame-ancestors 'none'"} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("%q no longer holds: %q", directive, policy)
+		}
+	}
+	// Single-campaign: no subdomain space, so nothing is added and the policy
+	// is what it always was.
+	t.Setenv("PARAPHE_BASE_DOMAIN", "")
+	if got := campaignOrigins(); got != "" {
+		t.Errorf("campaignOrigins() = %q on a single-campaign instance", got)
+	}
+	if !strings.Contains(contentSecurityPolicy("", campaignOrigins()), "connect-src 'self';") {
+		t.Error("a single-campaign instance widened its policy")
+	}
+}
+
+// A REFUSED domain yields nothing, like a refused media origin: the value
+// lands between two sources of a policy, and the startup check is what says
+// it is a bare DNS name. Forwarding it is how `paraphe.org; script-src *`
+// would become a directive of the operator's choosing on a process that
+// starts clean, and `https://paraphe.test` — checked AFTER normalising —
+// would become the one-label domain `https`.
+func TestARefusedBaseDomainStaysOutOfThePolicy(t *testing.T) {
+	for _, bad := range []string{
+		"paraphe.org; script-src *",
+		"paraphe.org script-src",
+		"https://paraphe.test",
+		"paraphe.org:8443",
+		"paraphe.org/campagnes",
+		"'self' *",
+	} {
+		t.Setenv("PARAPHE_BASE_DOMAIN", bad)
+		if got := campaignOrigins(); got != "" {
+			t.Errorf("PARAPHE_BASE_DOMAIN = %q reached the policy as %q", bad, got)
+		}
+		if policy := contentSecurityPolicy("", campaignOrigins()); !strings.Contains(
+			policy, "connect-src 'self';") {
+			t.Errorf("PARAPHE_BASE_DOMAIN = %q widened the policy: %q", bad, policy)
+		}
 	}
 }
 
@@ -312,7 +374,7 @@ func TestAMediaOriginCannotAppendDirectivesToThePolicy(t *testing.T) {
 		// assertion that counts: the policy must still say exactly what it
 		// said before, with no directive the operator did not write.
 		t.Setenv("PARAPHE_MEDIA_PUBLIC_URL", poison)
-		policy := contentSecurityPolicy(mediaOrigin())
+		policy := contentSecurityPolicy(mediaOrigin(), campaignOrigins())
 		if strings.Count(policy, ";") != 6 {
 			t.Errorf("PARAPHE_MEDIA_PUBLIC_URL = %q produced %d directives "+
 				"instead of 7:\n\t%s", poison, strings.Count(policy, ";")+1, policy)
@@ -343,7 +405,7 @@ func TestAPlainMediaOriginIsAccepted(t *testing.T) {
 			continue
 		}
 		t.Setenv("PARAPHE_MEDIA_PUBLIC_URL", good)
-		if !strings.Contains(contentSecurityPolicy(mediaOrigin()),
+		if !strings.Contains(contentSecurityPolicy(mediaOrigin(), campaignOrigins()),
 			"img-src 'self' data: "+origin+";") {
 			t.Errorf("%q did not reach img-src", good)
 		}

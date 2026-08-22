@@ -381,7 +381,7 @@ func answerOnPanic(next http.Handler) http.Handler {
 // being a constant. Left unset, nothing is added and the policy is what it
 // always was.
 func securityHeaders(next http.Handler) http.Handler {
-	policy := contentSecurityPolicy(mediaOrigin())
+	policy := contentSecurityPolicy(mediaOrigin(), campaignOrigins())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", policy)
@@ -412,15 +412,38 @@ func securityHeaders(next http.Handler) http.Handler {
 // costing the picture and nothing else. Published on a static host, that
 // same build has no policy at all and has always worked.
 //
-// It buys one origin, the operator's own object store, for one call. What is
-// still refused there is everything that matters: no script, no frame, no
-// form, and `default-src 'self'` over the rest.
-func contentSecurityPolicy(media string) string {
+// THE INSTANCE'S OWN SUBDOMAINS ARE THE OTHER CALL `connect-src` DECIDES,
+// and leaving them out killed the door a LINK opens. `?org=<slug>` resolves
+// to `https://<slug>.<base domain>/api/campaign/public`, which is a
+// different origin from the page that offers it — the apex, or a neighbour
+// campaign — so the browser refused the fetch and the screen said « Ce lien
+// ne propose aucune campagne : Failed to fetch ». Both directions,
+// apex→campaign and campaign→campaign, on every multi-campaign instance;
+// measured on production, where the feature had never worked. The end-to-end
+// suite cannot see it: it builds with PARAPHE_BASE_DOMAIN deliberately
+// EMPTY, so `?org=` resolves no host and no cross-origin fetch is ever made.
+// The ORIGIN door is untouched by any of this — `ownCampaign` is
+// root-relative, hence same-origin, which is why the pre-fill kept working
+// and hid the other half.
+//
+// A WILDCARD, and it is exactly the reach the code already has: a link
+// carries a DNS LABEL and never a host (`requestedSlug`, and `fetchCampaign`
+// checks it again where the host is BUILT), so what this admits is the set
+// of hosts that were reachable in the first place. Single-campaign, nothing
+// is added: there is no subdomain space to speak of.
+//
+// It buys the operator's own object store and the operator's own subdomains,
+// for one call each. What is still refused is everything that matters: no
+// script, no frame, no form, and `default-src 'self'` over the rest.
+func contentSecurityPolicy(media, campaigns string) string {
 	images := "img-src 'self' data:"
 	connect := "connect-src 'self'"
 	if media != "" {
 		images += " " + media
 		connect += " " + media
+	}
+	if campaigns != "" {
+		connect += " " + campaigns
 	}
 	const policy = "default-src 'self'; " +
 		"style-src 'self' 'unsafe-inline'; " + // React sets style attributes
@@ -450,6 +473,35 @@ func mediaOrigin() string {
 		return ""
 	}
 	return origin
+}
+
+// campaignOrigins: the wildcard covering this instance's campaign
+// subdomains, or nothing when there are none.
+//
+// The same discipline as mediaOrigin, for the same reason: a REFUSED value
+// yields nothing at all, and the check is the SAME function the startup
+// runs (validBaseDomain) rather than a second reading of the rule. The value
+// lands inside a policy where a space or a semicolon would open a directive
+// of the operator's choosing — validBaseDomain bounds it to DNS labels, so
+// there is nothing there to close with. Failing closed costs the ?org= door,
+// which is what an unset domain costs anyway; failing open would cost the
+// policy.
+//
+// CHECKED FIRST, NORMALISED SECOND, like markBrowserVersion: normaliseHost
+// is written for a Host header where a port is legal, so run first it turns
+// `https://paraphe.test` into the one-label domain `https`.
+func campaignOrigins() string {
+	raw := Get("base_domain")
+	if strings.TrimSpace(raw) == "" {
+		return "" // single-campaign: every host is the bootstrap campaign
+	}
+	if err := validBaseDomain(raw); err != nil {
+		slog.Error("the base domain is refused and left out of the "+
+			"Content-Security-Policy: a ?org= link will not reach the "+
+			"campaign it names", "error", err)
+		return ""
+	}
+	return "https://*." + normaliseHost(raw)
 }
 
 // publicToEveryOrigin marks a route readable from any origin, BEFORE the
