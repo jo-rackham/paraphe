@@ -1058,9 +1058,17 @@ export function PiedDePage({
  * eyes, reusing the download bar's own animation, which the reduced-motion
  * rule already stills. A bare paragraph read as a tool that had hung.
  */
-export function Chargement({ quoi = "Chargement…" }: { quoi?: string }) {
+export function Chargement({
+  quoi = "Chargement…",
+  centre = false,
+}: {
+  quoi?: string;
+  /** Centred variant: the one site whose original paragraph carried
+   *  `textAlign: center` (the list refreshing under its own table). */
+  centre?: boolean;
+}) {
   return (
-    <div className="attente">
+    <div className={centre ? "attente centre" : "attente"}>
       <p role="status">{quoi}</p>
       <div className="jauge" aria-hidden="true">
         <div className="barre indeterminee" />

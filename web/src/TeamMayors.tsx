@@ -190,7 +190,7 @@ export function ListeServeur({
           ))}
         </TableMaires>
         <div ref={sentinel} />
-        {loading && <Chargement />}
+        {loading && <Chargement centre />}
         {/*
           The role sits on a span holding the TEXT alone, as everywhere
           else: an interactive control inside a live region is re-read on

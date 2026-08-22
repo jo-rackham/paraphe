@@ -107,6 +107,20 @@ function ConfigurationCampagne({
   // the word beside the button that was just pressed.
   const [refus, setRefus] = useState("");
   const [saved, setSaved] = useState("");
+  // DIRTY FIRST, derived — the rule BrowserCampagne states in the same
+  // words: a form retyped after a save is unsaved again, whatever was said
+  // in between. Written state-only, « Enregistré. » stood beside a field
+  // the coordination had just edited, which is a confirmation that lies.
+  // Compared against cfg with the seeds' own fallbacks: a successful save
+  // updates cfg (onCfg), so the comparison closes itself.
+  const dirty =
+    Object.keys({ ...cfg.campaign, ...values }).some(
+      (k) => (values[k] ?? "") !== (cfg.campaign[k] ?? ""),
+    ) ||
+    batchSize !== String(cfg.batch_size) ||
+    listed !== (cfg.organisation?.listed ?? true) ||
+    appel !== (cfg.phone_outreach ?? false) ||
+    name !== (cfg.organisation?.name ?? "");
   const [busy, done] = useSubmitGuard();
 
   const save = async (e: React.FormEvent) => {
@@ -277,9 +291,10 @@ function ConfigurationCampagne({
         {sending ? "Enregistrement…" : "Enregistrer la campagne"}
       </button>{" "}
       {/* pre-exists, text-change only: a region inserted with its text is
-          a region nothing announces */}
-      <span role="status" className="confirmation">
-        {saved}
+          a region nothing announces. Three states, dirty first, exactly as
+          BrowserCampagne renders the same word. */}
+      <span role="status" className={dirty ? "gris" : "confirmation"}>
+        {dirty ? "modifications non enregistrées" : saved}
       </span>
     </form>
   );

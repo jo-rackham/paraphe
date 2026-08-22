@@ -120,7 +120,17 @@ export function CampaignTab({
           type="button"
           onClick={async () => {
             setSavedSaid(false);
-            await onSave(draft, note, appelTelephonique);
+            // the CURRENT parent reports its own failures and never
+            // rejects; the widened signature invites one that does, and an
+            // uncaught rejection in an async handler surfaces nowhere a
+            // volunteer looks. Explicit, per the house rule: the fault is
+            // shown, not swallowed — and « Enregistré. » is not said.
+            try {
+              await onSave(draft, note, appelTelephonique);
+            } catch (e) {
+              onErreur(e instanceof Error ? e.message : String(e));
+              return;
+            }
             // the parent reports its own failure and the draft then stays
             // DIRTY, which is the branch shown below — this word appears
             // only once the marker has nothing left to warn about
