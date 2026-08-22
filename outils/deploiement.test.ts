@@ -509,28 +509,54 @@ describe("the deployment files", () => {
     // to img-src alone", and the day the self-hosted browser version needed
     // to download a logo the only thing to do with a number was bump it.
     const assembled =
-      /func contentSecurityPolicy\(media string\) string \{([\s\S]*?)\n\}/.exec(
+      /func contentSecurityPolicy\(([\w, ]+) string\) string \{([\s\S]*?)\n\}/.exec(
         go,
       );
     expect(
       assembled,
       "contentSecurityPolicy is no longer where this test " + "reads it",
     ).toBeTruthy();
-    const lines = assembled![1].split("\n").filter((l) => /\bmedia\b/.test(l));
-    const appended = lines
-      .filter((l) => /\+=/.test(l))
-      .map((l) => /^\s*(\w+)\s*\+=/.exec(l)?.[1])
-      .sort();
+
+    // EVERY source the policy takes, and the directives each is allowed to
+    // reach — walked the same way, because an axis added at one and not the
+    // other is how a source widens in silence. `campaigns` is the wildcard
+    // over the instance's own subdomains: a `?org=` link resolves to one,
+    // which is a different origin from the page offering it, and left out of
+    // connect-src the browser refused the fetch on every multi-campaign
+    // instance. It belongs to connect-src ALONE — a campaign subdomain is
+    // somewhere this build asks a question, never somewhere code, images,
+    // frames or forms may come from.
+    const reaches: Record<string, string[]> = {
+      media: ["connect", "images"],
+      campaigns: ["connect"],
+    };
     expect(
-      appended,
-      "the media origin no longer reaches both the images and the connect " +
-        "directive: a logo it cannot be fetched from, or cannot be shown from",
-    ).toEqual(["connect", "images"]);
-    expect(
-      lines.filter((l) => !/\+=/.test(l) && !/if media != ""/.test(l)),
-      "the media origin is read somewhere other than the two directives it " +
-        "belongs to",
-    ).toEqual([]);
+      assembled![1]
+        .split(",")
+        .map((s) => s.trim())
+        .sort(),
+      "contentSecurityPolicy takes a source this test says nothing about",
+    ).toEqual(Object.keys(reaches).sort());
+
+    for (const [source, directives] of Object.entries(reaches)) {
+      const lines = assembled![2]
+        .split("\n")
+        .filter((l) => new RegExp(`\\b${source}\\b`).test(l));
+      const appended = lines
+        .filter((l) => /\+=/.test(l))
+        .map((l) => /^\s*(\w+)\s*\+=/.exec(l)?.[1])
+        .sort();
+      expect(
+        appended,
+        `${source} no longer reaches ${directives.join(" and ")}`,
+      ).toEqual(directives);
+      expect(
+        lines.filter(
+          (l) => !/\+=/.test(l) && !new RegExp(`if ${source} != ""`).test(l),
+        ),
+        `${source} is read somewhere other than the directives it belongs to`,
+      ).toEqual([]);
+    }
   });
 
   // The interface picks its mode at load: an API answers /api/config → team
