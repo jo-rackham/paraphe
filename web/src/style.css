@@ -47,6 +47,12 @@
   /* the outcome of an act, said in text beside its control: the status
      palette's own green, at text-contrast strength in both schemes */
   --ok-txt: light-dark(#15803d, #4ade80);
+  /* the refusal beside a control, as TEXT — not the error-border token:
+     that one only owes 3:1 (non-text) and its dark value reads 4.19:1 on
+     the alert background, under the 4.5:1 text floor. This one clears it
+     on every surface it can land on, both schemes; the pair is held by
+     the palette e2e. */
+  --refus-txt: light-dark(#e1000f, #ff6b74);
   /* status dots, one hue per state, stepped per scheme */
   --pastille-gris: light-dark(#64748b, #94a3b8);
   --pastille-bleu: light-dark(#2563eb, #60a5fa);
@@ -313,8 +319,10 @@ html { scroll-padding-bottom: 8rem; }
    fifty pixels of layout under the very finger that just tapped it */
 /* The save button NAMES the act (statut / note / both), so its label moves
    while typing: a reserved width keeps the bar from jumping under the very
-   keystroke that changes it. */
-.barre-statut .champs > button { min-width: 13.5rem; text-align: center; }
+   keystroke that changes it. 14rem = 224px, one past the longest label —
+   « Enregistrer statut et note » measures 223px (bold 1rem, system-ui);
+   13.5rem left a 7px jump at exactly the moment the width existed for. */
+.barre-statut .champs > button { min-width: 14rem; text-align: center; }
 @media (max-width: 640px) {
   .barre-statut { padding-left: .6rem; padding-right: .6rem; }
   .barre-statut .champs { gap: .3rem .6rem; }
@@ -452,7 +460,7 @@ button[aria-disabled="true"], .bouton[aria-disabled="true"] {
    glance, never grey-on-grey. Text colours clear 4.5:1 on the card in both
    schemes (the green is the status palette's own, the red the alert's). */
 .confirmation { color: var(--ok-txt); font-weight: 600; font-size: .9rem; }
-.retour-refus { color: var(--alerte-erreur-trait); font-weight: 600;
+.retour-refus { color: var(--refus-txt); font-weight: 600;
                 font-size: .9rem; }
 
 /* The waiting state (Chargement): sentence plus indeterminate gauge. */
@@ -484,9 +492,14 @@ header .theme, tbody tr td {
 @keyframes apparition {
   from { transform: translateY(3px); }
 }
+/* `none`, NOT a .01ms duration: `transition-duration` on `*` GIVES every
+   element a transition (property defaults to `all`), and a probe that sets
+   a colour and reads it back synchronously then reads the PREVIOUS value —
+   the palette e2e measured jaune vs piste at 1:1 under reduce. `none` is
+   also the honest reading of the preference: things snap. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    transition-duration: .01ms !important;
-    animation-duration: .01ms !important;
+    transition: none !important;
+    animation: none !important;
   }
 }

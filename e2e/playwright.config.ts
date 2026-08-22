@@ -30,14 +30,12 @@ export default defineConfig({
     baseURL: API_ORIGIN,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    // The interface moves now (arrival slides, hover eases). Reduce is the
-    // suite's posture: it exercises the one experience no test covered —
-    // what a user who asked for reduced motion gets — and it keeps the CSS
-    // reduced-motion block honest, since a rule that escapes it shows here.
-    // It is NOT what fixed the scan race the axe sweep once caught: that
-    // was React morphing one button into another through a shared colour
-    // transition, keyed apart at the source (see Fiche's history rows).
-    reducedMotion: "reduce",
+    // NO `reducedMotion` here: in @playwright/test 1.62.1 the option is a
+    // silent no-op at every level — config, project, inline test.use — the
+    // CDP trace shows prefers-reduced-motion sent as "no-preference" while
+    // colorScheme beside it travels. Measured by an adversarial round; the
+    // a11y sweep emulates it per page instead (07, emulateMedia), which is
+    // the one channel that works.
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

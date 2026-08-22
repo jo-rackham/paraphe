@@ -1501,9 +1501,16 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   three `<p>` are KEYED apart for that reason: a replacement paints its
   first frame with no transition at all. Diagnosed by sampling computed
   styles DURING the scan — at rest every value was correct — and the a11y
-  helper now prints axe's own fg/bg/ratio with each finding. The suite runs
-  `reducedMotion: "reduce"`: the one experience nothing exercised, and the
-  guard that keeps the CSS reduced-motion block honest.
+  helper now prints axe's own fg/bg/ratio with each finding. The a11y sweep
+  runs under reduced motion **emulated per page** (`emulateMedia`, asserted
+  in 07's beforeEach): in @playwright/test 1.62.1 `use.reducedMotion` is a
+  silent no-op at every level — the CDP trace shows prefers-reduced-motion
+  sent as "no-preference" while colorScheme beside it travels — so a config
+  option would claim a posture nothing delivers. The act-outcome TEXT
+  tokens (`--ok-txt`, `--refus-txt`) owe 4.5:1 on card AND alert surfaces,
+  held by the palette e2e: the refusal red is deliberately not the
+  error-border token, which owes only 3:1 and fails the text floor on the
+  dark alert background.
   **The write lock outlived the wall by one round, and the screen is what
   caught it.** Removing the team wall from the READS left
   `assignments.volunteer IS NULL OR assignments.volunteer=$n` standing in the

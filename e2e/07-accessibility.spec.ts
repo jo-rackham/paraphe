@@ -21,6 +21,23 @@ import { openManagement, openTab, signIn } from "./helpers.ts";
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
+// EVERY scan in this file runs under reduced motion — emulated PER PAGE,
+// because in @playwright/test 1.62.1 `use.reducedMotion` is a silent no-op
+// at every level (config, project, inline test.use): the CDP trace shows
+// prefers-reduced-motion sent as "no-preference" while colorScheme beside
+// it travels. emulateMedia is the one channel that reaches the browser,
+// and the assertion is what turns the next harness surprise red instead of
+// silently scanning an experience nobody asked for.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(
+    await page.evaluate(
+      () => matchMedia("(prefers-reduced-motion: reduce)").matches,
+    ),
+    "reduced motion did not reach the browser",
+  ).toBe(true);
+});
+
 /** Fails with one readable line per violation, not a JSON dump. */
 async function checkA11y(page: Page, screen: string) {
   const { violations } = await new AxeBuilder({ page })
@@ -189,6 +206,9 @@ test.describe
             alerteFond: v("--alerte-fond"),
             alerteTrait: v("--alerte-trait"),
             alerteErreurTrait: v("--alerte-erreur-trait"),
+            carte: v("--carte"),
+            okTxt: v("--ok-txt"),
+            refusTxt: v("--refus-txt"),
           };
           probe.remove();
           return out;
@@ -211,6 +231,24 @@ test.describe
           contrast(vars.alerteErreurTrait, vars.alerteFond),
           `${scheme}: error bar vs alert background`,
         ).toBeGreaterThanOrEqual(3);
+        // The act-outcome TEXT tokens owe the 4.5:1 text floor, on every
+        // surface they can land on. The refusal red is NOT the error-border
+        // token for exactly this: that one owes 3:1 and its dark value read
+        // 4.19:1 on the alert background — a latent failure an adversarial
+        // round computed before any usage reached that surface.
+        for (const [fg, name] of [
+          [vars.okTxt, "confirmation green"],
+          [vars.refusTxt, "refusal red"],
+        ] as const) {
+          expect(
+            contrast(fg, vars.carte),
+            `${scheme}: ${name} vs card`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrast(fg, vars.alerteFond),
+            `${scheme}: ${name} vs alert background`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
       }
     });
 
@@ -225,11 +263,9 @@ test.describe
     });
 
     test.describe(() => {
-      // reducedMotion re-affirmed BESIDE the scheme: the style sampling
-      // that diagnosed the button morph saw live 150 ms transitions in this
-      // describe while the config-level reduce should have stilled them —
-      // whatever the merge rule, stating both here costs nothing
-      test.use({ colorScheme: "dark", reducedMotion: "reduce" });
+      // colorScheme alone: `use.reducedMotion` is the no-op the beforeEach
+      // at the top of this file documents — reduce arrives by emulateMedia
+      test.use({ colorScheme: "dark" });
       test("browser mode in dark: the hand-defined palette holds", async ({
         page,
       }) => {
@@ -374,11 +410,9 @@ test.describe
     // all THREE modes — browser mode alone left the two screens a volunteer
     // spends the campaign on unscanned in the dark.
     test.describe(() => {
-      // reducedMotion re-affirmed BESIDE the scheme: the style sampling
-      // that diagnosed the button morph saw live 150 ms transitions in this
-      // describe while the config-level reduce should have stilled them —
-      // whatever the merge rule, stating both here costs nothing
-      test.use({ colorScheme: "dark", reducedMotion: "reduce" });
+      // colorScheme alone: `use.reducedMotion` is the no-op the beforeEach
+      // at the top of this file documents — reduce arrives by emulateMedia
+      test.use({ colorScheme: "dark" });
 
       test("team mode in dark", async ({ page }) => {
         const origin = campaignOrigin(FIRST_CAMPAIGN);
