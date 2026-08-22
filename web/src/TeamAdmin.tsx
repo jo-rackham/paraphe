@@ -188,6 +188,7 @@ function ConfigurationCampagne({
           <label>
             Nom de la campagne
             <input
+              type="text"
               value={name}
               maxLength={200}
               onChange={(e) => setName(e.target.value)}

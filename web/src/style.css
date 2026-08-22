@@ -176,6 +176,9 @@ a { color: var(--lien); }
          overflow-x: auto; box-shadow: 0 1px 2px var(--ombre); }
 /* sign-in: two fields lost on a 64 rem line — a narrow centred card */
 .carte.etroite { max-width: 26rem; margin-left: auto; margin-right: auto; }
+/* the sign-in page introduces the campaign and the tool: a readable
+   measure, not the full 64 rem line */
+.presentation { max-width: 44rem; }
 /* Status chip: a dot in the status hue, a quiet border, the theme's own
    text — the old hardcoded pastels forced light backgrounds onto the dark
    scheme. The dot is decorative; the label alone carries the state. */
@@ -229,10 +232,15 @@ button.secondaire, .bouton.secondaire { background: var(--noir); color: #fff;
 button.lien { background: none; border: 0; color: var(--lien); font: inherit;
   padding: 0; cursor: pointer; text-decoration: underline; text-align: left; }
 main button.lien { font-weight: inherit; }
-input[type=text], input[type=password], input[type=email], select, textarea {
+/* input:not([type]) is a text field the tag simply does not say — it must
+   not render browser-default beside nine styled ones */
+input[type=text], input[type=password], input[type=email], input[type=search],
+input[type=number], input:not([type]), select, textarea {
   font: inherit; padding: .5rem .6rem; border: 1px solid var(--champ-trait);
   border-radius: .45rem; width: 100%; background: var(--champ);
   color: var(--texte); }
+/* a number is a few digits: at full width it reads as a text field */
+input[type=number] { max-width: 9rem; }
 input:focus, select:focus, textarea:focus {
   outline: 3px solid var(--focus); outline-offset: 1px; }
 /* the border firms up under the pointer: a field is where you can type */
@@ -243,8 +251,24 @@ textarea:hover:not(:focus) { border-color: var(--texte-sec); }
 button:focus-visible, a:focus-visible, summary:focus-visible {
   outline: 3px solid currentColor; outline-offset: 2px; }
 textarea { resize: vertical; }
+/* A full-width control wrapped in its label wraps onto the text's own line
+   box: no gap of its own, the field biting the words above it. Beside a
+   label (htmlFor), the same. :where() keeps these a DEFAULT any specific
+   rule outranks (.barre-statut keeps its tighter .15rem). Checkboxes stay
+   out: their label text follows the box on one line. */
+label > :where(input[type=text], input[type=password], input[type=email],
+    input[type=search], input[type=number], input[type=file],
+    input:not([type]), select, textarea),
+label + :where(input[type=text], input[type=password], input[type=email],
+    input[type=search], input[type=number], input[type=file],
+    input:not([type]), select, textarea) {
+  display: block; margin-top: .3rem; }
+/* a label whose visible name is for the ear only (sr-only) draws no line of
+   text above the control: nothing to breathe from */
+label:has(> .sr-only:first-child) > :where(input, select, textarea) {
+  margin-top: 0; }
 /* campaign fields: the label sits BESIDE its control, not around it */
-label[for^="champ-"] { display: block; margin-bottom: .25rem; }
+label[for^="champ-"] { display: block; }
 form.enligne { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
 form.enligne > div { flex: 1; min-width: 12rem; }
 details { border: 1px solid var(--trait); border-radius: .6rem;
