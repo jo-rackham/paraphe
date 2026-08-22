@@ -842,6 +842,56 @@ describe("the deployment files", () => {
     }
     expect(offenders).toEqual({});
   });
+
+  // PUBLIC IS TWO THINGS, and the bucket needs both. `<img>` needs no CORS,
+  // which is why the header has always shown a campaign's logo and why this
+  // was invisible: the account-less version does not use an `<img>` on the
+  // remote URL — it promises nothing leaves the browser, so it FETCHES the
+  // bytes and inlines them as a data URI. A response with no
+  // `Access-Control-Allow-Origin` is refused by the browser, in the console
+  // alone, and every campaign adopted through either door arrived WITHOUT
+  // ITS MARK. Measured on production before it was written here.
+  //
+  // The rule is read out of the init script rather than asserted against a
+  // live store, because that script is the only thing that decides it: one
+  // file, run by the compose stack and by the chart's Job, and a bucket
+  // recreated tomorrow gets whatever it says.
+  it("let a browser fetch a logo cross-origin from the object store", () => {
+    const sh = readFileSync(
+      join(ROOT, "chart", "paraphe", "files", "garage-init.sh"),
+      "utf8",
+    );
+    const update = /UpdateBucket[\s\S]*?>\/dev\/null/.exec(sh);
+    expect(
+      update,
+      "the bucket is no longer published where this test reads it",
+    ).toBeTruthy();
+    expect(
+      update![0],
+      "the bucket carries no CORS rule: the account-less version fetches " +
+        "the logo to inline it, and a fetch without Access-Control-Allow-" +
+        "Origin is refused — the campaign is adopted without its mark, and " +
+        "the failure shows in the console alone",
+    ).toContain("corsRules");
+    expect(update![0], "the rule allows no origin").toMatch(
+      /"AllowedOrigin"\s*:\s*\[\s*"\*"\s*\]/,
+    );
+    // READ ONLY, and the methods are read out of THEIR OWN list rather than
+    // searched for in the whole rule: `AllowedHeader` is `["*"]`, so a scan
+    // of the block reads that star as a method and refuses a rule that is
+    // correct. A canary that cries on the right answer is one the next
+    // author routes around.
+    const methods = /"AllowedMethod"\s*:\s*\[([^\]]*)\]/.exec(update![0]);
+    expect(
+      methods,
+      "the rule allows no method, so it matches no request",
+    ).toBeTruthy();
+    expect(
+      [...methods![1].matchAll(/"([^"]*)"/g)].map((m) => m[1]),
+      "writing to this bucket is signed, and a CORS rule naming a write " +
+        "method offers the browser the door that signature exists to keep shut",
+    ).toEqual(["GET"]);
+  });
 });
 
 // A PARAPHE_* variable named in the chart, in .env.exemple or in the

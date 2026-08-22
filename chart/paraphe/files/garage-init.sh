@@ -282,6 +282,23 @@ done
 # the store's own origin, so the bucket has to be readable without a
 # signature. Only logos live here, and each of them is already shown on a
 # public sign-in page.
+#
+# CORS IS THE OTHER HALF OF PUBLIC, and without it the account-less version
+# adopted every campaign WITHOUT ITS MARK. An `<img>` needs no CORS, which is
+# why the header has always shown the logo; but that mode promises nothing
+# leaves the browser, so it FETCHES the bytes and inlines them as a data URI
+# — and a fetch of a response carrying no `Access-Control-Allow-Origin` is
+# refused by the browser, in the console alone. Measured on production:
+# `logo: 0` after adopting a campaign that has one.
+#
+# `GET` and `*`: this bucket holds public images and nothing else, it is
+# already readable by anyone with the URL, and the browser version may be
+# served from any origin — a campaign's own subdomain, the apex, or a static
+# publication on somebody else's host. Writing stays signed, and no rule
+# here grants it.
 api POST "/v2/UpdateBucket?id=$bucket" -d '{"websiteAccess": {"enabled": true,
-  "indexDocument": "index.html", "errorDocument": "index.html"}}' >/dev/null
-echo "bucket $MEDIA_BUCKET is served on the web endpoint"
+  "indexDocument": "index.html", "errorDocument": "index.html"},
+  "corsRules": [{"ID": "paraphe-logos", "AllowedOrigin": ["*"],
+    "AllowedMethod": ["GET"], "AllowedHeader": ["*"],
+    "MaxAgeSeconds": 3600}]}' >/dev/null
+echo "bucket $MEDIA_BUCKET is served on the web endpoint, readable cross-origin"
