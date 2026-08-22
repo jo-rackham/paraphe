@@ -1480,6 +1480,15 @@ the sign-in page. PNG, JPEG, WebP or SVG, 64 KiB at most.
   select at the bottom was the only place it showed, and a pending pick
   hides even that. « Copier » answers (« Copié. », or a refusal): clipboard
   access can be denied, and unawaited it failed in silence.
+  **EVERY setState that follows an await on this card is gated by a counter
+  the swap block bumps — whatever the act.** The first four regressions of
+  the wrong-card class were all writes of save/onNote; the FIFTH arrived
+  with the first OTHER async act, « Copier » : its confirmation landed on
+  the next mayor's card, where « Copié. » means paste A's text into a mail
+  addressed to B — and its refusal sent the volunteer hand-selecting B's
+  text for A's message. `copies` joined `saves` and `revisions`; whoever
+  adds an async act to the card adds its counter, or the adversarial round
+  after them will.
   **Motion never blends what axe reads.** The arrival animation is a slide
   with NO opacity ramp, and opacity is not in the shared transition list —
   aria-disabled flips it on every busy button, and whoever measures contrast

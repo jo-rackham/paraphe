@@ -1405,10 +1405,14 @@ export function Fiche({
   const [notesBusy, setNotesBusy] = useState(false);
   const [noteSubmitting, noteSubmitted] = useSubmitGuard();
   // How many acts of each KIND this card has begun. Declared here because the
-  // block that resets per-card state bumps both; what they are FOR is under
-  // `superseded`.
+  // block that resets per-card state bumps all three; what they are FOR is
+  // under `superseded`. `copies` is the FIFTH regression of the class — the
+  // first four were all writes of save/onNote, this one arrived with the
+  // first OTHER await on the card: the rule is every setState that follows
+  // an await here, whatever the act.
   const saves = useRef(0);
   const revisions = useRef(0);
+  const copies = useRef(0);
 
   let rendered: {
     subject: string;
@@ -1547,6 +1551,7 @@ export function Fiche({
       // at: it writes nothing when it lands (see `superseded`)
       saves.current += 1;
       revisions.current += 1;
+      copies.current += 1;
     }
     shown.current = { basis, who };
     const e = freshEmail();
@@ -2028,13 +2033,21 @@ export function Fiche({
                     // clipboard access can be REFUSED — a permissions
                     // policy, an embedded browser — and unawaited, the
                     // refusal was silent: the volunteer pasted nothing into
-                    // their mailer with the screen saying nothing at all
+                    // their mailer with the screen saying nothing at all.
+                    // GATED like every write that follows an await on this
+                    // card: in browser mode the mayor swaps under the mount,
+                    // and a « Copié. » landing on the NEXT card is a paste
+                    // of A's text into a mail addressed to B — the
+                    // setNote("") defect, one panel over.
+                    const act = begin(copies);
                     try {
                       await navigator.clipboard.writeText(
                         `${subject}\n\n${body}`,
                       );
+                      if (superseded(copies, act)) return;
                       setCopied({ tone: "ok", text: "Copié." });
                     } catch {
+                      if (superseded(copies, act)) return;
                       setCopied({
                         tone: "erreur",
                         text:

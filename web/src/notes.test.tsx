@@ -1348,6 +1348,65 @@ describe("a pick belongs to the mayor it was made on", () => {
     );
   });
 
+  // « COPIER » IS AN AWAIT ON THIS CARD LIKE ANY OTHER, and it was the fifth
+  // regression of the class: the first four were all writes of save/onNote,
+  // this one arrived with the first OTHER async act. A « Copié. » landing on
+  // the NEXT mayor's card is read as that card's — the volunteer pastes A's
+  // text into a mail addressed to B, under A's words. Found by an
+  // adversarial round, red-proven before the gate was written.
+  it("does not confirm a copy on the card the volunteer moved to", async () => {
+    let resolveClipboard: () => void = () => {};
+    const inFlight = new Promise<void>((r) => {
+      resolveClipboard = r;
+    });
+    (
+      navigator as unknown as { clipboard: { writeText: () => Promise<void> } }
+    ).clipboard = { writeText: () => inFlight };
+
+    await act(() => {
+      root.render(<DeuxFiches filed={[]} />);
+    });
+    await click("📋 Copier");
+    await click("fiche suivante");
+    await act(async () => {
+      resolveClipboard();
+      await inFlight;
+    });
+    await flush();
+    expect(
+      text(),
+      "« Copié. » must not appear on a card the volunteer never copied",
+    ).not.toContain("Copié.");
+  });
+
+  // …and the REFUSAL is the worse half: « Impossible de copier » on the next
+  // card sends the volunteer hand-selecting THAT card's text for a message
+  // whose context they have just lost.
+  it("does not blame the next card for the previous card's clipboard refusal", async () => {
+    let refuse: (e: Error) => void = () => {};
+    const inFlight = new Promise<void>((_r, rej) => {
+      refuse = rej;
+    });
+    (
+      navigator as unknown as { clipboard: { writeText: () => Promise<void> } }
+    ).clipboard = { writeText: () => inFlight };
+
+    await act(() => {
+      root.render(<DeuxFiches filed={[]} />);
+    });
+    await click("📋 Copier");
+    await click("fiche suivante");
+    await act(async () => {
+      refuse(new Error("denied"));
+      await inFlight.catch(() => {});
+    });
+    await flush();
+    expect(
+      text(),
+      "the clipboard refusal for one mayor must not accuse the next",
+    ).not.toContain("Impossible de copier");
+  });
+
   // AND THE NOTE CONTROLS ARE RELEASED LIKE THE SAVE BUTTON, which is the
   // same rule one panel down and was carried by nothing: removing either half
   // of it from the reset block left all 335 tests green. Two mayors are two
