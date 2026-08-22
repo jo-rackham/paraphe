@@ -782,6 +782,12 @@ describe("the offer banner, rendered", () => {
       () => text().includes("Campagne enregistrée"),
       "the save lands",
     );
+    // …and the word BESIDE the button says so too: the page banner lives at
+    // the top of a long form, off-screen from where the press happened
+    await until(
+      () => text().includes("Enregistré."),
+      "the local confirmation appears",
+    );
     expect(text()).not.toContain("Reprendre la campagne");
     // the banner is a claim about the BASE, not about the screen: under a
     // mutation that dropped the writes, every assertion above stayed green

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ChampLogo, ChampsCampagne } from "./common.tsx";
 import { ModelesMessages } from "./Templates.tsx";
 import type { Campaign, Message, Templates } from "./types.ts";
@@ -38,11 +39,13 @@ interface CampaignTabProps {
   campaignTemplates: Templates;
   onTemplates: (templates: Templates) => Promise<Templates>;
   onMessage: (m: Message) => void;
+  // awaited: the word beside the button appears once the parent's writes
+  // have landed, not when the click did
   onSave: (
     cfg: Campaign,
     personalNote: string,
     appelTelephonique: boolean,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 export function CampaignTab({
@@ -62,6 +65,10 @@ export function CampaignTab({
   onMessage,
   onSave,
 }: CampaignTabProps) {
+  // whether the LAST press got as far as the parent's answer — shown only
+  // once `dirty` has nothing left to warn about, so a failed save (which
+  // leaves the draft dirty) never reads as saved
+  const [savedSaid, setSavedSaid] = useState(false);
   return (
     <>
       <h1>Ma campagne</h1>
@@ -111,14 +118,31 @@ export function CampaignTab({
         </p>
         <button
           type="button"
-          onClick={() => onSave(draft, note, appelTelephonique)}
+          onClick={async () => {
+            setSavedSaid(false);
+            await onSave(draft, note, appelTelephonique);
+            // the parent reports its own failure and the draft then stays
+            // DIRTY, which is the branch shown below — this word appears
+            // only once the marker has nothing left to warn about
+            setSavedSaid(true);
+          }}
         >
           Enregistrer
         </button>
         {/* persistent: the marker appears as a text change, not as a node
-            mounting with its warning already written */}
-        <span className="gris" role="status" style={{ marginLeft: ".6rem" }}>
-          {dirty ? "modifications non enregistrées" : ""}
+            mounting with its warning already written. Three states, dirty
+            first: a form retyped after a save is unsaved again, whatever
+            was said in between. */}
+        <span
+          className={dirty ? "gris" : "confirmation"}
+          role="status"
+          style={{ marginLeft: ".6rem" }}
+        >
+          {dirty
+            ? "modifications non enregistrées"
+            : savedSaid
+              ? "Enregistré."
+              : ""}
         </span>
       </div>
       {/* The same editor the account version uses, one level down: here the

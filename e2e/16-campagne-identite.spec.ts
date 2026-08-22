@@ -24,6 +24,9 @@ test.use({ extraHTTPHeaders: { "X-Forwarded-For": "192.0.2.16" } });
 async function saveCampaign(page: Page) {
   await page.getByRole("button", { name: "Enregistrer la campagne" }).click();
   await expect(page.getByText(/Campagne enregistrée/)).toBeVisible();
+  // and the word BESIDE the button: the banner lives at the top of a long
+  // form, off-screen from where the press happened
+  await expect(page.getByText("Enregistré.", { exact: true })).toBeVisible();
 }
 
 /** The email of the first card on this account's dashboard. */

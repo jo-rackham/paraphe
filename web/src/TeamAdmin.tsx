@@ -102,13 +102,17 @@ function ConfigurationCampagne({
   // The refusal, IN THIS CARD: the page banner lives at the top of a long
   // screen and misses the eye of whoever is scrolled down to this form — a
   // refused save whose reason shows nowhere visible reads as a save that
-  // silently did nothing.
+  // silently did nothing. The SUCCESS gets the same treatment for the same
+  // scroll: the detailed sentence still goes to the page banner, this is
+  // the word beside the button that was just pressed.
   const [refus, setRefus] = useState("");
+  const [saved, setSaved] = useState("");
   const [busy, done] = useSubmitGuard();
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy()) return; // a REF: state is a render behind
+    setSaved("");
     setSending(true);
     try {
       const r = await API.updateCampaign(
@@ -134,6 +138,7 @@ function ConfigurationCampagne({
         },
       });
       setRefus("");
+      setSaved("Enregistré.");
       onMessage({
         tone: "ok",
         text:
@@ -270,7 +275,12 @@ function ConfigurationCampagne({
       </p>
       <button type="submit" aria-disabled={sending || undefined}>
         {sending ? "Enregistrement…" : "Enregistrer la campagne"}
-      </button>
+      </button>{" "}
+      {/* pre-exists, text-change only: a region inserted with its text is
+          a region nothing announces */}
+      <span role="status" className="confirmation">
+        {saved}
+      </span>
     </form>
   );
 }

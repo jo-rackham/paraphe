@@ -206,9 +206,12 @@ test.describe
       page,
     }) => {
       await probeSignIn(page);
-      // the guide is the landing; the dashboard hands a card
+      // the guide is the landing; the dashboard hands a card. The tabs are
+      // LINKS (a real href is what lets ctrl+clic open a view in a new
+      // tab): this suite only runs when the probe variables are set, so it
+      // aged past that change unnoticed.
       await page
-        .getByRole("button", { name: "Mon tableau", exact: true })
+        .getByRole("link", { name: "Mon tableau", exact: true })
         .click();
       await expect(
         page.getByRole("button", { name: "Prendre un lot" }),
@@ -228,8 +231,9 @@ test.describe
       page,
     }) => {
       await probeSignIn(page);
+      // a LINK, like every tab — see « Mon tableau » above
       await page
-        .getByRole("button", { name: /^(Ma campagne|Mon équipe)$/ })
+        .getByRole("link", { name: /^(Ma campagne|Mon équipe)$/ })
         .click();
       const editor = page.locator(".carte", {
         hasText: "Les modèles de messages",
@@ -249,7 +253,7 @@ test.describe
 
       // the card renders the stored text, placeholders filled
       await page
-        .getByRole("button", { name: "Mon tableau", exact: true })
+        .getByRole("link", { name: "Mon tableau", exact: true })
         .click();
       await page.locator("table button.lien").first().click();
       await page.getByText("📮 Courrier").click();
@@ -259,7 +263,7 @@ test.describe
 
       // leave the probe campaign on the shipped text
       await page
-        .getByRole("button", { name: /^(Ma campagne|Mon équipe)$/ })
+        .getByRole("link", { name: /^(Ma campagne|Mon équipe)$/ })
         .click();
       const again = page.locator(".carte", {
         hasText: "Les modèles de messages",
