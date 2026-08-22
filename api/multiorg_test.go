@@ -278,6 +278,43 @@ func TestApexIsNotACampaign(t *testing.T) {
 	}
 }
 
+// A campaign's screens link back to the instance's home page — the apex is
+// where the tool is explained and the campaigns are listed. The subdomain's
+// own config is the one place the interface can learn it from: the page's
+// host carries it, but reading it out of `location` would re-implement the
+// Host-resolution rules client-side.
+func TestACampaignConfigNamesTheApex(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "paraphe.test")
+	_, srv := testServer(t)
+
+	c := clientOn(t, srv, testSlug+".paraphe.test")
+	code, rep := c.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK || rep["mode"] != "team" {
+		t.Fatalf("/api/config on the campaign: %d %v", code, rep)
+	}
+	if rep["base_domain"] != "paraphe.test" {
+		t.Errorf("the campaign config does not name the apex: %v",
+			rep["base_domain"])
+	}
+}
+
+// A single-campaign instance has no apex: every host serves the campaign,
+// and a link « back to the instance » would point at the very page it is on.
+// The interface hides the link on an empty value, so the value must be empty.
+func TestASingleCampaignConfigNamesNoApex(t *testing.T) {
+	t.Setenv("PARAPHE_BASE_DOMAIN", "")
+	_, srv := testServer(t)
+
+	c := clientOn(t, srv, "whatever.example")
+	code, rep := c.call(http.MethodGet, "/api/config", nil)
+	if code != http.StatusOK || rep["mode"] != "team" {
+		t.Fatalf("/api/config single-campaign: %d %v", code, rep)
+	}
+	if domain, _ := rep["base_domain"].(string); domain != "" {
+		t.Errorf("a single-campaign instance names an apex: %q", domain)
+	}
+}
+
 // The form is public, but it creates nothing: the approval is what creates
 // the campaign, and with it its requester's access.
 func TestRequestThenApprovalCreatesCampaign(t *testing.T) {

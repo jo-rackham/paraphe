@@ -989,11 +989,35 @@ export function httpUrl(raw: string | undefined | null): string | undefined {
   }
 }
 
+/**
+ * The instance's home page, when this campaign is a subdomain of one — where
+ * the tool is explained and the hosted campaigns are listed. Undefined on a
+ * single-campaign instance: every host serves the campaign, there is no apex
+ * to link to, and `/api/config` says so with an empty `base_domain`.
+ *
+ * The HOST is the configured base domain, bounded to DNS labels by the
+ * server before it reaches this body. The SCHEME and the PORT are the
+ * page's own: the instance that names itself served this very page, so it
+ * is reachable as this page was reached — hardcoded `https` and no port
+ * points every instance not listening on 443 at a host nothing answers,
+ * and only the end-to-end suite would see it (prefill.ts, publicCampaignUrl,
+ * carries the same lesson).
+ */
+export function instanceApex(
+  baseDomain: string | undefined,
+): { url: string; domain: string } | undefined {
+  const domain = (baseDomain ?? "").trim();
+  if (!domain) return undefined;
+  const port = window.location.port ? `:${window.location.port}` : "";
+  return { url: `${window.location.protocol}//${domain}${port}/`, domain };
+}
+
 export function PiedDePage({
   children,
   sourceUrl,
   browserUrl,
   teamUrl,
+  apex,
 }: {
   children?: ReactNode;
   sourceUrl?: string;
@@ -1013,6 +1037,13 @@ export function PiedDePage({
    * operator set, this one is a constant this application produces.
    */
   teamUrl?: string;
+  /**
+   * The instance's home page, when this campaign is one of several — the
+   * door back to the apex, on every screen like the account-less door
+   * above. Built by `instanceApex` from the host the server bounded and
+   * the page's own scheme and port, so no `httpUrl` here either.
+   */
+  apex?: { url: string; domain: string };
 }) {
   const source = httpUrl(sourceUrl);
   const sansCompte = httpUrl(browserUrl);
@@ -1029,6 +1060,12 @@ export function PiedDePage({
           <a href={teamUrl}>
             Revenir à la version avec compte, pour travailler à plusieurs
           </a>
+        </p>
+      )}
+      {apex && (
+        <p className="sans-compte">
+          Campagne hébergée sur <a href={apex.url}>{apex.domain}</a> —
+          présentation de l'outil et annuaire des campagnes.
         </p>
       )}
       {source && (

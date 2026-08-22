@@ -17,6 +17,7 @@ export const teamConfig = (over: Partial<ServerConfig> = {}): ServerConfig => ({
   source_url: "",
   magic_link: false,
   browser_version_url: "",
+  base_domain: "",
   departments: [],
   logo: null,
   statuses: [{ key: "to_contact", label: "À contacter", colour: "#eee" }],

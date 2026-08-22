@@ -164,6 +164,13 @@ export interface ServerConfig {
   /** Present when the instance hosts several campaigns. */
   organisation?: { slug: string; name: string; listed: boolean };
   /**
+   * The apex this campaign is a subdomain of — where the instance explains
+   * the tool and lists its campaigns. Empty or absent on a single-campaign
+   * instance (every host serves the campaign, there is no apex to link to)
+   * and on an API one release behind; both read as « no link to show ».
+   */
+  base_domain?: string;
+  /**
    * Whether the campaign telephones the mayors it writes to — its DEFAULT.
    * A volunteer who has answered for themselves (Account.phone_outreach)
    * overrides it; one who has not follows it as it changes.

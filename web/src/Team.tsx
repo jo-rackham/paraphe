@@ -15,6 +15,7 @@ import {
   Guide,
   gestionLabel,
   httpUrl,
+  instanceApex,
   LogoCampagne,
   Marque,
   NavOnglets,
@@ -641,6 +642,7 @@ function Coquille({
       <PiedDePage
         sourceUrl={cfg.source_url}
         browserUrl={cfg.browser_version_url}
+        apex={instanceApex(cfg.base_domain)}
       >
         <p>
           Le travail est enregistré sur le serveur de la campagne. Vos notes et
@@ -670,6 +672,19 @@ function Connexion({
   // is a setting an operator can leave empty, and an <a> with no href is a
   // link that looks like one and does nothing.
   const sansCompte = httpUrl(cfg.browser_version_url);
+  // What this page IS, for whoever lands on the campaign's address without
+  // an account — a mayor following a link, a volunteer someone recruited by
+  // telephone. The candidate is named only once the campaign filled the
+  // field: before that the value is the template's « Prénom NOM », which
+  // must reach no screen as if it were a name.
+  const candidat = cfg.unfilled?.includes("candidat")
+    ? ""
+    : cfg.campaign.candidat;
+  const qualite = cfg.unfilled?.includes("candidat_description")
+    ? ""
+    : cfg.campaign.candidat_description;
+  const nomCampagne = cfg.organisation?.name ?? "";
+  const apex = instanceApex(cfg.base_domain);
   return (
     <>
       {/* The campaign's mark on the one page a volunteer reaches before the
@@ -681,6 +696,37 @@ function Connexion({
         <LogoCampagne logo={cfg.logo} className="grand" />
       </p>
       <h1>Connexion</h1>
+      <p className="presentation">
+        {candidat ? (
+          <>
+            Cet espace est celui de la campagne de <strong>{candidat}</strong>
+            {qualite ? `, ${qualite}` : ""}.
+          </>
+        ) : nomCampagne ? (
+          <>
+            Cet espace est celui de la campagne{" "}
+            <strong>« {nomCampagne} »</strong>.
+          </>
+        ) : (
+          <>Cet espace est celui d'une campagne en préparation.</>
+        )}{" "}
+        Les bénévoles s'y organisent pour réunir les 500 parrainages d'élus
+        qu'exige une candidature à l'élection présidentielle de 2027 : repérer
+        les maires à contacter, suivre les échanges, écrire d'une seule voix.
+      </p>
+      <p className="presentation">
+        Il fonctionne avec paraphe, un outil libre au service des candidatures
+        qui partent loin des projecteurs
+        {apex ? (
+          <>
+            {" "}
+            — présentation de l'outil et annuaire des campagnes sur{" "}
+            <a href={apex.url}>{apex.domain}</a>.
+          </>
+        ) : (
+          "."
+        )}
+      </p>
       <FormulaireConnexion
         magicLink={cfg.magic_link}
         onSignedIn={onSignedIn}

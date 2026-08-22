@@ -86,6 +86,13 @@ func (s *Server) routeConfig(w http.ResponseWriter, r *http.Request) {
 		// it (see /api/me); one who has not follows it, and follows it as it
 		// CHANGES rather than as it stood the day their account was made.
 		"phone_outreach": org.PhoneOutreach,
+		// The apex this campaign is a subdomain of — what lets its screens
+		// link back to the instance's home page, where the tool is explained
+		// and the campaigns are listed. Already public one host over (the
+		// instance answer above), so it reveals nothing. Empty on a
+		// single-campaign instance, which has no apex to point at: the
+		// interface then shows no link.
+		"base_domain": BaseDomain(),
 		"organisation": map[string]any{
 			"slug": org.Slug, "name": org.Name,
 			// the toggle "Mon équipe" shows needs the current state
