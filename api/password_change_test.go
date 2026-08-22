@@ -66,6 +66,14 @@ func TestChangingThePasswordRequiresTheCurrentOne(t *testing.T) {
 	if code != http.StatusForbidden {
 		t.Fatalf("a wrong current password: %d %v, want 403", code, body)
 	}
+	// The waiver belongs to the LINK door alone: on a password session an
+	// empty `current` is a wrong password, not a shortcut to the waived path.
+	if code, body := c.call(http.MethodPost, "/api/me/password",
+		map[string]string{"current": "", "new": newPassword}); code != http.StatusForbidden {
+		t.Fatalf("an EMPTY current password on a password session: %d %v, "+
+			"want 403 — this is the exact request a link session sends, and "+
+			"accepting it here waives the proof for every stolen cookie", code, body)
+	}
 	// …and the account is untouched: the old password still opens it, and
 	// the new one does not
 	if code := newClient(t, srv).signIn(email, old); code != http.StatusOK {
@@ -194,6 +202,76 @@ func TestTheInstanceAdministrationChangesItsOwnPassword(t *testing.T) {
 	if code := clientOn(t, srv, "paraphe.test").
 		signIn(email, newPassword); code != http.StatusOK {
 		t.Errorf("the new password does not open the administration: %d", code)
+	}
+}
+
+// A session the emailed link opened chooses a password WITHOUT the old one.
+// Whoever clicked that link is usually the person who forgot it — a lone
+// coordination most of all, with nobody above them to draw one — and the
+// link out of their own inbox is the ownership the current password proves
+// on every other session.
+func TestALinkSessionChoosesAPasswordWithoutTheOldOne(t *testing.T) {
+	s, srv := testServer(t)
+	withMailer(t, s, "https://campagne.exemple.fr")
+	email := "coordination@exemple.fr"
+	forgotten := createAccount(t, s, email, RoleCoordination, nil)
+
+	c := newClient(t, srv)
+	code, body := redeem(t, c, askForLink(t, s, c, email))
+	if code != http.StatusOK {
+		t.Fatalf("redeeming the link: %d %v", code, body)
+	}
+	// the answer says which door this session came through — it is what the
+	// profile screen reads to stop asking for a password nobody typed
+	if via, _ := body["via_link"].(bool); !via {
+		t.Fatalf("the redeem answer does not say via_link: %v", body)
+	}
+
+	if code, body := c.call(http.MethodPost, "/api/me/password",
+		map[string]string{"current": "", "new": newPassword}); code != http.StatusOK {
+		t.Fatalf("a link session setting a password: %d %v — « mot de passe "+
+			"oublié » ends on a form asking for the forgotten password", code, body)
+	}
+	// the new password opens the account, the forgotten one is gone
+	if code := newClient(t, srv).signIn(email, newPassword); code != http.StatusOK {
+		t.Errorf("the chosen password does not open the account: %d", code)
+	}
+	if code := newClient(t, srv).signIn(email, forgotten); code != http.StatusUnauthorized {
+		t.Errorf("the forgotten password still opens the account: %d", code)
+	}
+	// and /api/me now reads as a PASSWORD session: the change is that proof,
+	// so the next change from this very session must prove the current one
+	if code, me := c.call(http.MethodGet, "/api/me", nil); code != http.StatusOK {
+		t.Fatalf("the session that set the password fell: %d %v", code, me)
+	} else if via, _ := me["via_link"].(bool); via {
+		t.Errorf("the re-minted session still claims the link door: the " +
+			"waiver would outlive the one proof it was granted on")
+	}
+	if code, body := c.call(http.MethodPost, "/api/me/password",
+		map[string]string{"current": "", "new": "prairie-fenetre-ruban-77"}); code != http.StatusForbidden {
+		t.Errorf("a second change without the current password: %d %v, want "+
+			"403 — the waiver is the link's, not the session's for ever", code, body)
+	}
+}
+
+// A password session says so, in the same key: the interface would otherwise
+// hide the current-password field on the strength of a field that is absent.
+func TestAPasswordSessionSaysItIsNotALinkOne(t *testing.T) {
+	s, srv := testServer(t)
+	email := "benevole@exemple.fr"
+	password := createAccount(t, s, email, RoleVolunteer, nil)
+	c := newClient(t, srv)
+	if code := c.signIn(email, password); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	code, me := c.call(http.MethodGet, "/api/me", nil)
+	if code != http.StatusOK {
+		t.Fatalf("/api/me: %d", code)
+	}
+	via, present := me["via_link"].(bool)
+	if !present || via {
+		t.Errorf("a password session reads back via_link=%v (present=%v), "+
+			"want an explicit false", via, present)
 	}
 }
 

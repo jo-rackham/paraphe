@@ -736,6 +736,23 @@ discovered by paying for it.
   with twelve hours on it; without that proof, whoever picked one up off a
   shared computer would turn a borrowed afternoon into ownership of the
   account, with its owner locked out.
+  **EXCEPT on a session the emailed link opened**, and that exception is what
+  makes « mot de passe oublié » end somewhere: the link left the account's
+  own inbox minutes ago — the same ownership, proved at the other door — and
+  whoever clicked it usually clicked it because they FORGOT the password the
+  form would demand. Without it, a lone coordination had no way back at all.
+  The door rides in the token (claim `via`, read `linkSession(r)`), the
+  three me-shaped answers carry it as `via_link`, and the profile hides the
+  current-password field on it. The change re-mints the session at the
+  PASSWORD door — the change itself is that proof — so the waiver is the
+  link's, never the session's for ever. The inbox stays the root of trust: a
+  link-session picked up off a shared computer can set a password, and the
+  owner, who holds the inbox, links in again and sets it back — which signs
+  the thief out. The claim's VALUES are closed (empty or `link`): a third
+  one is a token something else minted, refused like an unknown claim.
+  **`contextKey` values are EXPLICIT, one per file**: scope.go holds 1, and
+  an iota in auth.go handed the new key that same value — every request then
+  overwrote its own scope with a bool, and 116 tests went red at once.
 - **A wrong current password answers 403, never 401.** This interface reads
   a 401 from an authenticated route as « your session is gone » — it fires
   `SESSION_LOST` and returns the volunteer to the sign-in form — so a typo

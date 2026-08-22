@@ -17,9 +17,23 @@ interface ProfilProps {
   onSaved: (personalNote: string, phoneOutreach: boolean | null) => void;
   /** the page-level live region, in the shell: see Team.tsx */
   onMessage: (m: Message) => void;
+  /**
+   * The password just changed, so the session is a PASSWORD one now
+   * whatever door it came through: the parent flips `me.via_link` off, and
+   * the form asks for the current password again — as the server would
+   * demand it, since the re-minted cookie no longer claims the link door.
+   */
+  onPasswordChanged: () => void;
 }
 
-export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
+export function Profil({
+  me,
+  cfg,
+  onError,
+  onSaved,
+  onMessage,
+  onPasswordChanged,
+}: ProfilProps) {
   const [personalNote, setPersonalNote] = useState(
     me.account.personal_note ?? "",
   );
@@ -111,7 +125,12 @@ export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
         </button>
       </div>
 
-      <MotDePasse onError={onError} onMessage={onMessage} />
+      <MotDePasse
+        viaLink={me.via_link === true}
+        onChanged={onPasswordChanged}
+        onError={onError}
+        onMessage={onMessage}
+      />
 
       <div className="carte">
         <h2 style={{ marginTop: 0 }}>La campagne</h2>
@@ -142,14 +161,25 @@ export function Profil({ me, cfg, onError, onSaved, onMessage }: ProfilProps) {
  * whoever picked one up off a shared computer would turn a borrowed
  * afternoon into permanent ownership — with the owner locked out.
  *
+ * EXCEPT on a session the emailed link opened (`viaLink`): the link left
+ * this account's own inbox, which is the same ownership proved at the other
+ * door — and whoever clicked it usually FORGOT the password this form would
+ * demand. The field is not shown at all there: shown and required, it asks
+ * for what its reader came here lacking; shown and optional, nobody knows
+ * whether to fill it.
+ *
  * Confirming the new one is not ceremony either: nothing here can show what
  * was typed, and a password nobody can read back is a password a typo turns
  * into an account nobody opens again.
  */
 function MotDePasse({
+  viaLink,
+  onChanged,
   onError,
   onMessage,
 }: {
+  viaLink: boolean;
+  onChanged: () => void;
   onError: (e: unknown) => void;
   onMessage: (m: Message) => void;
 }) {
@@ -183,10 +213,13 @@ function MotDePasse({
     setRefus("");
     setSending(true);
     try {
-      await API.changePassword(current, next);
+      // an empty `current` on the link door: the server reads the door from
+      // the session itself, not from this field
+      await API.changePassword(viaLink ? "" : current, next);
       setCurrent("");
       setNext("");
       setConfirm("");
+      onChanged();
       onMessage({
         tone: "ok",
         text:
@@ -207,29 +240,41 @@ function MotDePasse({
   return (
     <form className="carte" onSubmit={submit}>
       <h2 style={{ marginTop: 0 }}>Changer mon mot de passe</h2>
-      <p className="gris">
-        Celui que votre référent vous a communiqué est passé par une
-        conversation, un SMS ou un email. Choisir le vôtre le retire de là.
-        Changer de mot de passe <strong>déconnecte vos autres sessions</strong>{" "}
-        — c'est ce qui sert si vous pensez que quelqu'un d'autre l'a eu.
-      </p>
+      {viaLink ? (
+        <p className="gris">
+          Votre session a été ouverte par le lien reçu par email : ce lien
+          prouve que le compte est à vous, alors{" "}
+          <strong>l'ancien mot de passe n'est pas demandé</strong>. Changer de
+          mot de passe <strong>déconnecte vos autres sessions</strong>.
+        </p>
+      ) : (
+        <p className="gris">
+          Celui que votre référent vous a communiqué est passé par une
+          conversation, un SMS ou un email. Choisir le vôtre le retire de là.
+          Changer de mot de passe{" "}
+          <strong>déconnecte vos autres sessions</strong> — c'est ce qui sert si
+          vous pensez que quelqu'un d'autre l'a eu.
+        </p>
+      )}
       {/* the region PRE-EXISTS its first message and holds no control:
           mounted with its text, some assistive technology never reads it */}
       <p className={refus ? "alerte erreur" : "sr-only"}>
         <span role="alert">{refus}</span>
       </p>
-      <p>
-        <label>
-          Mot de passe actuel
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-          />
-        </label>
-      </p>
+      {!viaLink && (
+        <p>
+          <label>
+            Mot de passe actuel
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </label>
+        </p>
+      )}
       <p>
         <label>
           Nouveau mot de passe

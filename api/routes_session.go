@@ -255,7 +255,7 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 	// The message templates are in there too, and they are the reason this
 	// paragraph is not merely a nicety: read after the commit, the one
 	// sign-in that commits — the hash upgrade — answered 500.
-	body, err := s.meBodyFor(r, c)
+	body, err := s.meBodyFor(r, c, false)
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -282,7 +282,8 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("password hash not upgraded", "account", account, "error", commitErr)
 		}
 	}
-	s.openSession(w, r, c, body, &limitSignInAccount, "signin_succeeded")
+	s.openSession(w, r, c, body, sessionViaPassword, &limitSignInAccount,
+		"signin_succeeded")
 }
 
 // openSession is what happens once a caller has PROVED who they are, by
@@ -305,9 +306,9 @@ func (s *Server) routeSignIn(w http.ResponseWriter, r *http.Request) {
 // and refunding the request ceiling there gave back an event nobody had
 // spent, which is the same observable credit the refund exists to avoid.
 func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
-	c *Account, body map[string]any, countedUnder *limitClass, event string,
-	extra ...any) {
-	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now()); err != nil {
+	c *Account, body map[string]any, via string, countedUnder *limitClass,
+	event string, extra ...any) {
+	if err := s.sessions.Set(w, c.Email, currentOrg(r), s.now(), via); err != nil {
 		s.failure(w, err)
 		return
 	}
@@ -351,6 +352,17 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request,
 // picked one up off a shared computer would turn a borrowed afternoon into
 // permanent ownership of the account, and the owner would be the one locked
 // out. Proving the password is what tells the two apart.
+//
+// EXCEPT when the session itself was opened by an emailed link. That link
+// left the account's own inbox minutes ago — the same ownership, proved at
+// the other door — and whoever clicked it is usually the person who FORGOT
+// the password this route would demand: without the waiver, « mot de passe
+// oublié » ended on a form asking for the forgotten password, and a lone
+// coordination had no way back at all. The inbox stays the root of trust: a
+// link-session picked up off a shared computer can set a password, and the
+// owner — who holds the inbox — asks for a new link and sets it back, which
+// signs the thief out. The session this route re-mints is a PASSWORD one:
+// the change it just made is that proof.
 func (s *Server) routeChangePassword(w http.ResponseWriter, r *http.Request) {
 	var d struct {
 		Current string `json:"current"`
@@ -360,6 +372,7 @@ func (s *Server) routeChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	me := accountOf(r)
+	fromLink := linkSession(r)
 	if utf8.RuneCountInString(d.New) < minPasswordRunes {
 		errorJSON(w, http.StatusBadRequest,
 			"Le nouveau mot de passe doit faire au moins %d caractères. "+
@@ -367,38 +380,39 @@ func (s *Server) routeChangePassword(w http.ResponseWriter, r *http.Request) {
 				"et se retiennent.", minPasswordRunes)
 		return
 	}
-	if d.New == d.Current {
-		errorJSON(w, http.StatusBadRequest,
-			"Le nouveau mot de passe est identique à l'ancien.")
-		return
-	}
-
-	var stored string
-	if err := s.tx(r).QueryRow(r.Context(),
-		"SELECT password_hash FROM accounts WHERE org_id=$1 AND email=$2",
-		scopeOrg(r), me.Email).Scan(&stored); err != nil {
-		s.failure(w, err)
-		return
-	}
-	good, verifyErr := VerifyPassword(stored, d.Current)
-	if verifyErr != nil {
-		// an unreadable hash is an operations problem, not a typing error —
-		// the same treatment as on the sign-in path, and the caller is told
-		// only that it did not verify
-		slog.Error("unusable password hash",
-			"account", s.accountPseudonym(me.Email), "error", verifyErr)
-		good = false
-	}
-	if !good {
-		s.securityEvent(r, slog.LevelInfo, "password_change_refused",
-			"account", s.accountPseudonym(me.Email))
-		// 403 and NOT 401. A 401 from an authenticated route is what this
-		// interface reads as « your session is gone » — it fires SESSION_LOST
-		// and returns the volunteer to the sign-in form — so a mistyped
-		// current password would have thrown them out of a session that is
-		// perfectly alive, with their work behind it.
-		errorJSON(w, http.StatusForbidden, "Mot de passe actuel incorrect.")
-		return
+	if !fromLink {
+		if d.New == d.Current {
+			errorJSON(w, http.StatusBadRequest,
+				"Le nouveau mot de passe est identique à l'ancien.")
+			return
+		}
+		var stored string
+		if err := s.tx(r).QueryRow(r.Context(),
+			"SELECT password_hash FROM accounts WHERE org_id=$1 AND email=$2",
+			scopeOrg(r), me.Email).Scan(&stored); err != nil {
+			s.failure(w, err)
+			return
+		}
+		good, verifyErr := VerifyPassword(stored, d.Current)
+		if verifyErr != nil {
+			// an unreadable hash is an operations problem, not a typing error —
+			// the same treatment as on the sign-in path, and the caller is told
+			// only that it did not verify
+			slog.Error("unusable password hash",
+				"account", s.accountPseudonym(me.Email), "error", verifyErr)
+			good = false
+		}
+		if !good {
+			s.securityEvent(r, slog.LevelInfo, "password_change_refused",
+				"account", s.accountPseudonym(me.Email))
+			// 403 and NOT 401. A 401 from an authenticated route is what this
+			// interface reads as « your session is gone » — it fires SESSION_LOST
+			// and returns the volunteer to the sign-in form — so a mistyped
+			// current password would have thrown them out of a session that is
+			// perfectly alive, with their work behind it.
+			errorJSON(w, http.StatusForbidden, "Mot de passe actuel incorrect.")
+			return
+		}
 	}
 
 	hashed, err := HashPassword(d.New)
@@ -425,12 +439,21 @@ func (s *Server) routeChangePassword(w http.ResponseWriter, r *http.Request) {
 	// THIS session survives, and every other one falls. Re-minted after the
 	// commit: the token carries its own instant, and one issued before the
 	// row was written would be refused by the very rule this route arms.
-	if err := s.sessions.Set(w, me.Email, currentOrg(r), s.now()); err != nil {
+	// Minted at the PASSWORD door whatever door it came through — the change
+	// this handler just wrote is that proof, so the next change from this
+	// session proves the current password like any other.
+	if err := s.sessions.Set(w, me.Email, currentOrg(r), s.now(),
+		sessionViaPassword); err != nil {
 		s.failure(w, err)
 		return
 	}
-	s.securityEvent(r, slog.LevelInfo, "password_changed",
-		"account", s.accountPseudonym(me.Email))
+	extra := []any{"account", s.accountPseudonym(me.Email)}
+	if fromLink {
+		// the one trace that a password was set without proving the previous
+		// one — the emailed link was the proof, and the log says which door
+		extra = append(extra, "via", "link")
+	}
+	s.securityEvent(r, slog.LevelInfo, "password_changed", extra...)
 	replyJSON(w, http.StatusOK, map[string]any{"state": "password_changed"})
 }
 
@@ -446,7 +469,7 @@ func (s *Server) routeMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replyMe(w http.ResponseWriter, r *http.Request, c *Account) {
-	body, err := s.meBodyFor(r, c)
+	body, err := s.meBodyFor(r, c, linkSession(r))
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -466,7 +489,10 @@ func (s *Server) replyMe(w http.ResponseWriter, r *http.Request, c *Account) {
 //
 // The TEMPLATES are here and not in /api/config: that body is public and has
 // no account, and a team's overlay is its team's.
-func (s *Server) meBodyFor(r *http.Request, c *Account) (
+// viaLink is passed by the caller rather than read from the context: two of
+// the three doors are anonymous routes, where no session is in the context
+// yet — they ARE the session being opened, and each knows its own door.
+func (s *Server) meBodyFor(r *http.Request, c *Account, viaLink bool) (
 	map[string]any, error) {
 	departments, err := s.teamDepartments(r, c)
 	if err != nil {
@@ -480,6 +506,9 @@ func (s *Server) meBodyFor(r *http.Request, c *Account) (
 		"account":     c,
 		"departments": departments,
 		"may_manage":  c.MayManage(),
+		// what the profile screen reads to offer a new password without
+		// asking for the one this session never typed
+		"via_link": viaLink,
 		"templates": map[string]any{
 			"campaign": campaignTemplates,
 			"team":     teamTemplates,

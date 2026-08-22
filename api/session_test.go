@@ -16,7 +16,7 @@ import (
 func session(t *testing.T, s *Sessions, email string, when time.Time) *http.Request {
 	t.Helper()
 	w := httptest.NewRecorder()
-	if err := s.Set(w, email, 1, when); err != nil {
+	if err := s.Set(w, email, 1, when, sessionViaPassword); err != nil {
 		t.Fatal(err)
 	}
 	r := httptest.NewRequest(http.MethodGet, "/api/me", nil)
@@ -29,9 +29,28 @@ func session(t *testing.T, s *Sessions, email string, when time.Time) *http.Requ
 func TestSessionRoundTrip(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
-	read, org, _, ok := s.Read(session(t, s, "marie@exemple.fr", t0), t0)
+	read, org, _, via, ok := s.Read(session(t, s, "marie@exemple.fr", t0), t0)
 	if !ok || read != "marie@exemple.fr" || org != 1 {
 		t.Fatalf("session not read back: %q org=%d %v", read, org, ok)
+	}
+	if via != sessionViaPassword {
+		t.Errorf("a password session reads back via=%q", via)
+	}
+}
+
+// The door a session came through survives the round trip: it is what lets
+// the password-change route waive the current password for a session the
+// emailed link opened — and demand it from every other one.
+func TestSessionCarriesItsDoor(t *testing.T) {
+	s := NewSessions([]byte("test key"))
+	t0 := time.Unix(1786000000, 0)
+	token, err := s.mint("marie@exemple.fr", 1, t0, sessionViaLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, via, ok := s.verify(token, t0)
+	if !ok || via != sessionViaLink {
+		t.Errorf("a link session reads back via=%q ok=%v", via, ok)
 	}
 }
 
@@ -39,10 +58,10 @@ func TestSessionExpires(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
 	r := session(t, s, "marie@exemple.fr", t0)
-	if _, _, _, ok := s.Read(r, t0.Add(SessionDuration-time.Minute)); !ok {
+	if _, _, _, _, ok := s.Read(r, t0.Add(SessionDuration-time.Minute)); !ok {
 		t.Error("session refused before its term")
 	}
-	if _, _, _, ok := s.Read(r, t0.Add(SessionDuration)); ok {
+	if _, _, _, _, ok := s.Read(r, t0.Add(SessionDuration)); ok {
 		t.Error("session accepted after its term")
 	}
 }
@@ -56,7 +75,7 @@ func TestSessionRefusesWrongSignature(t *testing.T) {
 	parts := strings.Split(token, ".")
 
 	other := NewSessions([]byte("other key"))
-	forged, err := other.mint("coordination@exemple.fr", 1, t0)
+	forged, err := other.mint("coordination@exemple.fr", 1, t0, sessionViaPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +91,7 @@ func TestSessionRefusesWrongSignature(t *testing.T) {
 	} {
 		r := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 		r.AddCookie(&http.Cookie{Name: SessionCookieName, Value: value})
-		if _, _, _, ok := s.Read(r, t0); ok {
+		if _, _, _, _, ok := s.Read(r, t0); ok {
 			t.Errorf("%s: token accepted", name)
 		}
 	}
@@ -108,12 +127,15 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 	}
 
 	// a control: the same builder, with the header and claims we do emit,
-	// must be ACCEPTED — otherwise every case below passes for free
-	if _, _, _, accepted := s.verify(
-		jwt(t, `{"alg":"HS512","typ":"JWT"}`, ok(""), []byte(key)), t0,
-	); !accepted {
-		t.Fatal("the control token is refused: every case below would pass " +
-			"whatever the verifier does")
+	// must be ACCEPTED — otherwise every case below passes for free. Both
+	// doors, since a refused `via:"link"` would sign every link session out.
+	for _, control := range []string{ok(""), ok(`,"via":"link"`)} {
+		if _, _, _, _, accepted := s.verify(
+			jwt(t, `{"alg":"HS512","typ":"JWT"}`, control, []byte(key)), t0,
+		); !accepted {
+			t.Fatalf("the control token %s is refused: every case below "+
+				"would pass whatever the verifier does", control)
+		}
 	}
 
 	for name, token := range map[string]string{
@@ -175,6 +197,10 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 		// a claim this code does not know was minted by something else
 		"an unknown claim": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
 			ok(`,"role":"coordination"`), []byte(key)),
+		// same rule for a VALUE this code never mints: `via` names one of
+		// two doors, and a third is a token something else made
+		"a door this code never minted": jwt(t, `{"alg":"HS512","typ":"JWT"}`,
+			ok(`,"via":"root"`), []byte(key)),
 		// DisallowUnknownFields guards the INSIDE of the object; Decode
 		// stops at the end of the first value and says nothing about what
 		// follows it
@@ -196,7 +222,7 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 		"claims are not an object": jwt(t,
 			`{"alg":"HS512","typ":"JWT"}`, `"marie@exemple.fr"`, []byte(key)),
 	} {
-		if _, _, _, accepted := s.verify(token, t0); accepted {
+		if _, _, _, _, accepted := s.verify(token, t0); accepted {
 			t.Errorf("%s: token accepted", name)
 		}
 	}
@@ -208,7 +234,7 @@ func TestSessionRefusesTheClassicJWTForgeries(t *testing.T) {
 func TestSessionRefusesAnOversizedToken(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
-	token, err := s.mint("marie@exemple.fr", 1, t0)
+	token, err := s.mint("marie@exemple.fr", 1, t0, sessionViaPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +242,7 @@ func TestSessionRefusesAnOversizedToken(t *testing.T) {
 		t.Errorf("a real token is %d bytes, close to the %d-byte bound: the "+
 			"bound is no longer generous", len(token), maxToken)
 	}
-	if _, _, _, ok := s.verify(token+strings.Repeat("A", maxToken), t0); ok {
+	if _, _, _, _, ok := s.verify(token+strings.Repeat("A", maxToken), t0); ok {
 		t.Error("a megabyte of padding was hashed and read")
 	}
 }
@@ -226,18 +252,20 @@ func TestSessionRefusesAnOversizedToken(t *testing.T) {
 func TestSessionToleratesASecondOfSkewAndNotAnHour(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
-	token, err := s.mint("marie@exemple.fr", 1, t0.Add(30*time.Second))
+	token, err := s.mint("marie@exemple.fr", 1, t0.Add(30*time.Second),
+		sessionViaPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, ok := s.verify(token, t0); !ok {
+	if _, _, _, _, ok := s.verify(token, t0); !ok {
 		t.Error("a token minted 30 s ahead by another pod was refused")
 	}
-	token, err = s.mint("marie@exemple.fr", 1, t0.Add(2*time.Minute))
+	token, err = s.mint("marie@exemple.fr", 1, t0.Add(2*time.Minute),
+		sessionViaPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, ok := s.verify(token, t0); ok {
+	if _, _, _, _, ok := s.verify(token, t0); ok {
 		t.Error("a token minted two minutes ahead was accepted")
 	}
 }
@@ -248,7 +276,7 @@ func TestSessionToleratesASecondOfSkewAndNotAnHour(t *testing.T) {
 func TestSessionMintsAReadableJWT(t *testing.T) {
 	s := NewSessions([]byte("test key"))
 	t0 := time.Unix(1786000000, 0)
-	token, err := s.mint("marie@exemple.fr", 7, t0)
+	token, err := s.mint("marie@exemple.fr", 7, t0, sessionViaPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +323,8 @@ func TestSessionCookieIsProtected(t *testing.T) {
 		emit func(w http.ResponseWriter)
 	}{
 		{"opening", func(w http.ResponseWriter) {
-			if err := s.Set(w, "marie@exemple.fr", 1, time.Unix(1786000000, 0)); err != nil {
+			if err := s.Set(w, "marie@exemple.fr", 1, time.Unix(1786000000, 0),
+				sessionViaPassword); err != nil {
 				t.Fatal(err)
 			}
 		}},

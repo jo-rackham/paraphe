@@ -18,7 +18,19 @@ import (
 
 type contextKey int
 
-const accountKey contextKey = 0
+// The values are EXPLICIT because the type is shared across files: scope.go
+// holds scopeKey = 1, and an iota here handed linkSessionKey that same value
+// — every WithValue below then overwrote the request's scope with a bool,
+// and all 116 authenticated-route tests went red at once.
+const (
+	accountKey contextKey = 0
+	// Whether THIS session was opened by an emailed link rather than a
+	// password. One route reads it: changing one's password waives the
+	// current one there — the link came out of the account's own inbox,
+	// which is the proof the current password stands in for, and whoever
+	// clicked it is usually the person who forgot it.
+	linkSessionKey contextKey = 2
+)
 
 type Account struct {
 	Email        string  `json:"email"`
@@ -74,6 +86,14 @@ func (c *Account) MayManage() bool {
 func accountOf(r *http.Request) *Account {
 	c, _ := r.Context().Value(accountKey).(*Account)
 	return c
+}
+
+// linkSession: whether the session behind this request was opened by an
+// emailed link. False outside signedIn, and for every token minted before
+// the claim existed — the strict direction, since what it waives is a proof.
+func linkSession(r *http.Request) bool {
+	v, _ := r.Context().Value(linkSessionKey).(bool)
+	return v
 }
 
 // query accumulates arguments and returns the $n placeholders in order. The
@@ -136,7 +156,7 @@ func (s *Server) readAccount(r *http.Request, email string) (*Account, error) {
 // makes the omission impossible rather than unlikely.
 func (s *Server) signedIn(next http.HandlerFunc) http.HandlerFunc {
 	return s.inScope(func(w http.ResponseWriter, r *http.Request) {
-		email, org, issued, ok := s.sessions.Read(r, s.now())
+		email, org, issued, via, ok := s.sessions.Read(r, s.now())
 		if !ok {
 			s.sessions.Clear(w)
 			errorJSON(w, http.StatusUnauthorized, "Session absente ou expirée.")
@@ -187,7 +207,9 @@ func (s *Server) signedIn(next http.HandlerFunc) http.HandlerFunc {
 				"Le mot de passe de ce compte a changé. Reconnectez-vous.")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), accountKey, c)))
+		ctx := context.WithValue(r.Context(), accountKey, c)
+		ctx = context.WithValue(ctx, linkSessionKey, via == sessionViaLink)
+		next(w, r.WithContext(ctx))
 	})
 }
 

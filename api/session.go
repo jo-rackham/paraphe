@@ -46,6 +46,15 @@ const (
 	SessionDuration   = 12 * time.Hour
 
 	jwtIssuer = "paraphe"
+	// How the session was OPENED rides in the token (claim `via`), because
+	// one route cares: changing one's password proves the current one —
+	// what tells an owner from whoever picked the cookie up — unless the
+	// session itself was opened by a link out of the account's own inbox,
+	// which is the same ownership proved at the other door. The empty
+	// string is the password door, and every token minted before the claim
+	// existed; anything else is a token this code never minted.
+	sessionViaPassword = ""
+	sessionViaLink     = "link"
 	// The header, emitted as a fixed string and compared as one.
 	//
 	// Every classic JWT break lives in a verifier that READS `alg` out of
@@ -93,6 +102,11 @@ type claims struct {
 	Aud string `json:"aud"`
 	Exp int64  `json:"exp"`
 	Iat int64  `json:"iat"`
+	// The door the session came through — sessionViaPassword or
+	// sessionViaLink. omitempty keeps password tokens byte-identical to the
+	// ones minted before the claim, and a missing claim reads as the
+	// password door, which is the strict direction.
+	Via string `json:"via,omitempty"`
 }
 
 func NewSessions(key []byte) *Sessions {
@@ -107,13 +121,15 @@ func (s *Sessions) sign(signingInput string) string {
 
 // mint builds the compact JWS. Exported behaviour is Set; this is separate
 // so the tests can forge neighbours of a real token.
-func (s *Sessions) mint(email string, org int, now time.Time) (string, error) {
+func (s *Sessions) mint(email string, org int, now time.Time, via string) (
+	string, error) {
 	body, err := json.Marshal(claims{
 		Iss: jwtIssuer,
 		Sub: email,
 		Aud: strconv.Itoa(org),
 		Exp: now.Add(SessionDuration).Unix(),
 		Iat: now.Unix(),
+		Via: via,
 	})
 	if err != nil {
 		return "", fmt.Errorf("serialising the session: %w", err)
@@ -126,8 +142,8 @@ func (s *Sessions) mint(email string, org int, now time.Time) (string, error) {
 // Set writes the session cookie. A volunteer's session has no business
 // surviving a week on a shared computer: 12 h.
 func (s *Sessions) Set(w http.ResponseWriter, email string, org int,
-	now time.Time) error {
-	token, err := s.mint(email, org, now)
+	now time.Time, via string) error {
+	token, err := s.mint(email, org, now, via)
 	if err != nil {
 		return err
 	}
@@ -161,11 +177,13 @@ func (s *Sessions) Clear(w http.ResponseWriter) {
 // password change sign the other sessions out: a token issued before the
 // change is refused (auth.go). There is no session table to delete from —
 // the token is stateless by design — so the account carries the instant and
-// every token is judged against it.
-func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, time.Time, bool) {
+// every token is judged against it. The DOOR it was opened by comes back
+// too (see sessionViaLink).
+func (s *Sessions) Read(r *http.Request, now time.Time) (
+	string, int, time.Time, string, bool) {
 	c, err := r.Cookie(SessionCookieName)
 	if err != nil {
-		return "", 0, time.Time{}, false
+		return "", 0, time.Time{}, "", false
 	}
 	return s.verify(c.Value, now)
 }
@@ -176,31 +194,35 @@ func (s *Sessions) Read(r *http.Request, now time.Time) (string, int, time.Time,
 // check would then be the amplifier. A real token is under 400 bytes.
 const maxToken = 4096
 
-func (s *Sessions) verify(token string, now time.Time) (string, int, time.Time, bool) {
+func (s *Sessions) verify(token string, now time.Time) (
+	string, int, time.Time, string, bool) {
+	nobody := func() (string, int, time.Time, string, bool) {
+		return "", 0, time.Time{}, "", false
+	}
 	if len(token) > maxToken {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	// Exactly three segments. Counting "at least three" is how a fourth one
 	// gets ignored, and a JWS with a fourth segment is not a JWS.
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	// The header is compared, never parsed. See jwtHeader.
 	if parts[0] != base64.RawURLEncoding.EncodeToString([]byte(jwtHeader)) {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	signingInput := parts[0] + "." + parts[1]
 	// Constant time: a byte-by-byte comparison leaks how much of a forged
 	// signature was right, which is enough to build the rest one byte at a
 	// time.
 	if !hmac.Equal([]byte(parts[2]), []byte(s.sign(signingInput))) {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	// DisallowUnknownFields: a claim this code does not know is a claim it
 	// cannot honour, and a token carrying one was minted by something else.
@@ -208,7 +230,7 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, time.Time, 
 	dec.DisallowUnknownFields()
 	var cl claims
 	if err := dec.Decode(&cl); err != nil {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	// A second document after the claims is not part of them. Decode stops
 	// at the end of the first value and says nothing about what follows, so
@@ -216,14 +238,19 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, time.Time, 
 	// second ignored — DisallowUnknownFields guards the inside of the
 	// object, not what comes after it.
 	if dec.More() {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 
 	if cl.Iss != jwtIssuer || cl.Sub == "" {
-		return "", 0, time.Time{}, false
+		return nobody()
+	}
+	// The same rule as the unknown claim above: a door this code never
+	// minted is a token something else made.
+	if cl.Via != sessionViaPassword && cl.Via != sessionViaLink {
+		return nobody()
 	}
 	if cl.Exp == 0 || now.Unix() >= cl.Exp {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	// Bounded on BOTH sides. `iat` at MaxInt64 overflows time.Unix into a
 	// date in the past, so the "not in the future" check passed and the
@@ -231,14 +258,14 @@ func (s *Sessions) verify(token string, now time.Time) (string, int, time.Time, 
 	// is the only shape that means anything.
 	if cl.Iat <= 0 || cl.Iat >= cl.Exp ||
 		time.Unix(cl.Iat, 0).After(now.Add(jwtSkew)) {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
 	org, err := strconv.Atoi(cl.Aud)
 	// OrgMaintenance crosses campaigns and no HTTP request may ever reach
 	// it. It cannot be reached through a token either — signing one would
 	// take the key, but the refusal is written here rather than assumed.
 	if err != nil || org < 0 {
-		return "", 0, time.Time{}, false
+		return nobody()
 	}
-	return cl.Sub, org, time.Unix(cl.Iat, 0), true
+	return cl.Sub, org, time.Unix(cl.Iat, 0), cl.Via, true
 }

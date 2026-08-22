@@ -177,6 +177,46 @@ describe("changing one's own password", () => {
     expect(text()).not.toContain("Votre session a expiré");
   });
 
+  // A session the emailed link opened proves ownership by the inbox, not by
+  // a password — and whoever clicked that link usually clicked it because
+  // they FORGOT the password this form would demand. Shown and required, the
+  // field asks for what its reader came here lacking.
+  it("does not ask for the old password on a link session", async () => {
+    vi.mocked(API.changePassword).mockResolvedValue({
+      state: "password_changed",
+    });
+    await openProfile({ ...ALICE, via_link: true });
+
+    expect(text()).not.toContain("Mot de passe actuel");
+    expect(text()).toContain("l'ancien mot de passe n'est pas demandé");
+    const fields = passwordFields();
+    expect(fields).toHaveLength(2);
+
+    await act(async () => {
+      setValue(fields[0], "colline-verger-42");
+      setValue(fields[1], "colline-verger-42");
+    });
+    await click("Changer mon mot de passe");
+    await flush();
+
+    // the door is the session's, read by the server from the cookie: the
+    // field the form did not show travels empty
+    expect(API.changePassword).toHaveBeenCalledWith("", "colline-verger-42");
+    await until(
+      () => text().includes("Vos autres sessions"),
+      "the screen says what the change did",
+    );
+    // …and the session is a PASSWORD one now: the server re-minted it at
+    // that door, so the form asks for the current password like any other —
+    // submitting without it would be answered 403 in words about a wrong
+    // password nobody mistyped
+    await until(
+      () => text().includes("Mot de passe actuel"),
+      "the current-password field is back",
+    );
+    expect(passwordFields()).toHaveLength(3);
+  });
+
   // Two clicks in the same tick run two handlers built by the same render.
   // On this form that spends two of the ten attempts an account is allowed
   // per quarter of an hour, and the second carries a password the first has

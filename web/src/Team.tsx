@@ -142,6 +142,19 @@ export default function Team({ config }: { config: ServerConfig }) {
             const opened = await API.redeemLink(token);
             lastAccount.current = opened.account.email;
             setMe(opened);
+            // The one thing a session the LINK opened can do that no other
+            // can: set a new password without the old one. Whoever clicked
+            // that link usually clicked it because they forgot it — said
+            // here, or the door this session exists for stays unfound.
+            if (opened.via_link) {
+              setMessage({
+                tone: "ok",
+                text:
+                  "Vous voilà dans votre espace, par le lien reçu par email. " +
+                  "Mot de passe oublié ? Choisissez-en un nouveau dans " +
+                  "« Mon profil », sans avoir à donner l'ancien.",
+              });
+            }
             return;
           } catch (e) {
             // The API's own sentence — expired, already used, or naming an
@@ -508,6 +521,11 @@ export default function Team({ config }: { config: ServerConfig }) {
           cfg={cfg}
           onError={report}
           onMessage={setMessage}
+          onPasswordChanged={() =>
+            // the server re-minted this session at the PASSWORD door: the
+            // next change proves the current one, and the form must say so
+            setMe((m) => (m ? { ...m, via_link: false } : m))
+          }
           onSaved={(personalNote: string, phoneOutreach: boolean | null) => {
             setMe((m) =>
               m

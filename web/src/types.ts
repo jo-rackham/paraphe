@@ -103,6 +103,15 @@ export interface Me {
   departments: string[];
   may_manage: boolean;
   /**
+   * True when THIS session was opened by an emailed link rather than a
+   * password. The profile then offers a new password without asking for the
+   * old one — the link out of the owner's inbox is the proof, and whoever
+   * clicked it usually clicked it because they forgot the password the form
+   * would demand. Optional: an API one release behind carries none, and
+   * absent reads as the password door, the strict direction.
+   */
+  via_link?: boolean;
+  /**
    * The message templates that apply to THIS account, in two layers over the
    * ones the image carries: its campaign's, then its team's.
    *
